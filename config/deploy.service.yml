@@ -1,0 +1,37 @@
+service: cukup-service
+image: <%= ENV.fetch("CUKUP_IMAGE") %>
+
+servers:
+  web:
+    - <%= ENV.fetch("CUKUP_DEPLOY_HOST") %>
+
+proxy:
+  ssl: true
+  host: <%= ENV.fetch("CUKUP_TLS_HOSTNAME") %>
+  app_port: 3000
+  healthcheck:
+    path: /healthz
+    interval: 3
+    timeout: 3
+
+registry:
+  server: ghcr.io
+  username: <%= ENV.fetch("KAMAL_REGISTRY_USERNAME") %>
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+builder:
+  arch: amd64
+  dockerfile: Dockerfile.service
+
+env:
+  clear:
+    CUKUP_HOST: 0.0.0.0
+    CUKUP_BEHIND_TLS_PROXY: 1
+    CUKUP_DATABASE_PATH: /var/lib/cukup/cukup.sqlite
+    PORT: 3000
+  secret:
+    - CUKUP_OIDC_ALLOWED_USER_ID
+
+volumes:
+  - "<%= ENV.fetch('CUKUP_DATA_DIRECTORY', '/srv/example-cukup-data') %>:/var/lib/cukup"

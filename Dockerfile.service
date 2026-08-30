@@ -1,0 +1,25 @@
+FROM oven/bun:1.3.10 AS build
+
+WORKDIR /app
+COPY package.json bun.lock tsconfig.json ./
+RUN bun install --frozen-lockfile
+COPY service ./service
+RUN bun run build:service
+
+FROM oven/bun:1.3.10-slim AS runtime
+
+WORKDIR /app
+RUN mkdir -p /var/lib/cukup && chown bun:bun /var/lib/cukup
+COPY --from=build --chown=bun:bun /app/dist/service ./
+
+USER bun
+ENV CUKUP_DATABASE_PATH=/var/lib/cukup/cukup.sqlite \
+    CUKUP_HOST=0.0.0.0 \
+    CUKUP_BEHIND_TLS_PROXY=1 \
+    PORT=3000
+VOLUME ["/var/lib/cukup"]
+EXPOSE 3000
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+  CMD ["bun", "-e", "const r=await fetch('http://127.0.0.1:3000/healthz');process.exit(r.ok?0:1)"]
+
+ENTRYPOINT ["bun", "/app/index.js"]
