@@ -4,16 +4,18 @@ This runbook describes the release candidate. It does not authorize a deployment
 
 ## Pre-deployment gate
 
-Do not deploy until each blank has a named owner and the evidence is linked from Fleet #31:
+The initial owner assignments are:
 
 | Responsibility | Required owner |
 | --- | --- |
-| Service/runtime | _assign before deployment_ |
-| DNS and TLS | _assign before deployment_ |
-| Backup schedule, retention, and off-site pull | _assign before deployment_ |
-| Incident response and credential revocation | _assign before deployment_ |
+| Service/runtime | Zain Fathoni |
+| DNS and TLS | Zain Fathoni |
+| Backup schedule, retention, and off-site pull | Zain Fathoni |
+| Incident response and credential revocation | Zain Fathoni |
 
-Also record VPS authorization, CPU/memory/disk capacity, container isolation, the final hostname, backup retention, alert destination, and recovery objectives. Backblaze B2 and Healthchecks are not configured or claimed by this RC. Add them only after real retention, retrieval, alert ownership, and restore paths are verified.
+The authorized deployment target is `rumahberbagi`, with final hostname `api.cukup.dev`. A read-only inspection on 2026-08-30 found an existing Kamal Proxy on ports 80/443, no conflicting Cukup resources, about 23 GB free disk, and about 2.2 GB available RAM. A native linux/amd64 container check then passed the full API/restart path at roughly 15 MiB idle and 30 MiB request-load working set within a 256 MiB limit. The Kamal role is capped at half of one CPU, 256 MiB RAM+swap, and 128 processes with a read-only root filesystem. This supports low-traffic personal co-location while protecting the host's existing workloads; sustained saturation must remain monitored. Before deployment, also prove registry access, public reachability, and the alert destination.
+
+The selected recovery policy is a verified SQLite backup every six hours, seven days of local retention on `rumahberbagi`, and a daily independent SSH pull to `vikas-mac-mini`, where backup pairs are retained for 30 days. The target is RPO 24 hours and RTO 4 hours, with a quarterly clean restore drill from Vikas. There is deliberately no B2 or other cloud object-storage dependency; see ADR 0003. Do not deploy until the local and off-site paths, pruning, monitoring, retrieval, and first clean restore are proven. Healthchecks is likewise not configured or claimed; add it only after the real alert path and owner response are verified.
 
 ## Runtime and TLS
 
@@ -77,7 +79,7 @@ bun run service:db backup /srv/cukup-backups /var/lib/cukup/cukup.sqlite
 bun run service:db verify /srv/cukup-backups/BACKUP.sqlite /srv/cukup-backups/BACKUP.json
 ```
 
-Schedule this command only after retention and monitoring owners are assigned. Preserve each `.sqlite` and `.json` pair. A backup is not successful until `integrity_check` is `ok` and the metadata is retained.
+Run the verified backup every six hours and prune local pairs only after they exceed seven days. Preserve each `.sqlite` and `.json` pair together. A backup is not successful until `integrity_check` is `ok`, the metadata is retained, and monitoring records success or alerts Zain Fathoni.
 
 An independent system must pull—not merely push—the pair off the VPS. A provider-neutral example from the off-site system is:
 
@@ -86,7 +88,7 @@ rsync --archive --protect-args DEPLOY_HOST:/srv/cukup-backups/ /independent/cuku
 bun run service:db verify /independent/cukup-backups/BACKUP.sqlite /independent/cukup-backups/BACKUP.json
 ```
 
-Supply SSH authentication outside process arguments and broad environments. Do not claim off-site protection until retrieval and verification have run from that independent system.
+From `vikas-mac-mini`, pull and verify backup pairs daily, retain them there for 30 days, and prune only after a successful inventory check. Supply SSH authentication outside process arguments and broad environments. A missed daily pull makes the 24-hour RPO visibly degraded; the seven-day VPS retention permits catch-up after Vikas returns. Do not claim off-site protection until an independent retrieval to Vikas, verification, and a clean restore have succeeded. Repeat that restore drill quarterly.
 
 ## Clean restore and replacement
 
