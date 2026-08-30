@@ -1,5 +1,7 @@
 export const IDLE_GRACE_MS = 15 * 60 * 1_000
 export const DEFAULT_WEEKDAY_TARGET_MINUTES = 8 * 60
+export const PRODUCT_TIME_ZONE = 'Asia/Jakarta'
+export const PRODUCT_WEEK_START = 'Monday'
 
 export type WorkEvent = {
 	threadId: string
@@ -138,6 +140,15 @@ export function localDayBounds(nowMs: number): { startMs: number; endMs: number;
 		endMs: end.getTime(),
 		weekend: now.getDay() === 0 || now.getDay() === 6,
 	}
+}
+
+export function jakartaDayBounds(nowMs: number): { startMs: number; endMs: number; weekend: boolean } {
+	const jakartaOffsetMs = 7 * 60 * 60 * 1_000
+	const shifted = new Date(nowMs + jakartaOffsetMs)
+	const startMs =
+		Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate()) - jakartaOffsetMs
+	const day = shifted.getUTCDay()
+	return { startMs, endMs: startMs + 24 * 60 * 60 * 1_000, weekend: day === 0 || day === 6 }
 }
 
 export function parseDailyTarget(input: string): number | undefined {
