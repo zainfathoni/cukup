@@ -1,0 +1,17 @@
+{
+  "name": "cukup",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.10",
+  "scripts": {
+    "test": "bun test plugin",
+    "typecheck": "tsc --noEmit",
+    "build": "bun build plugin/index.ts --target=bun --external @ampcode/plugin --outdir dist",
+    "check": "bun run test && bun run typecheck && bun run build"
+  },
+  "devDependencies": {
+    "@ampcode/plugin": "0.0.0-20260830001921-g9741aa9",
+    "@types/bun": "1.3.10",
+    "typescript": "5.9.3"
+  }
+}
