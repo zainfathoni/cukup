@@ -1,0 +1,101 @@
+name: Manage Cukup DNS
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Create or update the api.cukup.dev A record
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: manage-cukup-dns
+  cancel-in-progress: false
+
+jobs:
+  cloudflare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      APPLY: ${{ inputs.apply }}
+      CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      DEPLOY_IPV4: ${{ secrets.CUKUP_DEPLOY_IPV4 }}
+    steps:
+      - name: Verify scope and manage the dedicated record
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CF_API_TOKEN"
+          test -n "$DEPLOY_IPV4"
+
+          api=https://api.cloudflare.com/client/v4
+          cf() {
+            printf 'header = "Authorization: Bearer %s"\n' "$CF_API_TOKEN" \
+              | curl --config - "$@"
+          }
+
+          token_status=$(cf --fail-with-body --silent --show-error \
+            "$api/user/tokens/verify")
+          jq -e '.success == true and .result.status == "active"' \
+            <<<"$token_status" >/dev/null
+
+          zones=$(cf --fail-with-body --silent --show-error --get \
+            --data-urlencode 'name=cukup.dev' \
+            "$api/zones")
+          jq -e '.success == true and (.result | length) == 1' \
+            <<<"$zones" >/dev/null
+          zone_id=$(jq -r '.result[0].id' <<<"$zones")
+
+          records=$(cf --fail-with-body --silent --show-error --get \
+            --data-urlencode 'name=api.cukup.dev' \
+            "$api/zones/$zone_id/dns_records")
+          jq -e '.success == true' <<<"$records" >/dev/null
+
+          a_count=$(jq '[.result[] | select(.type == "A")] | length' <<<"$records")
+          conflicting_count=$(
+            jq '[.result[] | select(.type == "AAAA" or .type == "CNAME")] | length' \
+              <<<"$records"
+          )
+          test "$a_count" -le 1
+          test "$conflicting_count" -eq 0
+
+          if [[ "$APPLY" == true ]]; then
+            payload=$(jq -n \
+              --arg content "$DEPLOY_IPV4" \
+              '{type:"A", name:"api.cukup.dev", content:$content, ttl:1, proxied:false}')
+            if [[ "$a_count" -eq 0 ]]; then
+              result=$(cf --fail-with-body --silent --show-error \
+                --request POST \
+                --header 'Content-Type: application/json' \
+                --data "$payload" \
+                "$api/zones/$zone_id/dns_records")
+              action=created
+            else
+              record_id=$(
+                jq -r '.result[] | select(.type == "A") | .id' <<<"$records"
+              )
+              result=$(cf --fail-with-body --silent --show-error \
+                --request PUT \
+                --header 'Content-Type: application/json' \
+                --data "$payload" \
+                "$api/zones/$zone_id/dns_records/$record_id")
+              action=updated
+            fi
+            jq -e --arg content "$DEPLOY_IPV4" '
+              .success == true and
+              .result.type == "A" and
+              .result.name == "api.cukup.dev" and
+              .result.content == $content and
+              .result.proxied == false and
+              .result.ttl == 1
+            ' <<<"$result" >/dev/null
+            printf 'DNS record %s: `A api.cukup.dev`, DNS-only, automatic TTL.\n' \
+              "$action" >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf 'Read-only preflight passed: token active, one zone, A=%s, conflicts=%s.\n' \
+              "$a_count" "$conflicting_count" >> "$GITHUB_STEP_SUMMARY"
+          fi
