@@ -27,7 +27,7 @@ export default function (amp: PluginAPI) {
 	const store = new WorkHoursStore()
 	const now = Date.now
 	const monotonicNow = () => performance.now()
-	const serviceURL = process.env.CUKUP_SERVICE_URL?.trim()
+	const serviceURL = process.env.CUKUP_SERVICE_URL?.trim() || 'https://api.cukup.dev'
 	const client = createClient(serviceURL, now)
 	const tokenProvider = selectTokenProvider(amp)
 	const sync = new SyncEngine({ store, client, tokenProvider, now })
