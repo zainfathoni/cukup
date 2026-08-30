@@ -1,4 +1,6 @@
 import type { PluginAPI, ThreadID } from '@ampcode/plugin'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import {
 	createFileTokenProvider,
 	createOidcTokenProvider,
@@ -154,7 +156,9 @@ function createClient(serviceURL: string | undefined, now: () => number): CukupS
 function selectTokenProvider(amp: PluginAPI): TokenProvider {
 	if (amp.system.executor.kind === 'remote') return createOidcTokenProvider(amp.$)
 	if (amp.system.executor.kind === 'local') {
-		return createFileTokenProvider(process.env.CUKUP_TOKEN_FILE?.trim())
+		return createFileTokenProvider(
+			process.env.CUKUP_TOKEN_FILE?.trim() || join(homedir(), '.config', 'cukup', 'token'),
+		)
 	}
 	return unavailableTokenProvider()
 }
