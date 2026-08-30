@@ -3,6 +3,7 @@ import {
 	IDLE_GRACE_MS,
 	classifyWork,
 	formatStatus,
+	jakartaDayBounds,
 	latestUnmatchedStarts,
 	localDayBounds,
 	parseDailyTarget,
@@ -131,5 +132,12 @@ describe('status and target formatting', () => {
 			if (previousTimezone === undefined) delete process.env.TZ
 			else process.env.TZ = previousTimezone
 		}
+	})
+
+	test('uses fixed Asia/Jakarta civil days for the non-authoritative fallback', () => {
+		const fridayLateUTC = jakartaDayBounds(Date.parse('2026-08-28T17:30:00.000Z'))
+		expect(new Date(fridayLateUTC.startMs).toISOString()).toBe('2026-08-28T17:00:00.000Z')
+		expect(fridayLateUTC.endMs - fridayLateUTC.startMs).toBe(24 * hour)
+		expect(fridayLateUTC.weekend).toBeTrue()
 	})
 })
