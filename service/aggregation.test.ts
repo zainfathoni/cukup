@@ -80,6 +80,24 @@ describe('global interval construction', () => {
 			{ startMs: base, endMs: base + 15 * minute },
 		])
 	})
+
+	test('prefers monotonic turn duration when wall-clock evidence moves', () => {
+		const base = Date.parse('2026-08-31T02:00:00.000Z')
+		const start = event(1, sourceA, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'agent.start', base)
+		const end = {
+			...event(
+				2,
+				sourceA,
+				'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+				'agent.end',
+				base - hour,
+			),
+			monotonicDurationMs: 20 * minute,
+		}
+		expect(buildGlobalIntervals([start, end], base + hour)).toEqual([
+			{ startMs: base, endMs: base + 35 * minute },
+		])
+	})
 })
 
 describe('timezone-aware summaries', () => {

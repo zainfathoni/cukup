@@ -36,6 +36,19 @@ describe('event protocol validation', () => {
 		])
 	})
 
+	test('accepts deterministic UUIDv5 event and session identities from legacy migration', () => {
+		const parsed = parseBatch({
+			events: [
+				{
+					...baseEvent,
+					event_id: '01990b2e-1c00-5000-8000-000000000001',
+					session_id: 'aaaaaaaa-aaaa-5aaa-8aaa-aaaaaaaaaaaa',
+				},
+			],
+		})
+		expect(parsed?.[0]).toEqual(expect.objectContaining({ event: expect.any(Object) }))
+	})
+
 	test('rejects every prohibited metadata category instead of ignoring it', () => {
 		for (const prohibited of [
 			'hostname',
@@ -83,7 +96,7 @@ describe('event protocol validation', () => {
 			{ event_id: '01990b2e-1c00-4000-8000-000000000001' },
 			{ source_instance_id: '01990b2e-1c00-7000-8000-000000000001' },
 			{ source_sequence: 0 },
-			{ session_id: 'not-random' },
+			{ session_id: '01990b2e-1c00-7000-8000-000000000001' },
 			{ kind: 'other' },
 			{ occurred_at: '2026-08-31T05:00:00Z' },
 			{ occurred_at: '2026-02-30T05:00:00.000Z' },

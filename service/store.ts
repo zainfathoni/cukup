@@ -187,7 +187,10 @@ export class ServiceStore {
 				return { outcome: 'rejected', reason: 'source_sequence_order' }
 			}
 
-			if (Math.abs(event.occurredAtMs - receivedAtMs) > MAX_CLOCK_SKEW_MS) {
+			// Old evidence is valid after an offline period. The plugin samples /v1/time
+			// before upload to surface clocks that are behind; the service independently
+			// prevents future-dated evidence from inflating current work.
+			if (event.occurredAtMs - receivedAtMs > MAX_CLOCK_SKEW_MS) {
 				return { outcome: 'rejected', reason: 'clock_skew' }
 			}
 

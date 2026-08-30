@@ -47,9 +47,15 @@ export function buildGlobalIntervals(
 		for (const event of evidence) {
 			if (event.kind === 'agent.end' && event.sourceSequence > start.sourceSequence) end = event
 		}
-		const inferredEndMs = end
-			? Math.max(start.occurredAtMs, end.occurredAtMs) + config.idleGraceMs
-			: start.occurredAtMs + config.crashCapMs
+		const completedAtMs = end
+			? end.monotonicDurationMs === undefined
+				? Math.max(start.occurredAtMs, end.occurredAtMs)
+				: start.occurredAtMs + end.monotonicDurationMs
+			: undefined
+		const inferredEndMs =
+			completedAtMs === undefined
+				? start.occurredAtMs + config.crashCapMs
+				: Math.max(start.occurredAtMs, completedAtMs) + config.idleGraceMs
 		const clippedEndMs = Math.min(inferredEndMs, nowMs)
 		if (clippedEndMs > start.occurredAtMs) {
 			intervals.push({ startMs: start.occurredAtMs, endMs: clippedEndMs })
