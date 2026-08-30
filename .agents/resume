@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Cukup has no services or authentication that need repair when an orb wakes.
+printf '[resume] ready\n'
