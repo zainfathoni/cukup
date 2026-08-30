@@ -1,19 +1,19 @@
 # Cukup
 
-Cukup tells Zain whether Amp-backed work time is under, complete, or over the hours due. The current epicenter is a personal Amp plugin that records `agent.start` and `agent.end`, infers work with a 15-minute idle grace, unions overlapping turns, and reports today's status.
+Cukup tells Zain whether Amp-backed work time is under, complete, or over the hours due. It contains a personal Amp plugin and a release-candidate shared authority that accepts privacy-preserving events, unions work globally, and reports authoritative daily and weekly status.
 
 ## Current status
 
-Only the local vertical slice exists today. It stores minimal event evidence in executor-local SQLite at `${XDG_STATE_HOME:-~/.local/state}/amp-work-hours/state.sqlite`. It does not aggregate across machines or fresh orbs, and no shared service, credential authority, deployment, or publication is live.
+The local plugin vertical slice stores minimal evidence in executor-local SQLite at `${XDG_STATE_HOME:-~/.local/state}/amp-work-hours/state.sqlite`. The `service/` release candidate adds the Fleet #31 HTTPS API, persistent shared SQLite authority, physical-machine bearer lifecycle, Amp workload OIDC, timezone aggregation, and verified backup/restore tooling. Nothing is deployed and no shared credential, DNS, TLS, backup provider, or infrastructure is live from this repository change.
 
-The privacy boundary excludes prompts, responses, titles, repository paths, and account data. The local database contains only timestamps, Amp thread/message identifiers, event kind/status, and the weekday target. A future shared protocol must use random source/session identifiers and must not transmit those local Amp identifiers.
+The shared privacy boundary excludes prompts/content, host/user/fleet identity, model names, repository/project IDs, and local Amp thread/message IDs. Shared events use only random source/session UUIDs. Amp workload JWT claims are a transient authentication-layer exception and never enter shared event records or logs. See [the v1 API contract](docs/service-api.md), [operations runbook](docs/service-operations.md), and [ADR 0002](docs/adr/0002-shared-service-release-candidate.md).
 
 ## Repository ownership
 
-This repository is the canonical development source for the plugin and any future service, architecture, and deployment code. The Amp Global User Plugins repository is only the reviewed publication target. Fleet tracks cross-machine coordination and rollout:
+This repository is the canonical development source for the plugin, service, architecture, and deployment code. The Amp Global User Plugins repository is only the reviewed publication target. Fleet tracks cross-machine coordination and rollout:
 
 - [Fleet #30](https://github.com/zainfathoni/fleet/issues/30) — parent architecture and acceptance record
-- [Fleet #31](https://github.com/zainfathoni/fleet/issues/31) — future shared service and deployment
+- [Fleet #31](https://github.com/zainfathoni/fleet/issues/31) — shared service and deployment acceptance
 - [Fleet #32](https://github.com/zainfathoni/fleet/issues/32) — plugin productionization and publication
 - [Fleet #33](https://github.com/zainfathoni/fleet/issues/33) — fleet and fresh-orb rollout
 
@@ -28,7 +28,7 @@ bun install --frozen-lockfile
 bun run check
 ```
 
-The build output under `dist/` is disposable and is not the publication source. Publish the reviewed `plugin/` implementation through the Amp Global User Plugins repository; do not edit the deployed copy as a second canonical source.
+The build output under `dist/` is disposable and is not the publication source. Publish the reviewed `plugin/` implementation through the Amp Global User Plugins repository; do not edit the deployed copy as a second canonical source. The shared service can be built independently with `bun run build:service` or `Dockerfile.service`; deployment requires a separate explicit approval and the gates in the operations runbook.
 
 ## Provenance
 

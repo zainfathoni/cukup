@@ -1,0 +1,9 @@
+.git
+.amp
+.amp-transfer
+data
+dist
+node_modules
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
