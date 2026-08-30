@@ -13,7 +13,10 @@ const EVENT_FIELDS = new Set([
 	'monotonic_duration_ms',
 ])
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const UUID_V5_OR_V7 =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[57][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const UUID_V4_OR_V5 =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[45][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const UTC_MILLISECONDS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 
 export type ParsedBatchEntry =
@@ -59,7 +62,7 @@ export function batchResult(
 function parseEvent(value: unknown, index: number): ParsedBatchEntry {
 	if (!isRecord(value)) return { index, reason: 'invalid_event' }
 	const eventId =
-		typeof value.event_id === 'string' && UUID_V7.test(value.event_id)
+		typeof value.event_id === 'string' && UUID_V5_OR_V7.test(value.event_id)
 			? value.event_id
 			: undefined
 	if (Object.keys(value).some((key) => !EVENT_FIELDS.has(key))) {
@@ -68,13 +71,13 @@ function parseEvent(value: unknown, index: number): ParsedBatchEntry {
 	if (
 		value.schema_version !== 1 ||
 		typeof value.event_id !== 'string' ||
-		!UUID_V7.test(value.event_id) ||
+		!UUID_V5_OR_V7.test(value.event_id) ||
 		typeof value.source_instance_id !== 'string' ||
 		!UUID_V4.test(value.source_instance_id) ||
 		!Number.isSafeInteger(value.source_sequence) ||
 		(value.source_sequence as number) < 1 ||
 		typeof value.session_id !== 'string' ||
-		!UUID_V4.test(value.session_id) ||
+		!UUID_V4_OR_V5.test(value.session_id) ||
 		(value.kind !== 'agent.start' && value.kind !== 'agent.end') ||
 		typeof value.occurred_at !== 'string' ||
 		!UTC_MILLISECONDS.test(value.occurred_at) ||

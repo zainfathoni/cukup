@@ -89,13 +89,13 @@ describe('append-only ingestion', () => {
 		store.close()
 	})
 
-	test('accepts the skew boundary and rejects excessive past or future evidence visibly', () => {
+	test('accepts delayed offline evidence and rejects excessive future evidence visibly', () => {
 		const store = new ServiceStore(databasePath())
 		const principal: Principal = { kind: 'oidc' }
 		expect(
 			store.ingest(
 				principal,
-				workEvent({ occurredAtMs: now + MAX_CLOCK_SKEW_MS, sourceInstance: sourceA }),
+				workEvent({ occurredAtMs: now - 24 * 60 * 60 * 1_000, sourceInstance: sourceA }),
 				now,
 			).outcome,
 		).toBe('accepted')
@@ -106,7 +106,7 @@ describe('append-only ingestion', () => {
 					eventId: '01990b2e-1c00-7000-8000-000000000002',
 					sourceInstance: sourceA,
 					sourceSequence: 2,
-					occurredAtMs: now - MAX_CLOCK_SKEW_MS - 1,
+					occurredAtMs: now + MAX_CLOCK_SKEW_MS + 1,
 				}),
 				now,
 			),

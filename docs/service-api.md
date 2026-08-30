@@ -63,11 +63,11 @@ The request root contains only `events` and is limited to 1 MiB. Records for eac
 }
 ```
 
-- `event_id` is UUIDv7.
-- `source_instance_id` and `session_id` are independently random RFC 4122 UUIDv4 values. They must reveal no machine, fleet, host, user, repository, project, thread, or message identity.
+- New `event_id` values are UUIDv7. Deterministically migrated legacy events use namespace-derived UUIDv5 values.
+- `source_instance_id` is an independently random RFC 4122 UUIDv4. New `session_id` values are random UUIDv4 values; deterministically migrated legacy sessions use namespace-derived UUIDv5 values. They must reveal no machine, fleet, host, user, repository, project, thread, or message identity.
 - `source_sequence` is a positive safe integer, monotonic within one source.
 - `kind` is `agent.start` or `agent.end`.
-- `monotonic_duration_ms` is optional nonnegative monotonic evidence. V1 retains it immutably for audit/migration but does not substitute it for the UTC interval endpoints.
+- `monotonic_duration_ms` is optional nonnegative monotonic evidence on a completed turn. When present, aggregation derives the completion endpoint from the start plus this duration so a wall-clock adjustment during the turn cannot distort worked time.
 
 The schema is closed. Unknown fields are rejected per record, preventing hostnames, usernames, repository/project IDs, thread/message IDs, prompts/content, model names, and fleet-identifying values from crossing the service boundary.
 
@@ -93,7 +93,7 @@ Outcomes:
 
 The wire result deliberately contains only `event_id` and `status`, matching the plugin protocol. The database still preserves the first `received_at`, and service tests distinguish both immutable conflict identities and every rejection boundary internally.
 
-Exact replay is checked before clock skew, so replaying old accepted batches remains a successful no-op. New evidence more than 10 minutes before or after receive time is rejected; timestamps are never silently rewritten. Evidence within the bound retains its original UTC timestamp, and aggregation clips intervals at current server time.
+Exact replay is checked first, so replaying old accepted batches remains a successful no-op. Delayed historical evidence is accepted for offline convergence. Before upload, the plugin uses authenticated `/v1/time` sampling to surface local clocks more than 10 minutes ahead or behind; the service independently rejects evidence dated more than 10 minutes in the future. Timestamps are never silently rewritten, and aggregation clips intervals at current server time.
 
 ## `GET /v1/summary`
 
