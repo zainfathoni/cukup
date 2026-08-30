@@ -34,9 +34,17 @@ if [[ "$(bun --version 2>/dev/null || true)" != "$bun_version" ]]; then
 fi
 
 profile_marker="# cukup Bun toolchain"
-if ! grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
+profile_file="$HOME/.profile"
+for candidate in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
+  if [[ -f "$candidate" ]]; then
+    profile_file="$candidate"
+    break
+  fi
+done
+
+if ! grep -Fqx "$profile_marker" "$profile_file" 2>/dev/null; then
   log "making Bun available to login shells"
-  cat >> "$HOME/.bash_profile" <<'EOF'
+  cat >> "$profile_file" <<'EOF'
 
 # cukup Bun toolchain
 export BUN_INSTALL="$HOME/.bun"
