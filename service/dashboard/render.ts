@@ -127,7 +127,7 @@ function renderRange(selection: DashboardSelection): string {
 		.map((days) => `<button type="button" data-range="${days}" data-focus-key="range:${days}" aria-pressed="${preset === days}">${days} days</button>`)
 		.join('')
 	const custom = preset === 'custom' ? selection.range : { start_date: '', end_date: '' }
-	return `<div class="range-controls" aria-label="Trend range">${buttons}<button type="button" data-range="custom" data-focus-key="range:custom" aria-pressed="${preset === 'custom'}">Custom</button></div>${preset === 'custom' ? `<div class="custom-range"><label>From <input type="date" name="start_date" value="${escapeHtml(custom.start_date)}" data-focus-key="start-date"></label><label>To <input type="date" name="end_date" value="${escapeHtml(custom.end_date)}" data-focus-key="end-date"></label><button type="button" class="button" data-action="apply-range" data-focus-key="apply-range">Apply range</button></div>` : ''}`
+	return `<div class="range-controls" role="group" aria-label="Trend range">${buttons}<button type="button" data-range="custom" data-focus-key="range:custom" aria-pressed="${preset === 'custom'}">Custom</button></div>${preset === 'custom' ? `<div class="custom-range"><label>From <input type="date" name="start_date" value="${escapeHtml(custom.start_date)}" data-focus-key="start-date"></label><label>To <input type="date" name="end_date" value="${escapeHtml(custom.end_date)}" data-focus-key="end-date"></label><button type="button" class="button" data-action="apply-range" data-focus-key="apply-range">Apply range</button></div>` : ''}`
 }
 
 function renderTrendData(trend: Trend): string {
@@ -176,7 +176,12 @@ export function renderDashboardContent(report: DashboardReport, selection: Dashb
 	return `<header class="masthead"><div><p class="eyebrow">Personal dashboard</p><h1>Cukup</h1></div><div class="freshness ${partial ? 'freshness-partial' : ''}"><span class="freshness-mark" aria-hidden="true"></span><span>${partial ? '<strong>Partial report.</strong> ' : ''}Authoritative as of <time datetime="${escapeHtml(report.as_of)}">${formatTimestamp(report.as_of, report.timezone)}</time></span><span class="sr-only" role="status" aria-live="polite">${refreshing ? 'Refreshing dashboard' : partial ? 'Dashboard has stale or unavailable panels' : 'Dashboard up to date'}</span></div></header><main>${renderOverall(report.overall)}${renderFilters(report, selection, refreshing)}${renderTimeline(report.timeline, report.timezone)}${renderTrend(report.trend, selection)}${renderExecutors(report.executors, report.timezone)}</main>`
 }
 
-export function renderDashboardDocument(report: DashboardReport, selection: DashboardSelection): string {
+export function renderDashboardDocument(
+	report: DashboardReport,
+	selection: DashboardSelection,
+	nonce?: string,
+): string {
 	const serialized = JSON.stringify({ report, selection }).replaceAll('<', '\\u003c')
-	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>Cukup dashboard</title><link rel="stylesheet" href="/assets/dashboard.css"></head><body><div id="dashboard-app">${renderDashboardContent(report, selection)}</div><script id="dashboard-data" type="application/json">${serialized}</script><script type="module" src="/assets/dashboard.js"></script></body></html>`
+	const nonceAttribute = nonce ? ` nonce="${escapeHtml(nonce)}"` : ''
+	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>Cukup dashboard</title><link rel="stylesheet" href="/assets/dashboard.css"></head><body><form class="session-actions" method="post" action="/logout"><button type="submit">Sign out</button></form><div id="dashboard-app">${renderDashboardContent(report, selection)}</div><script id="dashboard-data" type="application/json"${nonceAttribute}>${serialized}</script><script type="module" src="/assets/dashboard.js"></script></body></html>`
 }

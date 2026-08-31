@@ -57,7 +57,7 @@ test('plugin migrates and converges delayed legacy evidence through the service 
 		logger: new ServiceLogger(() => {}),
 	})
 	const client = new CukupServiceClient(
-		'https://cukup.dev',
+		'https://api.cukup.dev',
 		(input, init) => app.fetch(new Request(input, init)),
 		() => nowMs,
 	)

@@ -32,7 +32,9 @@ Required deployment inputs:
 - Kamal secret `CUKUP_FLEET_HOSTNAMES`, containing the comma-separated exact canonical lowercase hostnames permitted to bind physical credentials;
 - `CUKUP_NEW_TURN_EVENT_SCHEMA_VERSION`, which must remain `1` until a separately reviewed plugin rollout is ready to snapshot v2 for future turns.
 
-The fixed OIDC issuer and audience are code constants, not deployment overrides. The container accepts HTTP only behind Kamal Proxy and requires `X-Forwarded-Proto: https` on `/v1/*`; Kamal Proxy owns public TLS. Direct Bun TLS is available outside this asset by setting both `CUKUP_TLS_CERT_PATH` and `CUKUP_TLS_KEY_PATH`. Never expose container port 3000 publicly.
+The fixed OIDC issuer and audience are code constants, not deployment overrides. The container accepts HTTP only behind Kamal Proxy and requires the single exact value `X-Forwarded-Proto: https` on secure API and dashboard routes; Kamal Proxy owns public TLS. Routing uses the preserved original `Host` and never trusts `X-Forwarded-Host`. Direct Bun TLS is available outside this asset by setting both `CUKUP_TLS_CERT_PATH` and `CUKUP_TLS_KEY_PATH`. Never expose container port 3000 publicly because proxy-header trust relies on that network boundary.
+
+The checked-in Kamal asset remains intentionally API-only. Before the separately approved dashboard rollout, extend and validate its proxy configuration for both `api.cukup.dev` and `cukup.dev` while retaining an API-host `/healthz` check. Inject `CUKUP_GITHUB_OAUTH_CLIENT_ID`, `CUKUP_GITHUB_OAUTH_CLIENT_SECRET`, `CUKUP_GITHUB_ALLOWED_USER_ID`, and `CUKUP_DASHBOARD_SESSION_KEYS` only through protected runtime configuration. Missing or invalid values leave dashboard routes disabled without affecting ingestion. The exact routes, key-ring rotation procedure, report contract, and remaining gates are in [the dashboard service contract](dashboard-service.md).
 
 Before a real deployment, render/validate the config and build the image without deploying:
 

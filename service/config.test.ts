@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import {
+	configuredApiHostname,
+	configuredDashboard,
+	configuredDashboardHostname,
 	configuredFleetHostnames,
 	configuredNewTurnEventSchemaVersion,
 	isCanonicalFleetHostname,
@@ -30,5 +33,49 @@ describe('attribution configuration', () => {
 		expect(isCanonicalProjectSlug('a'.repeat(64))).toBeTrue()
 		expect(isCanonicalProjectSlug('a'.repeat(65))).toBeFalse()
 		expect(isCanonicalProjectSlug('cukup_service')).toBeFalse()
+	})
+})
+
+describe('dashboard configuration', () => {
+	test('derives the exact callback and decodes a primary-first session key ring', () => {
+		const first = Buffer.alloc(32, 1).toString('base64url')
+		const second = Buffer.alloc(32, 2).toString('base64url')
+		const value = configuredDashboard({
+			CUKUP_GITHUB_OAUTH_CLIENT_ID: 'client-id',
+			CUKUP_GITHUB_OAUTH_CLIENT_SECRET: 'client-secret',
+			CUKUP_GITHUB_ALLOWED_USER_ID: '12345678',
+			CUKUP_DASHBOARD_SESSION_KEYS: `${first},${second}`,
+		})
+		expect(value).toMatchObject({
+			hostname: 'cukup.dev',
+			callbackUrl: 'https://cukup.dev/auth/github/callback',
+			allowedGithubUserId: '12345678',
+		})
+		expect(value?.sessionKeys).toEqual([Buffer.alloc(32, 1), Buffer.alloc(32, 2)])
+	})
+
+	test('disables missing or invalid OAuth/session inputs instead of throwing', () => {
+		const valid = {
+			CUKUP_GITHUB_OAUTH_CLIENT_ID: 'client-id',
+			CUKUP_GITHUB_OAUTH_CLIENT_SECRET: 'client-secret',
+			CUKUP_GITHUB_ALLOWED_USER_ID: '12345678',
+			CUKUP_DASHBOARD_SESSION_KEYS: Buffer.alloc(32, 1).toString('base64url'),
+		}
+		expect(configuredDashboard({})).toBeUndefined()
+		for (const overrides of [
+			{ CUKUP_GITHUB_ALLOWED_USER_ID: 'login-name' },
+			{ CUKUP_GITHUB_ALLOWED_USER_ID: '9007199254740992' },
+			{ CUKUP_GITHUB_OAUTH_CLIENT_ID: 'contains whitespace' },
+			{ CUKUP_DASHBOARD_SESSION_KEYS: 'too-short' },
+		]) {
+			expect(configuredDashboard({ ...valid, ...overrides })).toBeUndefined()
+		}
+	})
+
+	test('uses canonical exact hostnames for host-first routing', () => {
+		expect(configuredApiHostname(undefined)).toBe('api.cukup.dev')
+		expect(configuredDashboardHostname(undefined)).toBe('cukup.dev')
+		expect(() => configuredApiHostname('API.cukup.dev')).toThrow()
+		expect(() => configuredDashboardHostname('cukup.dev:443')).toThrow()
 	})
 })

@@ -7,6 +7,10 @@ import {
 import type { StoredWorkEvent, SummaryPeriod, WorkSummary } from './types.ts'
 
 export type Interval = { startMs: number; endMs: number }
+export type SessionInterval<T extends StoredWorkEvent = StoredWorkEvent> = Interval & {
+	start: T
+	end?: T
+}
 export type CivilDate = { year: number; month: number; day: number }
 
 export type AggregationConfig = {
@@ -30,7 +34,15 @@ export function buildGlobalIntervals(
 	nowMs: number,
 	config: Pick<AggregationConfig, 'idleGraceMs' | 'crashCapMs'> = defaultConfig,
 ): Interval[] {
-	const sessions = new Map<string, StoredWorkEvent[]>()
+	return unionIntervals(buildSessionIntervals(events, nowMs, config))
+}
+
+export function buildSessionIntervals<T extends StoredWorkEvent>(
+	events: readonly T[],
+	nowMs: number,
+	config: Pick<AggregationConfig, 'idleGraceMs' | 'crashCapMs'> = defaultConfig,
+): SessionInterval<T>[] {
+	const sessions = new Map<string, T[]>()
 	for (const event of events) {
 		const key = `${event.sourceInstance}\u0000${event.sessionId}`
 		const session = sessions.get(key) ?? []
@@ -38,12 +50,12 @@ export function buildGlobalIntervals(
 		sessions.set(key, session)
 	}
 
-	const intervals: Interval[] = []
+	const intervals: SessionInterval<T>[] = []
 	for (const evidence of sessions.values()) {
 		evidence.sort((left, right) => left.sourceSequence - right.sourceSequence)
 		const start = evidence.find((event) => event.kind === 'agent.start')
 		if (!start) continue
-		let end: StoredWorkEvent | undefined
+		let end: T | undefined
 		for (const event of evidence) {
 			if (event.kind === 'agent.end' && event.sourceSequence > start.sourceSequence) end = event
 		}
@@ -58,16 +70,21 @@ export function buildGlobalIntervals(
 				: Math.max(start.occurredAtMs, completedAtMs) + config.idleGraceMs
 		const clippedEndMs = Math.min(inferredEndMs, nowMs)
 		if (clippedEndMs > start.occurredAtMs) {
-			intervals.push({ startMs: start.occurredAtMs, endMs: clippedEndMs })
+			intervals.push({
+				startMs: start.occurredAtMs,
+				endMs: clippedEndMs,
+				start,
+				...(end ? { end } : {}),
+			})
 		}
 	}
-	return unionIntervals(intervals)
+	return intervals
 }
 
 export function unionIntervals(intervals: readonly Interval[]): Interval[] {
 	const sorted = intervals
 		.filter((interval) => interval.endMs > interval.startMs)
-		.map((interval) => ({ ...interval }))
+		.map((interval) => ({ startMs: interval.startMs, endMs: interval.endMs }))
 		.sort((left, right) => left.startMs - right.startMs || left.endMs - right.endMs)
 	const union: Interval[] = []
 	for (const interval of sorted) {
