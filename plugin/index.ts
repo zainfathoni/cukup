@@ -108,7 +108,11 @@ export default function (amp: PluginAPI) {
 				sync.markTrackingIncomplete()
 				message = 'UNKNOWN · TRACKING INCOMPLETE · Cukup local state is unavailable.'
 			}
-			await ctx.ui.notify(message)
+			await ctx.ui.select({
+				title: 'Cukup status',
+				message,
+				options: ['Close'],
+			})
 		},
 	)
 

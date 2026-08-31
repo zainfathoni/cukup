@@ -25,6 +25,7 @@ describe('work-hours plugin', () => {
 		const commandCategories = new Map<string, string>()
 		const disposers: Array<() => unknown> = []
 		const notifications: string[] = []
+		const statusDialogs: Array<{ title: string; message?: string; options: string[] }> = []
 		const amp = {
 			on(name: string, handler: (event: any, context?: any) => unknown) {
 				handlers.set(name, handler)
@@ -55,6 +56,10 @@ describe('work-hours plugin', () => {
 			ui: {
 				notify: async (message: string) => notifications.push(message),
 				input: async () => '0:01',
+				select: async (options: { title: string; message?: string; options: string[] }) => {
+					statusDialogs.push(options)
+					return 'Close'
+				},
 			},
 		}
 
@@ -72,8 +77,12 @@ describe('work-hours plugin', () => {
 			handlers.get('agent.start')?.(event, context)
 			handlers.get('agent.end')?.({ ...event, status: 'done', messages: [] }, context)
 			await commands.get('work-hours-status')?.(context)
-			expect(notifications.at(-1)).toStartWith('UNKNOWN · no authoritative summary')
-				expect(notifications.at(-1)).toContain('Local fallback (non-authoritative):')
+			expect(statusDialogs.at(-1)).toMatchObject({
+				title: 'Cukup status',
+				options: ['Close'],
+			})
+			expect(statusDialogs.at(-1)?.message).toStartWith('UNKNOWN · no authoritative summary')
+			expect(statusDialogs.at(-1)?.message).toContain('Local fallback (non-authoritative):')
 
 			await commands.get('work-hours-set-target')?.(context)
 			expect(notifications.at(-1)).toBe('Weekday target set to 1m.')
