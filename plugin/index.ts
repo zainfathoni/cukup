@@ -1,5 +1,5 @@
-import type { PluginAPI, ThreadID } from '@ampcode/plugin'
-import { homedir } from 'node:os'
+import type { PluginAPI, PluginExecutorKind, ThreadID } from '@ampcode/plugin'
+import { homedir, hostname } from 'node:os'
 import { join } from 'node:path'
 import {
 	createFileTokenProvider,
@@ -8,9 +8,14 @@ import {
 	type TokenProvider,
 } from './auth.ts'
 import { CukupServiceClient } from './protocol.ts'
+import {
+	PROJECT_SLUG_CONFIG_KEY,
+	normalizeProjectSlug,
+	projectSlugFromConfiguration,
+} from './project.ts'
 import { formatStatusDisplay } from './status.ts'
 import { WorkHoursStore } from './store.ts'
-import { SyncEngine } from './sync.ts'
+import { REMOTE_EXECUTOR_LABEL, SyncEngine, type ExecutorProfile } from './sync.ts'
 import {
 	classifyWork,
 	formatMinutes,
@@ -32,19 +37,30 @@ export default function (amp: PluginAPI) {
 	const serviceURL = process.env.CUKUP_SERVICE_URL?.trim() || 'https://api.cukup.dev'
 	const client = createClient(serviceURL, now)
 	const tokenProvider = selectTokenProvider(amp)
-	const sync = new SyncEngine({ store, client, tokenProvider, now })
+	const sync = new SyncEngine({
+		store,
+		client,
+		tokenProvider,
+		now,
+		executorProfile: executorProfileFor(amp.system.executor.kind),
+	})
 	const monotonicStarts = new Map<string, number>()
 
-	amp.on('agent.start', (event, ctx) => {
+	amp.on('agent.start', async (event, ctx) => {
 		const eventKey = turnKey({ threadId: event.thread.id, messageId: String(event.id) })
 		const startedAt = monotonicNow()
 		try {
-			const recorded = store.record({
-				threadId: event.thread.id,
-				messageId: String(event.id),
-				kind: 'start',
-				atMs: now(),
-			})
+			const projectSlug = await configuredProjectSlug(amp)
+			const recorded = store.record(
+				{
+					threadId: event.thread.id,
+					messageId: String(event.id),
+					kind: 'start',
+					atMs: now(),
+				},
+				undefined,
+				sync.attributionForNewTurn(projectSlug),
+			)
 			if (recorded) monotonicStarts.set(eventKey, startedAt)
 			sync.kick()
 		} catch {
@@ -117,6 +133,60 @@ export default function (amp: PluginAPI) {
 	)
 
 	amp.registerCommand(
+		'project-slug-set',
+		{
+			title: 'Set project slug',
+			category: 'cukup',
+			description: 'Set or clear the explicit Project Slug for future turns in this workspace.',
+			availability: hasAmpWorkspace(amp) ? { type: 'enabled' } : { type: 'hidden' },
+		},
+		async (ctx) => {
+			if (!hasAmpWorkspace(amp)) return
+			const current = await configuredProjectSlug(amp)
+			const action = await ctx.ui.select({
+				title: 'Set project slug',
+				message: `Current Project Slug: **${current ?? 'Unassigned'}**`,
+				options: ['Set or change', 'Clear'],
+			})
+			if (action === 'Clear') {
+				const confirmed = await ctx.ui.confirm({
+					title: 'Clear project slug?',
+					message: 'Future turns in this workspace will be **Unassigned**. Existing turns are unchanged.',
+					confirmButtonText: 'Clear',
+				})
+				if (!confirmed) return
+				await amp.configuration.delete(PROJECT_SLUG_CONFIG_KEY, 'workspace')
+				await ctx.ui.notify('Project Slug cleared. Future turns will be Unassigned.')
+				return
+			}
+			if (action !== 'Set or change') return
+
+			const input = await ctx.ui.input({
+				title: 'Set project slug',
+				helpText: 'Lowercase letters, numbers, spaces, underscores, and dashes; maximum 64 characters after normalization.',
+				initialValue: current ?? '',
+				submitButtonText: 'Preview',
+			})
+			if (input === undefined) return
+			const normalized = normalizeProjectSlug(input)
+			if (!normalized) {
+				await ctx.ui.notify(
+					'Project Slug must normalize to lowercase kebab-case, use no punctuation, and be at most 64 characters.',
+				)
+				return
+			}
+			const confirmed = await ctx.ui.confirm({
+				title: 'Save project slug?',
+				message: `Normalized Project Slug: **${normalized}**\n\nOnly future turns are affected.`,
+				confirmButtonText: 'Save',
+			})
+			if (!confirmed) return
+			await amp.configuration.update({ [PROJECT_SLUG_CONFIG_KEY]: normalized }, 'workspace')
+			await ctx.ui.notify(`Project Slug set to ${normalized}.`)
+		},
+	)
+
+	amp.registerCommand(
 		'work-hours-set-target',
 		{
 			title: 'Set local fallback target',
@@ -146,6 +216,28 @@ export default function (amp: PluginAPI) {
 		await sync.dispose()
 		store.close()
 	})
+}
+
+export function executorProfileFor(
+	kind: PluginExecutorKind,
+	getHostname: () => string = hostname,
+): ExecutorProfile | undefined {
+	if (kind === 'local') return { kind: 'local', hostname: getHostname() }
+	if (kind === 'remote') return { kind: 'remote', executorLabel: REMOTE_EXECUTOR_LABEL }
+	return undefined
+}
+
+function hasAmpWorkspace(amp: PluginAPI): boolean {
+	return amp.system.user?.workspace != null
+}
+
+async function configuredProjectSlug(amp: PluginAPI): Promise<string | null> {
+	if (!hasAmpWorkspace(amp)) return null
+	try {
+		return projectSlugFromConfiguration(await amp.configuration.get())
+	} catch {
+		return null
+	}
 }
 
 function createClient(serviceURL: string | undefined, now: () => number): CukupServiceClient | undefined {

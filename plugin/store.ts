@@ -4,13 +4,15 @@ import { chmodSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
-	PROTOCOL_SCHEMA_VERSION,
+	EVENT_SCHEMA_VERSION_V1,
+	EVENT_SCHEMA_VERSION_V2,
 	parseSummary,
 	type AuthoritativeSummary,
 	type ClockSample,
 	type DeliveryResult,
 	type OutboxEvent,
 } from './protocol.ts'
+import { isProjectSlug } from './project.ts'
 import { DEFAULT_WEEKDAY_TARGET_MINUTES, type WorkEvent } from './tracker.ts'
 
 const targetSetting = 'weekday-target-minutes'
@@ -38,6 +40,15 @@ export type PersistedSyncState = {
 	clock: ClockSample | null
 }
 
+export type EventAttribution =
+	| { schemaVersion: typeof EVENT_SCHEMA_VERSION_V1; projectSlug: null }
+	| { schemaVersion: typeof EVENT_SCHEMA_VERSION_V2; projectSlug: string | null }
+
+export const UNASSIGNED_V1_ATTRIBUTION: EventAttribution = {
+	schemaVersion: EVENT_SCHEMA_VERSION_V1,
+	projectSlug: null,
+}
+
 export function defaultDatabasePath(): string {
 	const stateHome = process.env.XDG_STATE_HOME?.trim() || join(homedir(), '.local', 'state')
 	return join(stateHome, 'amp-work-hours', 'state.sqlite')
@@ -59,11 +70,16 @@ export class WorkHoursStore {
 		this.#sourceInstanceID = this.#initializeIdentityAndMigrate()
 	}
 
-	record(event: WorkEvent, monotonicDurationMs?: number): OutboxEvent | undefined {
+	record(
+		event: WorkEvent,
+		monotonicDurationMs?: number,
+		startAttribution: EventAttribution = UNASSIGNED_V1_ATTRIBUTION,
+	): OutboxEvent | undefined {
 		const eventKey = legacyEventKey(event)
 		const turn = turnKey(event)
 		const eventID = uuidv7(event.atMs)
 		const proposedSessionID = randomUUID()
+		validateAttribution(startAttribution)
 
 		const write = this.#database.transaction((): OutboxEvent | undefined => {
 			const existing = this.#database
@@ -72,17 +88,25 @@ export class WorkHoursStore {
 			if (existing) return undefined
 
 			const sequence = this.#nextSequence()
+			const session = this.#turnSession(
+				turn,
+				proposedSessionID,
+				event.kind === 'start' ? startAttribution : UNASSIGNED_V1_ATTRIBUTION,
+			)
 			const sequenced: OutboxEvent = {
-				schema_version: PROTOCOL_SCHEMA_VERSION,
+				schema_version: session.schemaVersion,
 				event_id: eventID,
 				source_instance_id: this.#sourceInstanceID,
 				source_sequence: sequence,
-				session_id: this.#turnSessionID(turn, proposedSessionID),
+				session_id: session.sessionID,
 				kind: `agent.${event.kind}`,
 				occurred_at: new Date(event.atMs).toISOString(),
 				...(monotonicDurationMs === undefined
 					? {}
 					: { monotonic_duration_ms: normalizeDuration(monotonicDurationMs) }),
+				...(session.schemaVersion === EVENT_SCHEMA_VERSION_V2 && session.projectSlug !== null
+					? { project_slug: session.projectSlug }
+					: {}),
 			}
 			this.#database
 				.query(
@@ -148,8 +172,8 @@ export class WorkHoursStore {
 		if (!Number.isSafeInteger(limit) || limit <= 0) throw new Error('Outbox limit must be positive.')
 		return this.#database
 			.query<OutboxRow, [number]>(
-				`SELECT event_id, source_instance_id, source_sequence, session_id, kind,
-				        occurred_at, monotonic_duration_ms
+				`SELECT schema_version, project_slug, event_id, source_instance_id,
+				        source_sequence, session_id, kind, occurred_at, monotonic_duration_ms
 				 FROM outbox
 				 WHERE delivery_state = 'pending'
 				 ORDER BY source_instance_id, source_sequence
@@ -157,6 +181,17 @@ export class WorkHoursStore {
 			)
 			.all(limit)
 			.map(outboxEventFromRow)
+	}
+
+	hasPendingEventSchema(schemaVersion: number): boolean {
+		return Boolean(
+			this.#database
+				.query<{ found: number }, [number]>(
+					`SELECT 1 AS found FROM outbox
+					 WHERE delivery_state = 'pending' AND schema_version = ? LIMIT 1`,
+				)
+				.get(schemaVersion),
+		)
 	}
 
 	applyDeliveryResults(results: readonly DeliveryResult[]): void {
@@ -329,6 +364,8 @@ export class WorkHoursStore {
 			);
 			CREATE TABLE IF NOT EXISTS outbox (
 				event_id TEXT PRIMARY KEY,
+				schema_version INTEGER NOT NULL DEFAULT 1 CHECK (schema_version IN (1, 2)),
+				project_slug TEXT,
 				source_instance_id TEXT NOT NULL,
 				source_sequence INTEGER NOT NULL CHECK (source_sequence > 0),
 				session_id TEXT NOT NULL,
@@ -346,7 +383,9 @@ export class WorkHoursStore {
 			);
 			CREATE TABLE IF NOT EXISTS turn_sessions (
 				turn_key TEXT PRIMARY KEY,
-				session_id TEXT NOT NULL UNIQUE
+				session_id TEXT NOT NULL UNIQUE,
+				schema_version INTEGER NOT NULL DEFAULT 1 CHECK (schema_version IN (1, 2)),
+				project_slug TEXT
 			);
 			CREATE TABLE IF NOT EXISTS summary_cache (
 				singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -366,6 +405,42 @@ export class WorkHoursStore {
 			);
 			INSERT OR IGNORE INTO sync_state (singleton) VALUES (1);
 		`)
+		this.#migrateAttributionSchema()
+	}
+
+	#migrateAttributionSchema(): void {
+		const migrate = this.#database.transaction(() => {
+			const outboxColumns = this.#tableColumns('outbox')
+			if (!outboxColumns.has('schema_version')) {
+				this.#database.exec(
+					'ALTER TABLE outbox ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1 CHECK (schema_version IN (1, 2))',
+				)
+			}
+			if (!outboxColumns.has('project_slug')) {
+				this.#database.exec('ALTER TABLE outbox ADD COLUMN project_slug TEXT')
+			}
+
+			const sessionColumns = this.#tableColumns('turn_sessions')
+			if (!sessionColumns.has('schema_version')) {
+				this.#database.exec(
+					'ALTER TABLE turn_sessions ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1 CHECK (schema_version IN (1, 2))',
+				)
+			}
+			if (!sessionColumns.has('project_slug')) {
+				this.#database.exec('ALTER TABLE turn_sessions ADD COLUMN project_slug TEXT')
+			}
+			this.#database.exec('PRAGMA user_version = 2')
+		})
+		migrate.immediate()
+	}
+
+	#tableColumns(table: 'outbox' | 'turn_sessions'): Set<string> {
+		return new Set(
+			this.#database
+				.query<{ name: string }, []>(`PRAGMA table_info(${table})`)
+				.all()
+				.map((column) => column.name),
+		)
 	}
 
 	#initializeIdentityAndMigrate(): string {
@@ -390,9 +465,10 @@ export class WorkHoursStore {
 				.all()
 			for (const row of legacyRows) {
 				const turn = `${row.thread_id}\u0000${row.message_id}`
-				const sessionID = this.#turnSessionID(
+				const session = this.#turnSession(
 					turn,
 					uuidv5(namespace, `cukup-legacy-session\u0000${turn}`),
+					UNASSIGNED_V1_ATTRIBUTION,
 				)
 				const migrated = this.#database
 					.query<{ found: number }, [string]>(
@@ -403,11 +479,11 @@ export class WorkHoursStore {
 				sequence += 1
 				const eventID = uuidv5(namespace, `cukup-legacy-event\u0000${row.event_key}`)
 				this.#insertOutboxEvent({
-					schema_version: PROTOCOL_SCHEMA_VERSION,
+					schema_version: EVENT_SCHEMA_VERSION_V1,
 					event_id: eventID,
 					source_instance_id: sourceInstanceID,
 					source_sequence: sequence,
-					session_id: sessionID,
+					session_id: session.sessionID,
 					kind: `agent.${row.kind}`,
 					occurred_at: new Date(row.at_ms).toISOString(),
 				})
@@ -448,12 +524,14 @@ export class WorkHoursStore {
 		this.#database
 			.query(
 				`INSERT INTO outbox
-					(event_id, source_instance_id, source_sequence, session_id, kind,
-					 occurred_at, monotonic_duration_ms)
-				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+					(event_id, schema_version, project_slug, source_instance_id, source_sequence,
+					 session_id, kind, occurred_at, monotonic_duration_ms)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			)
 			.run(
 				event.event_id,
+				event.schema_version,
+				event.schema_version === EVENT_SCHEMA_VERSION_V2 ? (event.project_slug ?? null) : null,
 				event.source_instance_id,
 				event.source_sequence,
 				event.session_id,
@@ -463,17 +541,25 @@ export class WorkHoursStore {
 			)
 	}
 
-	#turnSessionID(turn: string, proposedSessionID: string): string {
+	#turnSession(
+		turn: string,
+		proposedSessionID: string,
+		proposedAttribution: EventAttribution,
+	): TurnSession {
 		const existing = this.#database
-			.query<{ sessionID: string }, [string]>(
-				'SELECT session_id AS sessionID FROM turn_sessions WHERE turn_key = ?',
+			.query<TurnSessionRow, [string]>(
+				`SELECT session_id, schema_version, project_slug
+				 FROM turn_sessions WHERE turn_key = ?`,
 			)
-			.get(turn)?.sessionID
-		if (existing) return existing
+			.get(turn)
+		if (existing) return turnSessionFromRow(existing)
 		this.#database
-			.query('INSERT INTO turn_sessions (turn_key, session_id) VALUES (?, ?)')
-			.run(turn, proposedSessionID)
-		return proposedSessionID
+			.query(
+				`INSERT INTO turn_sessions
+					(turn_key, session_id, schema_version, project_slug) VALUES (?, ?, ?, ?)`,
+			)
+			.run(turn, proposedSessionID, proposedAttribution.schemaVersion, proposedAttribution.projectSlug)
+		return { sessionID: proposedSessionID, ...proposedAttribution }
 	}
 
 	#setting(key: string): string | undefined {
@@ -501,6 +587,8 @@ type LegacyRow = {
 }
 
 type OutboxRow = {
+	schema_version: number
+	project_slug: string | null
 	event_id: string
 	source_instance_id: string
 	source_sequence: number
@@ -510,9 +598,16 @@ type OutboxRow = {
 	monotonic_duration_ms: number | null
 }
 
+type TurnSessionRow = {
+	session_id: string
+	schema_version: number
+	project_slug: string | null
+}
+
+type TurnSession = EventAttribution & { sessionID: string }
+
 function outboxEventFromRow(row: OutboxRow): OutboxEvent {
-	return {
-		schema_version: PROTOCOL_SCHEMA_VERSION,
+	const event = {
 		event_id: row.event_id,
 		source_instance_id: row.source_instance_id,
 		source_sequence: row.source_sequence,
@@ -522,6 +617,51 @@ function outboxEventFromRow(row: OutboxRow): OutboxEvent {
 		...(row.monotonic_duration_ms === null
 			? {}
 			: { monotonic_duration_ms: row.monotonic_duration_ms }),
+	}
+	if (row.schema_version === EVENT_SCHEMA_VERSION_V1 && row.project_slug === null) {
+		return { schema_version: EVENT_SCHEMA_VERSION_V1, ...event }
+	}
+	if (
+		row.schema_version === EVENT_SCHEMA_VERSION_V2 &&
+		(row.project_slug === null || isProjectSlug(row.project_slug))
+	) {
+		return {
+			schema_version: EVENT_SCHEMA_VERSION_V2,
+			...event,
+			...(row.project_slug === null ? {} : { project_slug: row.project_slug }),
+		}
+	}
+	throw new Error('Outbox attribution is invalid.')
+}
+
+function turnSessionFromRow(row: TurnSessionRow): TurnSession {
+	if (row.schema_version === EVENT_SCHEMA_VERSION_V1 && row.project_slug === null) {
+		return {
+			sessionID: row.session_id,
+			schemaVersion: EVENT_SCHEMA_VERSION_V1,
+			projectSlug: null,
+		}
+	}
+	if (
+		row.schema_version === EVENT_SCHEMA_VERSION_V2 &&
+		(row.project_slug === null || isProjectSlug(row.project_slug))
+	) {
+		return {
+			sessionID: row.session_id,
+			schemaVersion: EVENT_SCHEMA_VERSION_V2,
+			projectSlug: row.project_slug,
+		}
+	}
+	throw new Error('Turn-session attribution is invalid.')
+}
+
+function validateAttribution(attribution: EventAttribution): void {
+	if (
+		attribution.schemaVersion === EVENT_SCHEMA_VERSION_V2 &&
+		attribution.projectSlug !== null &&
+		!isProjectSlug(attribution.projectSlug)
+	) {
+		throw new Error('Project Slug must be lowercase kebab-case and at most 64 characters.')
 	}
 }
 

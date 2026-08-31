@@ -1,20 +1,32 @@
 import { TokenProviderError, type TokenProvider } from './auth.ts'
 import {
+	EVENT_SCHEMA_VERSION_V1,
+	EVENT_SCHEMA_VERSION_V2,
 	MAX_CLIENT_CLOCK_SKEW_MS,
 	ServiceRequestError,
 	type CukupServiceClient,
+	type ServiceCapabilities,
 } from './protocol.ts'
-import type { WorkHoursStore } from './store.ts'
+import {
+	UNASSIGNED_V1_ATTRIBUTION,
+	type EventAttribution,
+	type WorkHoursStore,
+} from './store.ts'
 
 export const OUTBOX_BATCH_SIZE = 50
 export const RETRY_INITIAL_MS = 1_000
 export const RETRY_MAX_MS = 5 * 60 * 1_000
 export const RETRY_JITTER = 0.2
+export const REMOTE_EXECUTOR_LABEL = 'amp-orb' as const
 
 export type SyncCycleResult = {
 	authoritativeSummary: boolean
 	errorKind?: string
 }
+
+export type ExecutorProfile =
+	| { kind: 'local'; hostname: string }
+	| { kind: 'remote'; executorLabel: typeof REMOTE_EXECUTOR_LABEL }
 
 type Timer = ReturnType<typeof setTimeout>
 
@@ -26,6 +38,7 @@ export type SyncEngineOptions = {
 	random?: () => number
 	setTimer?: (callback: () => void, delayMs: number) => Timer
 	clearTimer?: (timer: Timer) => void
+	executorProfile?: ExecutorProfile
 }
 
 export class SyncEngine {
@@ -36,11 +49,14 @@ export class SyncEngine {
 	readonly #random: () => number
 	readonly #setTimer: (callback: () => void, delayMs: number) => Timer
 	readonly #clearTimer: (timer: Timer) => void
+	readonly #executorProfile: ExecutorProfile | undefined
 	#timer: Timer | undefined
 	#running: Promise<SyncCycleResult> | undefined
 	#deferredDelayMs: number | undefined
 	#disposed = false
 	#trackingIncomplete: boolean
+	#preferredNewEventSchemaVersion: 1 | 2 = EVENT_SCHEMA_VERSION_V1
+	#executorProfileBound = false
 
 	constructor(options: SyncEngineOptions) {
 		this.#store = options.store
@@ -50,6 +66,7 @@ export class SyncEngine {
 		this.#random = options.random ?? Math.random
 		this.#setTimer = options.setTimer ?? setTimeout
 		this.#clearTimer = options.clearTimer ?? clearTimeout
+		this.#executorProfile = options.executorProfile
 		this.#trackingIncomplete = this.#store.trackingIncomplete()
 	}
 
@@ -76,6 +93,12 @@ export class SyncEngine {
 
 	trackingIncomplete(): boolean {
 		return this.#trackingIncomplete
+	}
+
+	attributionForNewTurn(projectSlug: string | null): EventAttribution {
+		return this.#preferredNewEventSchemaVersion === EVENT_SCHEMA_VERSION_V2
+			? { schemaVersion: EVENT_SCHEMA_VERSION_V2, projectSlug }
+			: UNASSIGNED_V1_ATTRIBUTION
 	}
 
 	async runNow(): Promise<SyncCycleResult> {
@@ -110,8 +133,10 @@ export class SyncEngine {
 
 	async #runCycle(): Promise<SyncCycleResult> {
 		let token = ''
+		this.#preferredNewEventSchemaVersion = EVENT_SCHEMA_VERSION_V1
 		try {
 			token = await this.#tokenProvider!.getToken()
+			await this.#configureAttribution(token)
 			const clock = await this.#client!.sampleTime(token)
 			this.#store.recordClockSample(clock)
 
@@ -153,6 +178,32 @@ export class SyncEngine {
 		}
 	}
 
+	async #configureAttribution(token: string): Promise<void> {
+		if (!this.#executorProfile) return
+		const capabilities = await this.#client!.fetchCapabilities(token)
+		const hasPendingV2 = this.#store.hasPendingEventSchema(EVENT_SCHEMA_VERSION_V2)
+		if (!capabilities) {
+			if (hasPendingV2) throw new ServiceRequestError('protocol', false)
+			return
+		}
+
+		const acceptsV2 = supportsEventSchema(capabilities, EVENT_SCHEMA_VERSION_V2)
+		const prefersV2 = capabilities.preferredNewEventSchemaVersion === EVENT_SCHEMA_VERSION_V2
+		const requiresV2 = hasPendingV2 || prefersV2
+		if (requiresV2 && !acceptsV2) throw new ServiceRequestError('protocol', false)
+
+		if (requiresV2 && this.#executorProfile.kind === 'local') {
+			if (!this.#executorProfileBound) {
+				await this.#client!.bindExecutorProfile(token, this.#executorProfile.hostname)
+				this.#executorProfileBound = true
+			}
+		}
+
+		if (prefersV2 && acceptsV2) {
+			this.#preferredNewEventSchemaVersion = EVENT_SCHEMA_VERSION_V2
+		}
+	}
+
 	#recordFailure(kind: string, retryable: boolean): void {
 		const nowMs = this.#now()
 		try {
@@ -182,6 +233,10 @@ export class SyncEngine {
 		}, Math.max(0, delayMs))
 		this.#timer.unref?.()
 	}
+}
+
+function supportsEventSchema(capabilities: ServiceCapabilities, version: 1 | 2): boolean {
+	return capabilities.acceptedEventSchemaVersions.includes(version)
 }
 
 export function retryDelay(attempt: number, random: number): number {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { PROTOCOL_SCHEMA_VERSION, type AuthoritativeSummary } from './protocol.ts'
+import { SUMMARY_SCHEMA_VERSION, type AuthoritativeSummary } from './protocol.ts'
 import { formatStatusDisplay } from './status.ts'
 
 const asOf = '2026-08-30T05:00:00.000Z'
@@ -20,7 +20,7 @@ function summary(status: 'UNDER' | 'COMPLETE' | 'OVER'): AuthoritativeSummary {
 		OVER: { worked_minutes: 540, target_minutes: 480, difference_minutes: 60 },
 	}[status]
 	return {
-		schema_version: PROTOCOL_SCHEMA_VERSION,
+		schema_version: SUMMARY_SCHEMA_VERSION,
 		as_of: asOf,
 		daily: { status, ...values },
 		weekly: { status, ...values },
