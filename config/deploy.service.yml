@@ -17,7 +17,7 @@ proxy:
   host: <%= ENV.fetch("CUKUP_TLS_HOSTNAME") %>
   app_port: 3000
   healthcheck:
-    path: /healthz
+    path: /up
     interval: 3
     timeout: 3
 

@@ -10,6 +10,7 @@ export const SESSION_COOKIE_NAME = '__Host-cukup_session'
 export const OAUTH_COOKIE_NAME = '__Host-cukup_oauth'
 export const SESSION_LIFETIME_SECONDS = 7 * 24 * 60 * 60
 export const OAUTH_LIFETIME_SECONDS = 10 * 60
+const GITHUB_REQUEST_TIMEOUT_MS = 10_000
 
 const githubAuthorizeUrl = 'https://github.com/login/oauth/authorize'
 const githubTokenUrl = 'https://github.com/login/oauth/access_token'
@@ -209,6 +210,7 @@ export class DashboardAuth {
 		const response = await this.#fetch(githubTokenUrl, {
 			method: 'POST',
 			redirect: 'error',
+			signal: AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS),
 			headers: {
 				accept: 'application/json',
 				'content-type': 'application/x-www-form-urlencoded',
@@ -230,6 +232,7 @@ export class DashboardAuth {
 	async #isAllowedGithubUser(accessToken: string): Promise<boolean> {
 		const response = await this.#fetch(githubUserUrl, {
 			redirect: 'error',
+			signal: AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS),
 			headers: {
 				accept: 'application/vnd.github+json',
 				authorization: `Bearer ${accessToken}`,

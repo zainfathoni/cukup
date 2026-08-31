@@ -46,7 +46,12 @@ export function createApp(options: AppOptions): { fetch(request: Request): Promi
 			let response: Response
 			try {
 				const hostname = originalHostname(request, url)
-				if (hostname === dashboardHostname) {
+				if (url.pathname === '/up') {
+					response =
+						request.method === 'GET'
+							? json({ ok: true })
+							: json({ error: 'method_not_allowed' }, 405, { allow: 'GET' })
+				} else if (hostname === dashboardHostname) {
 					response =
 						options.dashboard && (!requireHttps || isSecureRequest(request, trustTlsProxy))
 							? await options.dashboard.fetch(request, url)
@@ -201,6 +206,7 @@ function originalHostname(request: Request, url: URL): string {
 
 function logPath(pathname: string): string {
 	if (
+		pathname === '/up' ||
 		pathname === '/healthz' ||
 		pathname === '/v1/time' ||
 		pathname === '/v1/capabilities' ||
