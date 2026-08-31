@@ -85,7 +85,7 @@ export default function (amp: PluginAPI) {
 		'work-hours-status',
 		{
 			title: 'Status',
-			category: 'work hours',
+			category: 'cukup',
 			description: 'Show authoritative daily and Monday–Sunday weekly Cukup status.',
 		},
 		async (ctx) => {
@@ -116,7 +116,7 @@ export default function (amp: PluginAPI) {
 		'work-hours-set-target',
 		{
 			title: 'Set local fallback target',
-			category: 'work hours',
+			category: 'cukup',
 			description: 'Set the non-authoritative local fallback target in H:MM format.',
 		},
 		async (ctx) => {
