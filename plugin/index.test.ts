@@ -22,6 +22,7 @@ describe('work-hours plugin', () => {
 
 		const handlers = new Map<string, (event: any, context?: any) => unknown>()
 		const commands = new Map<string, (context: any) => unknown>()
+		const commandCategories = new Map<string, string>()
 		const disposers: Array<() => unknown> = []
 		const notifications: string[] = []
 		const amp = {
@@ -29,8 +30,13 @@ describe('work-hours plugin', () => {
 				handlers.set(name, handler)
 				return { unsubscribe() {} }
 			},
-			registerCommand(id: string, _options: unknown, handler: (context: any) => unknown) {
+			registerCommand(
+				id: string,
+				options: { category: string },
+				handler: (context: any) => unknown,
+			) {
 				commands.set(id, handler)
+				commandCategories.set(id, options.category)
 				return { unsubscribe() {}, setAvailability() {} }
 			},
 			onDispose(callback: () => unknown) {
@@ -56,6 +62,7 @@ describe('work-hours plugin', () => {
 			workHoursPlugin(amp as never)
 			expect([...handlers.keys()]).toEqual(['agent.start', 'agent.end'])
 			expect([...commands.keys()]).toEqual(['work-hours-status', 'work-hours-set-target'])
+			expect([...commandCategories.values()]).toEqual(['cukup', 'cukup'])
 
 			const event = {
 				thread: { id: 'T-smoke' },
