@@ -336,4 +336,29 @@ describe('WorkHoursStore', () => {
 		database.close()
 		upgraded.close()
 	})
+
+	test('refuses a future schema without lowering its version or creating current tables', () => {
+		const path = databasePath()
+		mkdirSync(dirname(path), { recursive: true })
+		const future = new Database(path, { create: true })
+		future.exec('CREATE TABLE future_state (value TEXT); PRAGMA user_version = 3;')
+		future.close()
+
+		expect(() => new WorkHoursStore(path)).toThrow(
+			'Plugin database schema version 3 is newer than supported version 2',
+		)
+
+		const unchanged = new Database(path)
+		expect(
+			unchanged.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version,
+		).toBe(3)
+		expect(
+			unchanged
+				.query<{ count: number }, []>(
+					"SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name = 'events'",
+				)
+				.get()?.count,
+		).toBe(0)
+		unchanged.close()
+	})
 })
