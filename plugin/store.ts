@@ -15,6 +15,7 @@ import {
 import { isProjectSlug } from './project.ts'
 import { DEFAULT_WEEKDAY_TARGET_MINUTES, type WorkEvent } from './tracker.ts'
 
+const DATABASE_VERSION = 2
 const targetSetting = 'weekday-target-minutes'
 const sourceSetting = 'source-instance-id'
 const migrationNamespaceSetting = 'legacy-migration-namespace'
@@ -63,6 +64,15 @@ export class WorkHoursStore {
 		mkdirSync(directory, { recursive: true, mode: 0o700 })
 		chmodSync(directory, 0o700)
 		this.#database = new Database(path, { create: true, strict: true })
+		const databaseVersion = this.#database
+			.query<{ user_version: number }, []>('PRAGMA user_version')
+			.get()!.user_version
+		if (databaseVersion > DATABASE_VERSION) {
+			this.#database.close()
+			throw new Error(
+				`Plugin database schema version ${databaseVersion} is newer than supported version ${DATABASE_VERSION}`,
+			)
+		}
 		chmodSync(path, 0o600)
 		this.#database.exec('PRAGMA busy_timeout = 5000')
 		this.#database.exec('PRAGMA journal_mode = WAL')
@@ -429,7 +439,7 @@ export class WorkHoursStore {
 			if (!sessionColumns.has('project_slug')) {
 				this.#database.exec('ALTER TABLE turn_sessions ADD COLUMN project_slug TEXT')
 			}
-			this.#database.exec('PRAGMA user_version = 2')
+			this.#database.exec(`PRAGMA user_version = ${DATABASE_VERSION}`)
 		})
 		migrate.immediate()
 	}
