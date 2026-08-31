@@ -3,6 +3,7 @@ import { Database } from 'bun:sqlite'
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { EVENT_SCHEMA_VERSION_V1, EVENT_SCHEMA_VERSION_V2 } from './protocol.ts'
 import { WorkHoursStore } from './store.ts'
 
 const temporaryDirectories: string[] = []
@@ -80,6 +81,77 @@ describe('WorkHoursStore', () => {
 		expect(third?.session_id).not.toBe(first?.session_id)
 		expect(third?.source_sequence).toBe((second?.source_sequence ?? 0) + 1)
 		reopened.close()
+	})
+
+	test('replays a v1 row after interrupted delivery deletion without changing its wire shape', () => {
+		const path = databasePath()
+		const first = new WorkHoursStore(path)
+		const recorded = first.record({ threadId: 'T-one', messageId: '1', kind: 'start', atMs: 100 })!
+		first.close()
+
+		const upgraded = new WorkHoursStore(path)
+		const replayed = upgraded.pendingEvents(10)[0]!
+		expect(replayed).toEqual(recorded)
+		expect(Object.keys(replayed).sort()).toEqual([
+			'event_id',
+			'kind',
+			'occurred_at',
+			'schema_version',
+			'session_id',
+			'source_instance_id',
+			'source_sequence',
+		])
+		expect(replayed.schema_version).toBe(EVENT_SCHEMA_VERSION_V1)
+		upgraded.close()
+	})
+
+	test('reuses a v2 turn snapshot across restart and a changed Project Slug', () => {
+		const path = databasePath()
+		const first = new WorkHoursStore(path)
+		const start = first.record(
+			{ threadId: 'T-one', messageId: '1', kind: 'start', atMs: 100 },
+			undefined,
+			{ schemaVersion: EVENT_SCHEMA_VERSION_V2, projectSlug: 'project-before' },
+		)!
+		first.close()
+
+		const restarted = new WorkHoursStore(path)
+		const end = restarted.record(
+			{ threadId: 'T-one', messageId: '1', kind: 'end', atMs: 200, status: 'done' },
+			undefined,
+			{ schemaVersion: EVENT_SCHEMA_VERSION_V2, projectSlug: 'project-after' },
+		)!
+		expect(start).toMatchObject({
+			schema_version: EVENT_SCHEMA_VERSION_V2,
+			project_slug: 'project-before',
+		})
+		expect(end).toMatchObject({
+			schema_version: EVENT_SCHEMA_VERSION_V2,
+			project_slug: 'project-before',
+			session_id: start.session_id,
+		})
+		restarted.close()
+	})
+
+	test('keeps a v1 turn v1 and makes an orphan end v1 Unassigned', () => {
+		const store = new WorkHoursStore(databasePath())
+		const start = store.record({ threadId: 'T-v1', messageId: '1', kind: 'start', atMs: 100 })!
+		const end = store.record(
+			{ threadId: 'T-v1', messageId: '1', kind: 'end', atMs: 200, status: 'done' },
+			undefined,
+			{ schemaVersion: EVENT_SCHEMA_VERSION_V2, projectSlug: 'later-config' },
+		)!
+		const orphan = store.record(
+			{ threadId: 'T-orphan', messageId: '2', kind: 'end', atMs: 300, status: 'error' },
+			undefined,
+			{ schemaVersion: EVENT_SCHEMA_VERSION_V2, projectSlug: 'current-config' },
+		)!
+		for (const event of [start, end, orphan]) {
+			expect(event.schema_version).toBe(EVENT_SCHEMA_VERSION_V1)
+			expect(event).not.toHaveProperty('project_slug')
+		}
+		expect(end.session_id).toBe(start.session_id)
+		store.close()
 	})
 
 	test('deletes only accepted and exact duplicate rows while retaining conflicts and rejections', () => {
@@ -166,6 +238,8 @@ describe('WorkHoursStore', () => {
 			expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-5/),
 		])
 		expect(migrated[0]?.session_id).toBe(migrated[1]?.session_id)
+		expect(migrated.every((event) => event.schema_version === EVENT_SCHEMA_VERSION_V1)).toBeTrue()
+		expect(migrated.every((event) => !('project_slug' in event))).toBeTrue()
 		expect(migrated.every((event) => event.monotonic_duration_ms === undefined)).toBeTrue()
 		first.close()
 
@@ -185,5 +259,81 @@ describe('WorkHoursStore', () => {
 				?.source_sequence,
 		).toBe(3)
 		afterAcceptance.close()
+	})
+
+	test('migrates every existing outbox row and turn session to v1 Unassigned', () => {
+		const path = databasePath()
+		mkdirSync(dirname(path), { recursive: true })
+		const legacy = new Database(path, { create: true })
+		legacy.exec(`
+			CREATE TABLE events (
+				event_key TEXT PRIMARY KEY,
+				thread_id TEXT NOT NULL,
+				message_id TEXT NOT NULL,
+				kind TEXT NOT NULL,
+				at_ms INTEGER NOT NULL,
+				status TEXT
+			);
+			CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+			CREATE TABLE outbox (
+				event_id TEXT PRIMARY KEY,
+				source_instance_id TEXT NOT NULL,
+				source_sequence INTEGER NOT NULL,
+				session_id TEXT NOT NULL,
+				kind TEXT NOT NULL,
+				occurred_at TEXT NOT NULL,
+				monotonic_duration_ms INTEGER,
+				delivery_state TEXT NOT NULL DEFAULT 'pending',
+				UNIQUE (source_instance_id, source_sequence)
+			);
+			CREATE TABLE legacy_migrations (
+				event_key TEXT PRIMARY KEY,
+				event_id TEXT NOT NULL UNIQUE,
+				source_sequence INTEGER NOT NULL UNIQUE
+			);
+			CREATE TABLE turn_sessions (turn_key TEXT PRIMARY KEY, session_id TEXT NOT NULL UNIQUE);
+			INSERT INTO settings VALUES
+				('source-instance-id', '6a19480a-2d4d-4a29-8dbf-735f8300aba0'),
+				('legacy-migration-namespace', 'b5c3a3d7-57e0-42cf-9732-59f68f31ab53'),
+				('next-source-sequence', '4');
+			INSERT INTO outbox VALUES
+				('event-pending', '6a19480a-2d4d-4a29-8dbf-735f8300aba0', 1, 'session-pending', 'agent.start', '2026-08-30T00:00:00.000Z', NULL, 'pending'),
+				('event-conflict', '6a19480a-2d4d-4a29-8dbf-735f8300aba0', 2, 'session-conflict', 'agent.start', '2026-08-30T00:01:00.000Z', NULL, 'conflict'),
+				('event-rejected', '6a19480a-2d4d-4a29-8dbf-735f8300aba0', 3, 'session-rejected', 'agent.end', '2026-08-30T00:02:00.000Z', NULL, 'rejected');
+			INSERT INTO turn_sessions VALUES ('T-pending' || char(0) || '1', 'session-pending');
+		`)
+		legacy.close()
+
+		const upgraded = new WorkHoursStore(path)
+		expect(upgraded.pendingEvents(10)).toEqual([
+			expect.objectContaining({
+				event_id: 'event-pending',
+				schema_version: EVENT_SCHEMA_VERSION_V1,
+			}),
+		])
+		const database = new Database(path)
+		expect(
+			database
+				.query<{ schema: number; slug: string | null }, []>(
+					'SELECT schema_version AS schema, project_slug AS slug FROM outbox ORDER BY source_sequence',
+				)
+				.all(),
+		).toEqual([
+			{ schema: EVENT_SCHEMA_VERSION_V1, slug: null },
+			{ schema: EVENT_SCHEMA_VERSION_V1, slug: null },
+			{ schema: EVENT_SCHEMA_VERSION_V1, slug: null },
+		])
+		expect(
+			database
+				.query<{ schema: number; slug: string | null }, []>(
+					'SELECT schema_version AS schema, project_slug AS slug FROM turn_sessions',
+				)
+				.get(),
+		).toEqual({ schema: EVENT_SCHEMA_VERSION_V1, slug: null })
+		expect(
+			database.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version,
+		).toBe(2)
+		database.close()
+		upgraded.close()
 	})
 })

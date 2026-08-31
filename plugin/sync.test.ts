@@ -4,13 +4,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TokenProviderError, type TokenProvider } from './auth.ts'
 import {
+	CAPABILITIES_SCHEMA_VERSION,
 	CukupServiceClient,
-	PROTOCOL_SCHEMA_VERSION,
+	EVENT_SCHEMA_VERSION_V1,
+	EVENT_SCHEMA_VERSION_V2,
+	SUMMARY_SCHEMA_VERSION,
 	type AuthoritativeSummary,
 	type Fetcher,
 } from './protocol.ts'
 import { WorkHoursStore } from './store.ts'
-import { RETRY_MAX_MS, SyncEngine, retryDelay } from './sync.ts'
+import { REMOTE_EXECUTOR_LABEL, RETRY_MAX_MS, SyncEngine, retryDelay } from './sync.ts'
 
 const temporaryDirectories: string[] = []
 const nowMs = Date.parse('2026-08-30T05:00:00.000Z')
@@ -24,7 +27,7 @@ function databasePath(): string {
 
 function summary(): AuthoritativeSummary {
 	return {
-		schema_version: PROTOCOL_SCHEMA_VERSION,
+		schema_version: SUMMARY_SCHEMA_VERSION,
 		as_of: new Date(nowMs).toISOString(),
 		daily: { status: 'UNDER', worked_minutes: 60, target_minutes: 480, difference_minutes: 420 },
 		weekly: { status: 'UNDER', worked_minutes: 60, target_minutes: 2_400, difference_minutes: 2_340 },
@@ -37,6 +40,17 @@ function provider(getToken: () => string | Promise<string> = () => token): Token
 
 function client(fetcher: Fetcher): CukupServiceClient {
 	return new CukupServiceClient('https://cukup.dev', fetcher, () => nowMs)
+}
+
+function capabilities(
+	preferredNewEventSchemaVersion: 1 | 2,
+	acceptedEventSchemaVersions: Array<1 | 2> = [1, 2],
+): Response {
+	return Response.json({
+		schema_version: CAPABILITIES_SCHEMA_VERSION,
+		accepted_event_schema_versions: acceptedEventSchemaVersions,
+		preferred_new_event_schema_version: preferredNewEventSchemaVersion,
+	})
 }
 
 function record(store: WorkHoursStore, number: number) {
@@ -55,6 +69,172 @@ afterEach(() => {
 })
 
 describe('SyncEngine', () => {
+	test('binds the local hostname before enabling and uploading v2 turns', async () => {
+		const store = new WorkHoursStore(databasePath())
+		const requests: string[] = []
+		let uploaded: Array<Record<string, unknown>> = []
+		const fetcher: Fetcher = async (url, init) => {
+			requests.push(url)
+			if (url.endsWith('/v1/capabilities')) return capabilities(2)
+			if (url.endsWith('/v1/executor-profile')) {
+				expect(JSON.parse(String(init.body))).toEqual({
+					hostname: 'fleet-host-1',
+				})
+				return Response.json({ executor_label: 'fleet-host-1' })
+			}
+			if (url.endsWith('/v1/time')) return Response.json({ server_time: new Date(nowMs).toISOString() })
+			if (url.endsWith('/v1/events:batch')) {
+				uploaded = JSON.parse(String(init.body)).events
+				return Response.json({
+					results: uploaded.map((event) => ({ event_id: event.event_id, status: 'accepted' })),
+				})
+			}
+			return Response.json(summary())
+		}
+		const engine = new SyncEngine({
+			store,
+			client: client(fetcher),
+			tokenProvider: provider(),
+			now: () => nowMs,
+			executorProfile: { kind: 'local', hostname: 'fleet-host-1' },
+		})
+		expect(engine.attributionForNewTurn('project-one')).toEqual({
+			schemaVersion: EVENT_SCHEMA_VERSION_V1,
+			projectSlug: null,
+		})
+		expect(await engine.runNow()).toEqual({ authoritativeSummary: true })
+		const event = store.record(
+			{ threadId: 'T-v2', messageId: '1', kind: 'start', atMs: nowMs + 1 },
+			undefined,
+			engine.attributionForNewTurn('project-one'),
+		)!
+		expect(event).toMatchObject({ schema_version: 2, project_slug: 'project-one' })
+		expect(await engine.runNow()).toEqual({ authoritativeSummary: true })
+		expect(uploaded).toEqual([event])
+		expect(requests.filter((url) => url.endsWith('/v1/executor-profile'))).toHaveLength(1)
+		expect(requests.findIndex((url) => url.endsWith('/v1/executor-profile'))).toBeLessThan(
+			requests.findIndex((url) => url.endsWith('/v1/events:batch')),
+		)
+		await engine.dispose()
+		store.close()
+	})
+
+	test('keeps the ADR-fixed amp-orb remote label without sending a hostname', async () => {
+		const store = new WorkHoursStore(databasePath())
+		const requests: Array<{ url: string; body: string }> = []
+		const fetcher: Fetcher = async (url, init) => {
+			requests.push({ url, body: String(init.body ?? '') })
+			if (url.endsWith('/v1/capabilities')) return capabilities(2)
+			if (url.endsWith('/v1/executor-profile')) throw new Error('remote profile must not bind')
+			if (url.endsWith('/v1/time')) return Response.json({ server_time: new Date(nowMs).toISOString() })
+			return Response.json(summary())
+		}
+		const engine = new SyncEngine({
+			store,
+			client: client(fetcher),
+			tokenProvider: provider(),
+			now: () => nowMs,
+			executorProfile: { kind: 'remote', executorLabel: REMOTE_EXECUTOR_LABEL },
+		})
+		expect(await engine.runNow()).toEqual({ authoritativeSummary: true })
+		expect(engine.attributionForNewTurn(null)).toEqual({
+			schemaVersion: EVENT_SCHEMA_VERSION_V2,
+			projectSlug: null,
+		})
+		expect(requests.some((request) => request.url.endsWith('/v1/executor-profile'))).toBeFalse()
+		expect(JSON.stringify(requests)).not.toContain('hostname')
+		await engine.dispose()
+		store.close()
+	})
+
+	test('switches only future starts to v1 while preserving queued and in-progress v2 rows', async () => {
+		const store = new WorkHoursStore(databasePath())
+		let preferredNewEventSchemaVersion: 1 | 2 = 2
+		let acceptedEventSchemaVersions: Array<1 | 2> = [1, 2]
+		const uploaded: Array<Record<string, unknown>> = []
+		const fetcher: Fetcher = async (url, init) => {
+			if (url.endsWith('/v1/capabilities')) {
+				return capabilities(preferredNewEventSchemaVersion, acceptedEventSchemaVersions)
+			}
+			if (url.endsWith('/v1/executor-profile')) {
+				return Response.json({ executor_label: 'fleet-host-1' })
+			}
+			if (url.endsWith('/v1/time')) return Response.json({ server_time: new Date(nowMs).toISOString() })
+			if (url.endsWith('/v1/events:batch')) {
+				const events: Array<Record<string, unknown>> = JSON.parse(String(init.body)).events
+				uploaded.push(...events)
+				return Response.json({
+					results: events.map((event) => ({ event_id: event.event_id, status: 'accepted' })),
+				})
+			}
+			return Response.json(summary())
+		}
+		const engine = new SyncEngine({
+			store,
+			client: client(fetcher),
+			tokenProvider: provider(),
+			now: () => nowMs,
+			executorProfile: { kind: 'local', hostname: 'fleet-host-1' },
+		})
+		await engine.runNow()
+		const start = store.record(
+			{ threadId: 'T-v2', messageId: '1', kind: 'start', atMs: nowMs + 1 },
+			undefined,
+			engine.attributionForNewTurn('project-before'),
+		)!
+		preferredNewEventSchemaVersion = 1
+		acceptedEventSchemaVersions = [2]
+		await engine.runNow()
+		expect(uploaded).toEqual([start])
+		expect(uploaded[0]).toMatchObject({ schema_version: 2, project_slug: 'project-before' })
+
+		const end = store.record(
+			{ threadId: 'T-v2', messageId: '1', kind: 'end', atMs: nowMs + 2, status: 'done' },
+			undefined,
+			engine.attributionForNewTurn(null),
+		)!
+		const newStart = store.record(
+			{ threadId: 'T-v1', messageId: '2', kind: 'start', atMs: nowMs + 3 },
+			undefined,
+			engine.attributionForNewTurn('project-after'),
+		)!
+		expect(end).toMatchObject({ schema_version: 2, project_slug: 'project-before' })
+		expect(newStart.schema_version).toBe(1)
+		expect(newStart).not.toHaveProperty('project_slug')
+		await engine.dispose()
+		store.close()
+	})
+
+	test('refuses to replay v2 rows when the service has no migration-aware capability', async () => {
+		const store = new WorkHoursStore(databasePath())
+		store.record(
+			{ threadId: 'T-v2', messageId: '1', kind: 'start', atMs: nowMs + 1 },
+			undefined,
+			{ schemaVersion: EVENT_SCHEMA_VERSION_V2, projectSlug: 'project-one' },
+		)
+		let batchRequests = 0
+		const fetcher: Fetcher = async (url) => {
+			if (url.endsWith('/v1/capabilities')) return new Response(null, { status: 404 })
+			if (url.endsWith('/v1/events:batch')) batchRequests += 1
+			return Response.json({ server_time: new Date(nowMs).toISOString() })
+		}
+		const engine = new SyncEngine({
+			store,
+			client: client(fetcher),
+			tokenProvider: provider(),
+			now: () => nowMs,
+			executorProfile: { kind: 'remote', executorLabel: REMOTE_EXECUTOR_LABEL },
+		})
+		expect(await engine.runNow()).toEqual({ authoritativeSummary: false, errorKind: 'protocol' })
+		expect(batchRequests).toBe(0)
+		expect(store.pendingEvents(10)[0]).toMatchObject({
+			schema_version: EVENT_SCHEMA_VERSION_V2,
+			project_slug: 'project-one',
+		})
+		await engine.dispose()
+		store.close()
+	})
+
 	test('uploads in source order and applies mixed partial success without deleting conflicts', async () => {
 		const store = new WorkHoursStore(databasePath())
 		const events = [record(store, 1), record(store, 2), record(store, 3)]

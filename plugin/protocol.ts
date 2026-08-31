@@ -1,11 +1,13 @@
-export const PROTOCOL_SCHEMA_VERSION = 1 as const
+export const EVENT_SCHEMA_VERSION_V1 = 1 as const
+export const EVENT_SCHEMA_VERSION_V2 = 2 as const
+export const SUMMARY_SCHEMA_VERSION = 1 as const
+export const CAPABILITIES_SCHEMA_VERSION = 1 as const
 export const MAX_CLIENT_CLOCK_SKEW_MS = 10 * 60 * 1_000
 export const REQUEST_TIMEOUT_MS = 10_000
 
 export type EventKind = 'agent.start' | 'agent.end'
 
-export type OutboxEvent = {
-	schema_version: typeof PROTOCOL_SCHEMA_VERSION
+type OutboxEventBase = {
 	event_id: string
 	source_instance_id: string
 	source_sequence: number
@@ -14,6 +16,13 @@ export type OutboxEvent = {
 	occurred_at: string
 	monotonic_duration_ms?: number
 }
+
+export type OutboxEvent =
+	| (OutboxEventBase & { schema_version: typeof EVENT_SCHEMA_VERSION_V1 })
+	| (OutboxEventBase & {
+			schema_version: typeof EVENT_SCHEMA_VERSION_V2
+			project_slug?: string
+		})
 
 export type DeliveryStatus = 'accepted' | 'duplicate' | 'conflict' | 'rejected'
 
@@ -30,10 +39,15 @@ export type SummaryPeriod = {
 }
 
 export type AuthoritativeSummary = {
-	schema_version: typeof PROTOCOL_SCHEMA_VERSION
+	schema_version: typeof SUMMARY_SCHEMA_VERSION
 	as_of: string
 	daily: SummaryPeriod
 	weekly: SummaryPeriod
+}
+
+export type ServiceCapabilities = {
+	acceptedEventSchemaVersions: Array<1 | 2>
+	preferredNewEventSchemaVersion: 1 | 2
 }
 
 export type ClockSample = {
@@ -81,6 +95,42 @@ export class CukupServiceClient {
 		}
 	}
 
+	async fetchCapabilities(token: string): Promise<ServiceCapabilities | undefined> {
+		const response = await this.#request('/v1/capabilities', token, { method: 'GET' }, true)
+		if (response.status === 404) return undefined
+		const body = await responseJSON(response)
+		const acceptedEventSchemaVersions = isRecord(body)
+			? body.accepted_event_schema_versions
+			: undefined
+		if (
+			!isRecord(body) ||
+			body.schema_version !== CAPABILITIES_SCHEMA_VERSION ||
+			!Array.isArray(acceptedEventSchemaVersions) ||
+			!acceptedEventSchemaVersions.every(isEventSchemaVersion) ||
+			!isEventSchemaVersion(body.preferred_new_event_schema_version)
+		) {
+			throw new ServiceRequestError('protocol', false)
+		}
+		return {
+			acceptedEventSchemaVersions: [...acceptedEventSchemaVersions],
+			preferredNewEventSchemaVersion: body.preferred_new_event_schema_version,
+		}
+	}
+
+	async bindExecutorProfile(token: string, hostname: string): Promise<void> {
+		if (!hostname || hostname.length > 255 || /\s/.test(hostname)) {
+			throw new ServiceRequestError('protocol', false)
+		}
+		const response = await this.#request('/v1/executor-profile', token, {
+			method: 'PUT',
+			body: JSON.stringify({ hostname }),
+		})
+		const body = await responseJSON(response)
+		if (!isRecord(body) || body.executor_label !== hostname) {
+			throw new ServiceRequestError('protocol', false)
+		}
+	}
+
 	async uploadBatch(token: string, events: readonly OutboxEvent[]): Promise<DeliveryResult[]> {
 		const response = await this.#request('/v1/events:batch', token, {
 			method: 'POST',
@@ -110,7 +160,12 @@ export class CukupServiceClient {
 		return parseSummary(await responseJSON(response))
 	}
 
-	async #request(path: string, token: string, init: RequestInit): Promise<Response> {
+	async #request(
+		path: string,
+		token: string,
+		init: RequestInit,
+		allowNotFound = false,
+	): Promise<Response> {
 		let response: Response
 		try {
 			response = await this.#fetch(new URL(path, this.#baseURL).toString(), {
@@ -126,7 +181,7 @@ export class CukupServiceClient {
 			throw new ServiceRequestError('network', true)
 		}
 
-		if (response.ok) return response
+		if (response.ok || (allowNotFound && response.status === 404)) return response
 		if (response.status === 401 || response.status === 403) {
 			throw new ServiceRequestError('authentication', false)
 		}
@@ -141,14 +196,14 @@ export class CukupServiceClient {
 export function parseSummary(value: unknown): AuthoritativeSummary {
 	if (
 		!isRecord(value) ||
-		value.schema_version !== PROTOCOL_SCHEMA_VERSION ||
+		value.schema_version !== SUMMARY_SCHEMA_VERSION ||
 		typeof value.as_of !== 'string'
 	) {
 		throw new ServiceRequestError('protocol', false)
 	}
 	parseTimestamp(value.as_of)
 	return {
-		schema_version: PROTOCOL_SCHEMA_VERSION,
+		schema_version: SUMMARY_SCHEMA_VERSION,
 		as_of: value.as_of,
 		daily: parseSummaryPeriod(value.daily),
 		weekly: parseSummaryPeriod(value.weekly),
@@ -210,6 +265,10 @@ function isDeliveryStatus(value: unknown): value is DeliveryStatus {
 
 function isMinutes(value: unknown): value is number {
 	return Number.isSafeInteger(value) && (value as number) >= 0
+}
+
+function isEventSchemaVersion(value: unknown): value is 1 | 2 {
+	return value === EVENT_SCHEMA_VERSION_V1 || value === EVENT_SCHEMA_VERSION_V2
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
