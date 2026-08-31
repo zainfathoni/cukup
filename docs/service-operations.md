@@ -28,7 +28,9 @@ Required deployment inputs:
 - `CUKUP_TLS_HOSTNAME`: dedicated service hostname;
 - `CUKUP_DATA_DIRECTORY`: persistent host directory (defaults to `/srv/example-cukup-data`);
 - `KAMAL_REGISTRY_USERNAME` and Kamal secret `KAMAL_REGISTRY_PASSWORD`;
-- Kamal secret `CUKUP_OIDC_ALLOWED_USER_ID`, containing only the exact permitted Amp `user_id`.
+- Kamal secret `CUKUP_OIDC_ALLOWED_USER_ID`, containing only the exact permitted Amp `user_id`;
+- Kamal secret `CUKUP_FLEET_HOSTNAMES`, containing the comma-separated exact canonical lowercase hostnames permitted to bind physical credentials;
+- `CUKUP_NEW_TURN_EVENT_SCHEMA_VERSION`, which must remain `1` until a separately reviewed plugin rollout is ready to snapshot v2 for future turns.
 
 The fixed OIDC issuer and audience are code constants, not deployment overrides. The container accepts HTTP only behind Kamal Proxy and requires `X-Forwarded-Proto: https` on `/v1/*`; Kamal Proxy owns public TLS. Direct Bun TLS is available outside this asset by setting both `CUKUP_TLS_CERT_PATH` and `CUKUP_TLS_KEY_PATH`. Never expose container port 3000 publicly.
 
@@ -41,7 +43,9 @@ docker build -f Dockerfile.service -t cukup-service-rc .
 
 After explicit deployment approval, verify minimal health through the final HTTPS hostname, then authenticated `/v1/time`, a disposable ingestion source, summary, and persistence across one normal restart. Do not paste the credential, JWT, headers, or response containing identity data into Fleet, GitHub, or an Amp thread.
 
-Record the deployed immutable image reference and the prior known-good reference for every release. To roll back application code, redeploy that prior reference with this separate Kamal config, leave the persistent volume in place, and repeat the health, authenticated time/summary, and restart checks. Do not replace SQLite merely to roll back the application: restore a backup only for a diagnosed data incident, using the stopped-service procedure below. Stop the rollback and preserve evidence if the prior version cannot read the current schema.
+Record the deployed immutable image reference and the prior known-good migration-aware reference for every release. SQLite `user_version=2` is the permanent compatibility floor: it transactionally preserves v1 rows while adding mixed v1/v2 events, nullable Project Slugs, physical labels, and attribution indexes. Startup is restart-safe, never lowers `user_version`, and fails closed on a schema newer than the binary supports. Never roll back to the old v1-only binary after migration.
+
+To roll back attribution, set `CUKUP_NEW_TURN_EVENT_SCHEMA_VERSION=1` so only future turns start as v1. The service must continue accepting delayed and in-progress v2 events. To roll back application code, deploy only a tested migration-aware reference against the existing persistent volume, then verify authenticated capabilities, time, mixed v1/v2 delayed replay, summary schema 1, labeled token rotation, and one further normal restart. Do not replace SQLite merely to roll back application behavior: restore a backup only for a diagnosed data incident, using the stopped-service procedure below.
 
 ## Physical-machine bearer lifecycle
 
@@ -54,7 +58,9 @@ bun run service:token issue /var/lib/cukup/cukup.sqlite > /secure-transfer/new-m
 
 Deliver the token through an approved narrow secret channel. Keep the nonsecret `token_id` for operations.
 
-Rotation atomically revokes the old token and transfers all its random source claims:
+The future plugin binds the bearer before its first v2 upload through `PUT /v1/executor-profile`. Binding is exact and immutable; an unrecognized hostname, rename attempt, or label already held by another active lineage fails without changing the credential. Configure the complete allowlist before enabling future v2 starts.
+
+Rotation atomically revokes the old token, copies its Executor Label to the replacement, and only then transfers all its random source claims:
 
 ```bash
 bun run service:token rotate TOKEN_ID /var/lib/cukup/cukup.sqlite > /secure-transfer/replacement-token.json
@@ -67,7 +73,7 @@ bun run service:token revoke TOKEN_ID /var/lib/cukup/cukup.sqlite
 bun run service:token list /var/lib/cukup/cukup.sqlite
 ```
 
-`list` emits only token IDs and lifecycle timestamps—never hashes or bearer values. A fresh Amp orb uses workload OIDC and must never receive a physical-machine token.
+`list` emits token IDs, lifecycle timestamps, and nullable Executor Labels—never hashes or bearer values. Treat its output as machine-identifying operational data. A fresh Amp orb uses workload OIDC, derives `amp-orb`, and must never receive a physical-machine token. Historical evidence is not rewritten: source ownership derives the current lineage label, and history from a never-bound physical lineage remains `unassigned-executor`.
 
 ## Integrity and online backup
 
@@ -97,7 +103,7 @@ Perform a clean restore drill periodically and before claiming production readin
 1. Retrieve one database/metadata pair from the off-site system into a new protected directory.
 2. Verify it before touching any service database.
 3. Restore to a new path, run integrity, start an isolated service against it, and authenticate with a designated drill credential.
-4. Confirm expected event count/summary and record only nonsensitive evidence (backup ID, dates, integrity result, and pass/fail).
+4. Confirm expected mixed-schema event count, summary schema 1, executor attribution, and token rotation; record only nonsensitive evidence (backup ID, dates, integrity result, and pass/fail).
 
 ```bash
 bun run service:db verify /retrieved/BACKUP.sqlite /retrieved/BACKUP.json
@@ -112,7 +118,7 @@ bun run service:db restore /retrieved/BACKUP.sqlite /var/lib/cukup/cukup.sqlite 
 bun run service:db integrity /var/lib/cukup/cukup.sqlite
 ```
 
-`--replace` removes stale WAL/SHM sidecars before the atomic replacement. Never run it against a live service. Restart, verify `/healthz`, authenticated `/v1/time`, summary, and persistence through one further normal restart. If integrity, checksum, authentication, or expected summary fails, stop and retain all artifacts; do not overwrite the backup or attempt repeated blind restores.
+`--replace` removes stale WAL/SHM sidecars before the atomic replacement. Never run it against a live service. A restored pre-migration `user_version=1` backup upgrades transactionally on startup; a post-migration backup remains version 2. Restart, verify `/healthz`, authenticated `/v1/capabilities` and `/v1/time`, delayed v1/v2 replay, summary schema 1, labeled rotation, and persistence through one further normal restart. If integrity, checksum, authentication, attribution, or expected summary fails, stop and retain all artifacts; do not overwrite the backup or attempt repeated blind restores.
 
 ## Incident boundaries
 

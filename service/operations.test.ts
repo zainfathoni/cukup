@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
+import { Database } from 'bun:sqlite'
 import { appendFileSync, copyFileSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -21,7 +22,7 @@ function workspace(): string {
 	return directory
 }
 
-function event(sequence: number): WorkEvent {
+function event(sequence: number, overrides: Partial<WorkEvent> = {}): WorkEvent {
 	return {
 		schemaVersion: 1,
 		eventId: `01990b2e-1c00-7000-8000-${String(sequence).padStart(12, '0')}`,
@@ -31,6 +32,7 @@ function event(sequence: number): WorkEvent {
 		kind: 'agent.start',
 		occurredAt: new Date(now).toISOString(),
 		occurredAtMs: now,
+		...overrides,
 	}
 }
 
@@ -41,7 +43,8 @@ test('creates a verified online SQLite snapshot and restores an independently re
 	const store = new ServiceStore(sourcePath)
 	const issued = store.issueBearer(now)
 	const principal = store.authenticateBearer(issued.token)!
-	store.ingest(principal, event(1), now)
+	store.bindExecutorLabel(issued.tokenId, 'workstation-a')
+	store.ingest(principal, event(1, { schemaVersion: 2, projectSlug: 'cukup-service' }), now)
 
 	const backup = backupDatabase(sourcePath, backupDirectory, {
 		nowMs: now,
@@ -51,7 +54,7 @@ test('creates a verified online SQLite snapshot and restores an independently re
 		backup_id: 'snapshot',
 		created_at: '2026-08-31T05:00:00.000Z',
 		integrity_check: 'ok',
-		sqlite_user_version: 1,
+		sqlite_user_version: 2,
 	})
 	expect(verifyBackup(backup.databasePath, backup.metadataPath)).toEqual(backup.metadata)
 
@@ -71,7 +74,7 @@ test('creates a verified online SQLite snapshot and restores an independently re
 	copyFileSync(backup.metadataPath, retrievedMetadata)
 	const restoredPath = join(directory, 'clean-restore', 'service.sqlite')
 	restoreDatabase(retrievedDatabase, restoredPath, { metadataPath: retrievedMetadata })
-	expect(inspectDatabase(restoredPath)).toEqual({ integrity: 'ok', userVersion: 1 })
+	expect(inspectDatabase(restoredPath)).toEqual({ integrity: 'ok', userVersion: 2 })
 
 	const restored = new ServiceStore(restoredPath)
 	expect(restored.authenticateBearer(issued.token)).toEqual({
@@ -79,7 +82,87 @@ test('creates a verified online SQLite snapshot and restores an independently re
 		tokenId: issued.tokenId,
 	})
 	expect(restored.events().map((value) => value.sourceSequence)).toEqual([1])
+	expect(restored.attributedEvents()[0]).toMatchObject({
+		schemaVersion: 2,
+		projectSlug: 'cukup-service',
+		executorLabel: 'workstation-a',
+	})
 	restored.close()
+})
+
+test('restores both pre-migration and post-migration backups into clean restartable databases', () => {
+	const directory = workspace()
+	const versionOnePath = join(directory, 'version-one.sqlite')
+	const versionOne = new Database(versionOnePath, { create: true, strict: true })
+	versionOne.exec(`
+		CREATE TABLE auth_tokens (
+			token_id TEXT PRIMARY KEY,
+			token_hash TEXT NOT NULL UNIQUE,
+			created_at TEXT NOT NULL,
+			revoked_at TEXT,
+			replaced_by TEXT REFERENCES auth_tokens(token_id)
+		) STRICT;
+		CREATE TABLE source_owners (
+			source_instance TEXT PRIMARY KEY,
+			owner_kind TEXT NOT NULL CHECK (owner_kind IN ('bearer', 'oidc')),
+			owner_id TEXT REFERENCES auth_tokens(token_id),
+			CHECK (
+				(owner_kind = 'bearer' AND owner_id IS NOT NULL) OR
+				(owner_kind = 'oidc' AND owner_id IS NULL)
+			)
+		) STRICT;
+		CREATE TABLE events (
+			event_id TEXT PRIMARY KEY,
+			schema_version INTEGER NOT NULL CHECK (schema_version = 1),
+			source_instance TEXT NOT NULL REFERENCES source_owners(source_instance),
+			source_sequence INTEGER NOT NULL CHECK (source_sequence >= 1),
+			session_id TEXT NOT NULL,
+			kind TEXT NOT NULL CHECK (kind IN ('agent.start', 'agent.end')),
+			occurred_at TEXT NOT NULL,
+			occurred_at_ms INTEGER NOT NULL,
+			monotonic_duration_ms INTEGER CHECK (monotonic_duration_ms IS NULL OR monotonic_duration_ms >= 0),
+			received_at TEXT NOT NULL,
+			received_at_ms INTEGER NOT NULL,
+			UNIQUE (source_instance, source_sequence)
+		) STRICT;
+		INSERT INTO source_owners VALUES ('7ebc7d16-3945-4e30-b46e-2c288d747f6f', 'oidc', NULL);
+		INSERT INTO events VALUES (
+			'01990b2e-1c00-7000-8000-000000000001', 1,
+			'7ebc7d16-3945-4e30-b46e-2c288d747f6f', 1,
+			'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'agent.start',
+			'2026-08-31T05:00:00.000Z', ${now}, NULL,
+			'2026-08-31T05:00:00.000Z', ${now}
+		);
+		PRAGMA user_version = 1;
+	`)
+	versionOne.close()
+
+	const pre = backupDatabase(versionOnePath, join(directory, 'pre-backups'), {
+		nowMs: now,
+		backupId: 'pre-migration',
+	})
+	expect(pre.metadata.sqlite_user_version).toBe(1)
+	const upgradedPath = join(directory, 'pre-restored', 'service.sqlite')
+	restoreDatabase(pre.databasePath, upgradedPath, { metadataPath: pre.metadataPath })
+	expect(inspectDatabase(upgradedPath).userVersion).toBe(1)
+	const upgraded = new ServiceStore(upgradedPath)
+	expect(upgraded.events()).toHaveLength(1)
+	expect(upgraded.attributedEvents()[0]?.executorLabel).toBe('amp-orb')
+	upgraded.close()
+	expect(inspectDatabase(upgradedPath).userVersion).toBe(2)
+
+	const post = backupDatabase(upgradedPath, join(directory, 'post-backups'), {
+		nowMs: now + 1,
+		backupId: 'post-migration',
+	})
+	expect(post.metadata.sqlite_user_version).toBe(2)
+	const postRestoredPath = join(directory, 'post-restored', 'service.sqlite')
+	restoreDatabase(post.databasePath, postRestoredPath, { metadataPath: post.metadataPath })
+	const postRestored = new ServiceStore(postRestoredPath)
+	expect(postRestored.events()).toEqual([
+		expect.objectContaining({ schemaVersion: 1, sourceSequence: 1 }),
+	])
+	postRestored.close()
 })
 
 test('fails closed on checksum damage and requires an explicit stopped-service replacement', () => {

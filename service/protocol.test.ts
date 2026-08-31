@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { parseBatch } from './protocol.ts'
+import { parseBatch, parseExecutorProfile } from './protocol.ts'
 
 const baseEvent = {
 	schema_version: 1,
@@ -12,7 +12,7 @@ const baseEvent = {
 }
 
 describe('event protocol validation', () => {
-	test('accepts only the append-only v1 schema and canonicalizes random identifiers', () => {
+	test('accepts the unchanged append-only v1 schema and canonicalizes random identifiers', () => {
 		const parsed = parseBatch({
 			events: [
 				{
@@ -34,6 +34,25 @@ describe('event protocol validation', () => {
 				}),
 			}),
 		])
+	})
+
+	test('accepts the separate closed v2 schema with an optional canonical project slug', () => {
+		for (const project_slug of ['cukup-service', undefined]) {
+			const parsed = parseBatch({
+				events: [{ ...baseEvent, schema_version: 2, ...(project_slug ? { project_slug } : {}) }],
+			})
+			expect(parsed?.[0]).toEqual(
+				expect.objectContaining({
+					event: expect.objectContaining({
+						schemaVersion: 2,
+						...(project_slug ? { projectSlug: project_slug } : {}),
+					}),
+				}),
+			)
+		}
+		expect(parseBatch({ events: [{ ...baseEvent, project_slug: 'cukup' }] })?.[0]).toEqual(
+			expect.objectContaining({ reason: 'prohibited_field' }),
+		)
 	})
 
 	test('accepts deterministic UUIDv5 event and session identities from legacy migration', () => {
@@ -92,7 +111,7 @@ describe('event protocol validation', () => {
 		expect(parseBatch([])).toBeUndefined()
 		expect(parseBatch({ events: [], extra: true })).toBeUndefined()
 		for (const override of [
-			{ schema_version: 2 },
+			{ schema_version: 3 },
 			{ event_id: '01990b2e-1c00-4000-8000-000000000001' },
 			{ source_instance_id: '01990b2e-1c00-7000-8000-000000000001' },
 			{ source_sequence: 0 },
@@ -106,5 +125,16 @@ describe('event protocol validation', () => {
 				expect.objectContaining({ reason: 'invalid_event' }),
 			])
 		}
+		for (const project_slug of ['', 'Cukup', '-cukup', 'cukup-', 'cukup--service', 'cukup!']) {
+			expect(
+				parseBatch({ events: [{ ...baseEvent, schema_version: 2, project_slug }] }),
+			).toEqual([expect.objectContaining({ reason: 'invalid_event' })])
+		}
+	})
+
+	test('accepts only the exact executor profile envelope', () => {
+		expect(parseExecutorProfile({ hostname: 'workstation-a' })).toBe('workstation-a')
+		expect(parseExecutorProfile({ hostname: 'workstation-a', extra: true })).toBeUndefined()
+		expect(parseExecutorProfile({ hostname: 1 })).toBeUndefined()
 	})
 })

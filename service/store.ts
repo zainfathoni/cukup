@@ -3,10 +3,63 @@ import { chmodSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { generateBearerToken, hashBearerToken, type IssuedToken } from './auth.ts'
 import { MAX_CLOCK_SKEW_MS, defaultServiceDatabasePath } from './config.ts'
-import type { IngestOutcome, Principal, StoredWorkEvent, WorkEvent } from './types.ts'
+import type {
+	AttributedStoredWorkEvent,
+	ExecutorBindingOutcome,
+	IngestOutcome,
+	Principal,
+	StoredWorkEvent,
+	WorkEvent,
+} from './types.ts'
+
+const DATABASE_VERSION = 2
+
+const EXECUTOR_LABEL_CHECK = `
+	CHECK (
+		executor_label IS NULL OR (
+			length(executor_label) BETWEEN 1 AND 253 AND
+			executor_label = lower(executor_label) AND
+			executor_label NOT GLOB '*[^a-z0-9.-]*' AND
+			executor_label NOT GLOB '.*' AND executor_label NOT GLOB '*.' AND
+			executor_label NOT GLOB '-*' AND executor_label NOT GLOB '*-' AND
+			executor_label NOT GLOB '*..*' AND
+			executor_label NOT GLOB '*.-*' AND executor_label NOT GLOB '*-.*' AND
+			executor_label NOT IN ('amp-orb', 'unassigned-executor')
+		)
+	)`
+
+const EVENTS_V2_TABLE = `
+	CREATE TABLE events (
+		event_id TEXT PRIMARY KEY,
+		schema_version INTEGER NOT NULL CHECK (schema_version IN (1, 2)),
+		project_slug TEXT,
+		source_instance TEXT NOT NULL REFERENCES source_owners(source_instance),
+		source_sequence INTEGER NOT NULL CHECK (source_sequence >= 1),
+		session_id TEXT NOT NULL,
+		kind TEXT NOT NULL CHECK (kind IN ('agent.start', 'agent.end')),
+		occurred_at TEXT NOT NULL,
+		occurred_at_ms INTEGER NOT NULL,
+		monotonic_duration_ms INTEGER CHECK (monotonic_duration_ms IS NULL OR monotonic_duration_ms >= 0),
+		received_at TEXT NOT NULL,
+		received_at_ms INTEGER NOT NULL,
+		CHECK (
+			(schema_version = 1 AND project_slug IS NULL) OR
+			(schema_version = 2 AND (
+				project_slug IS NULL OR (
+					length(project_slug) BETWEEN 1 AND 64 AND
+					project_slug = lower(project_slug) AND
+					project_slug NOT GLOB '*[^a-z0-9-]*' AND
+					project_slug NOT GLOB '-*' AND project_slug NOT GLOB '*-' AND
+					project_slug NOT GLOB '*--*'
+				)
+			))
+		),
+		UNIQUE (source_instance, source_sequence)
+	) STRICT`
 
 type EventRow = {
-	schemaVersion: 1
+	schemaVersion: 1 | 2
+	projectSlug: string | null
 	eventId: string
 	sourceInstance: string
 	sourceSequence: number
@@ -19,6 +72,7 @@ type EventRow = {
 	receivedAtMs: number
 }
 
+type AttributedEventRow = EventRow & { executorLabel: string }
 type SourceOwnerRow = { ownerKind: 'bearer' | 'oidc'; ownerId: string | null }
 
 export class ServiceStore {
@@ -33,42 +87,12 @@ export class ServiceStore {
 		this.#database.exec('PRAGMA busy_timeout = 5000')
 		this.#database.exec('PRAGMA foreign_keys = ON')
 		this.#database.exec('PRAGMA journal_mode = WAL')
-		this.#database.exec(`
-			CREATE TABLE IF NOT EXISTS auth_tokens (
-				token_id TEXT PRIMARY KEY,
-				token_hash TEXT NOT NULL UNIQUE,
-				created_at TEXT NOT NULL,
-				revoked_at TEXT,
-				replaced_by TEXT REFERENCES auth_tokens(token_id)
-			) STRICT;
-
-			CREATE TABLE IF NOT EXISTS source_owners (
-				source_instance TEXT PRIMARY KEY,
-				owner_kind TEXT NOT NULL CHECK (owner_kind IN ('bearer', 'oidc')),
-				owner_id TEXT REFERENCES auth_tokens(token_id),
-				CHECK (
-					(owner_kind = 'bearer' AND owner_id IS NOT NULL) OR
-					(owner_kind = 'oidc' AND owner_id IS NULL)
-				)
-			) STRICT;
-
-			CREATE TABLE IF NOT EXISTS events (
-				event_id TEXT PRIMARY KEY,
-				schema_version INTEGER NOT NULL CHECK (schema_version = 1),
-				source_instance TEXT NOT NULL REFERENCES source_owners(source_instance),
-				source_sequence INTEGER NOT NULL CHECK (source_sequence >= 1),
-				session_id TEXT NOT NULL,
-				kind TEXT NOT NULL CHECK (kind IN ('agent.start', 'agent.end')),
-				occurred_at TEXT NOT NULL,
-				occurred_at_ms INTEGER NOT NULL,
-				monotonic_duration_ms INTEGER CHECK (monotonic_duration_ms IS NULL OR monotonic_duration_ms >= 0),
-				received_at TEXT NOT NULL,
-				received_at_ms INTEGER NOT NULL,
-				UNIQUE (source_instance, source_sequence)
-			) STRICT;
-
-			PRAGMA user_version = 1;
-		`)
+		try {
+			this.#migrate()
+		} catch (error) {
+			this.#database.close()
+			throw error
+		}
 	}
 
 	issueBearer(nowMs = Date.now(), issued = generateBearerToken()): IssuedToken {
@@ -84,8 +108,8 @@ export class ServiceStore {
 	rotateBearer(tokenId: string, nowMs = Date.now(), issued = generateBearerToken()): IssuedToken {
 		const rotate = this.#database.transaction(() => {
 			const current = this.#database
-				.query<{ tokenId: string }, [string]>(
-					`SELECT token_id AS tokenId FROM auth_tokens
+				.query<{ tokenId: string; executorLabel: string | null }, [string]>(
+					`SELECT token_id AS tokenId, executor_label AS executorLabel FROM auth_tokens
 					 WHERE token_id = ? AND revoked_at IS NULL`,
 				)
 				.get(tokenId)
@@ -93,16 +117,19 @@ export class ServiceStore {
 			const at = new Date(nowMs).toISOString()
 			this.#database
 				.query(
-					`INSERT INTO auth_tokens (token_id, token_hash, created_at)
-					 VALUES (?, ?, ?)`,
+					`UPDATE auth_tokens SET revoked_at = ?
+					 WHERE token_id = ? AND revoked_at IS NULL`,
 				)
-				.run(issued.tokenId, issued.tokenHash, at)
+				.run(at, tokenId)
 			this.#database
 				.query(
-					`UPDATE auth_tokens SET revoked_at = ?, replaced_by = ?
-					 WHERE token_id = ?`,
+					`INSERT INTO auth_tokens (token_id, token_hash, created_at, executor_label)
+					 VALUES (?, ?, ?, ?)`,
 				)
-				.run(at, issued.tokenId, tokenId)
+				.run(issued.tokenId, issued.tokenHash, at, current.executorLabel)
+			this.#database
+				.query(`UPDATE auth_tokens SET replaced_by = ? WHERE token_id = ?`)
+				.run(issued.tokenId, tokenId)
 			this.#database
 				.query(`UPDATE source_owners SET owner_id = ? WHERE owner_kind = 'bearer' AND owner_id = ?`)
 				.run(issued.tokenId, tokenId)
@@ -131,11 +158,43 @@ export class ServiceStore {
 		return row ? { kind: 'bearer', tokenId: row.tokenId } : undefined
 	}
 
+	bindExecutorLabel(tokenId: string, executorLabel: string): ExecutorBindingOutcome {
+		const bind = this.#database.transaction((): ExecutorBindingOutcome => {
+			const current = this.#database
+				.query<{ executorLabel: string | null }, [string]>(
+					`SELECT executor_label AS executorLabel FROM auth_tokens
+					 WHERE token_id = ? AND revoked_at IS NULL`,
+				)
+				.get(tokenId)
+			if (!current) return { outcome: 'conflict' }
+			if (current.executorLabel === executorLabel) {
+				return { outcome: 'bound', executorLabel }
+			}
+			if (current.executorLabel !== null) return { outcome: 'conflict' }
+			const claimed = this.#database
+				.query<{ value: number }, [string, string]>(
+					`SELECT 1 AS value FROM auth_tokens
+					 WHERE executor_label = ? AND revoked_at IS NULL AND token_id <> ?`,
+				)
+				.get(executorLabel, tokenId)
+			if (claimed) return { outcome: 'conflict' }
+			this.#database
+				.query(
+					`UPDATE auth_tokens SET executor_label = ?
+					 WHERE token_id = ? AND revoked_at IS NULL AND executor_label IS NULL`,
+				)
+				.run(executorLabel, tokenId)
+			return { outcome: 'bound', executorLabel }
+		})
+		return bind.immediate()
+	}
+
 	listBearerMetadata(): Array<{
 		tokenId: string
 		createdAt: string
 		revokedAt: string | null
 		replacedBy: string | null
+		executorLabel: string | null
 	}> {
 		return this.#database
 			.query<
@@ -144,11 +203,13 @@ export class ServiceStore {
 					createdAt: string
 					revokedAt: string | null
 					replacedBy: string | null
+					executorLabel: string | null
 				},
 				[]
 			>(
 				`SELECT token_id AS tokenId, created_at AS createdAt,
-				        revoked_at AS revokedAt, replaced_by AS replacedBy
+				        revoked_at AS revokedAt, replaced_by AS replacedBy,
+				        executor_label AS executorLabel
 				 FROM auth_tokens ORDER BY created_at, token_id`,
 			)
 			.all()
@@ -177,6 +238,34 @@ export class ServiceStore {
 				return immutableEventEquals(bySequence, event)
 					? { outcome: 'duplicate', receivedAt: bySequence.receivedAt }
 					: { outcome: 'conflicted', reason: 'source_sequence_conflict' }
+			}
+			if (event.schemaVersion === 2 && principal.kind === 'bearer') {
+				const profile = this.#database
+					.query<{ executorLabel: string | null }, [string]>(
+						`SELECT executor_label AS executorLabel FROM auth_tokens
+						 WHERE token_id = ? AND revoked_at IS NULL`,
+					)
+					.get(principal.tokenId)
+				if (!profile?.executorLabel) {
+					return { outcome: 'rejected', reason: 'executor_profile_required' }
+				}
+			}
+			if (event.kind === 'agent.end') {
+				const start = this.#database
+					.query<Pick<EventRow, 'schemaVersion' | 'projectSlug'>, [string, string]>(
+						`SELECT schema_version AS schemaVersion, project_slug AS projectSlug
+						 FROM events
+						 WHERE source_instance = ? AND session_id = ? AND kind = 'agent.start'
+						 ORDER BY source_sequence LIMIT 1`,
+					)
+					.get(event.sourceInstance, event.sessionId)
+				if (
+					start &&
+					(start.schemaVersion !== event.schemaVersion ||
+						start.projectSlug !== (event.projectSlug ?? null))
+				) {
+					return { outcome: 'rejected', reason: 'session_attribution_mismatch' }
+				}
 			}
 			const latestSequence = this.#database
 				.query<{ value: number | null }, [string]>(
@@ -211,14 +300,15 @@ export class ServiceStore {
 			this.#database
 				.query(
 					`INSERT INTO events (
-						event_id, schema_version, source_instance, source_sequence,
+						event_id, schema_version, project_slug, source_instance, source_sequence,
 						session_id, kind, occurred_at, occurred_at_ms,
 						monotonic_duration_ms, received_at, received_at_ms
-					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				)
 				.run(
 					event.eventId,
 					event.schemaVersion,
+					event.projectSlug ?? null,
 					event.sourceInstance,
 					event.sourceSequence,
 					event.sessionId,
@@ -237,7 +327,8 @@ export class ServiceStore {
 	events(): StoredWorkEvent[] {
 		return this.#database
 			.query<EventRow, []>(
-				`SELECT schema_version AS schemaVersion, event_id AS eventId,
+				`SELECT schema_version AS schemaVersion, project_slug AS projectSlug,
+				        event_id AS eventId,
 				        source_instance AS sourceInstance, source_sequence AS sourceSequence,
 				        session_id AS sessionId, kind, occurred_at AS occurredAt,
 				        occurred_at_ms AS occurredAtMs,
@@ -246,21 +337,30 @@ export class ServiceStore {
 				 FROM events ORDER BY source_instance, source_sequence`,
 			)
 			.all()
-			.map((row) => ({
-				schemaVersion: row.schemaVersion,
-				eventId: row.eventId,
-				sourceInstance: row.sourceInstance,
-				sourceSequence: row.sourceSequence,
-				sessionId: row.sessionId,
-				kind: row.kind,
-				occurredAt: row.occurredAt,
-				occurredAtMs: row.occurredAtMs,
-				...(row.monotonicDurationMs === null
-					? {}
-					: { monotonicDurationMs: row.monotonicDurationMs }),
-				receivedAt: row.receivedAt,
-				receivedAtMs: row.receivedAtMs,
-			}))
+			.map(storedEvent)
+	}
+
+	attributedEvents(): AttributedStoredWorkEvent[] {
+		return this.#database
+			.query<AttributedEventRow, []>(
+				`SELECT e.schema_version AS schemaVersion, e.project_slug AS projectSlug,
+				        e.event_id AS eventId, e.source_instance AS sourceInstance,
+				        e.source_sequence AS sourceSequence, e.session_id AS sessionId,
+				        e.kind, e.occurred_at AS occurredAt,
+				        e.occurred_at_ms AS occurredAtMs,
+				        e.monotonic_duration_ms AS monotonicDurationMs,
+				        e.received_at AS receivedAt, e.received_at_ms AS receivedAtMs,
+				        CASE source_owners.owner_kind
+				          WHEN 'oidc' THEN 'amp-orb'
+				          ELSE COALESCE(auth_tokens.executor_label, 'unassigned-executor')
+				        END AS executorLabel
+				 FROM events e
+				 JOIN source_owners ON source_owners.source_instance = e.source_instance
+				 LEFT JOIN auth_tokens ON auth_tokens.token_id = source_owners.owner_id
+				 ORDER BY e.source_instance, e.source_sequence`,
+			)
+			.all()
+			.map((row) => ({ ...storedEvent(row), executorLabel: row.executorLabel }))
 	}
 
 	integrityCheck(): string {
@@ -272,10 +372,95 @@ export class ServiceStore {
 		this.#database.close()
 	}
 
+	#migrate(): void {
+		const startupVersion = this.#database
+			.query<{ user_version: number }, []>('PRAGMA user_version')
+			.get()!.user_version
+		if (startupVersion > DATABASE_VERSION) {
+			throw new Error(
+				`Database schema version ${startupVersion} is newer than supported version ${DATABASE_VERSION}`,
+			)
+		}
+		if (startupVersion === DATABASE_VERSION) return
+
+		const migrate = this.#database.transaction(() => {
+			const version = this.#database
+				.query<{ user_version: number }, []>('PRAGMA user_version')
+				.get()!.user_version
+			if (version > DATABASE_VERSION) {
+				throw new Error(
+					`Database schema version ${version} is newer than supported version ${DATABASE_VERSION}`,
+				)
+			}
+			if (version === DATABASE_VERSION) return
+			if (version === 0) {
+				const tableCount = this.#database
+					.query<{ value: number }, []>(
+						`SELECT COUNT(*) AS value FROM sqlite_schema
+						 WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`,
+					)
+					.get()!.value
+				if (tableCount !== 0) throw new Error('Unversioned service database is not empty')
+				this.#database.exec(`
+					CREATE TABLE auth_tokens (
+						token_id TEXT PRIMARY KEY,
+						token_hash TEXT NOT NULL UNIQUE,
+						created_at TEXT NOT NULL,
+						revoked_at TEXT,
+						replaced_by TEXT REFERENCES auth_tokens(token_id),
+						executor_label TEXT ${EXECUTOR_LABEL_CHECK}
+					) STRICT;
+
+					CREATE TABLE source_owners (
+						source_instance TEXT PRIMARY KEY,
+						owner_kind TEXT NOT NULL CHECK (owner_kind IN ('bearer', 'oidc')),
+						owner_id TEXT REFERENCES auth_tokens(token_id),
+						CHECK (
+							(owner_kind = 'bearer' AND owner_id IS NOT NULL) OR
+							(owner_kind = 'oidc' AND owner_id IS NULL)
+						)
+					) STRICT;
+
+					${EVENTS_V2_TABLE};
+				`)
+			} else if (version === 1) {
+				this.#database.exec(`
+					ALTER TABLE auth_tokens ADD COLUMN executor_label TEXT ${EXECUTOR_LABEL_CHECK};
+					ALTER TABLE events RENAME TO events_v1;
+					${EVENTS_V2_TABLE};
+					INSERT INTO events (
+						event_id, schema_version, project_slug, source_instance, source_sequence,
+						session_id, kind, occurred_at, occurred_at_ms,
+						monotonic_duration_ms, received_at, received_at_ms
+					)
+					SELECT event_id, schema_version, NULL, source_instance, source_sequence,
+					       session_id, kind, occurred_at, occurred_at_ms,
+					       monotonic_duration_ms, received_at, received_at_ms
+					FROM events_v1;
+					DROP TABLE events_v1;
+				`)
+			}
+
+			this.#database.exec(`
+				CREATE UNIQUE INDEX auth_tokens_active_executor_label
+					ON auth_tokens(executor_label)
+					WHERE revoked_at IS NULL AND executor_label IS NOT NULL;
+				CREATE INDEX source_owners_bearer_owner
+					ON source_owners(owner_id) WHERE owner_kind = 'bearer';
+				CREATE INDEX events_occurred_at_ms ON events(occurred_at_ms);
+				CREATE INDEX events_project_slug_occurred_at_ms
+					ON events(project_slug, occurred_at_ms) WHERE project_slug IS NOT NULL;
+				PRAGMA user_version = ${DATABASE_VERSION};
+			`)
+		})
+		migrate.immediate()
+	}
+
 	#eventById(eventId: string): EventRow | null {
 		return this.#database
 			.query<EventRow, [string]>(
-				`SELECT schema_version AS schemaVersion, event_id AS eventId,
+				`SELECT schema_version AS schemaVersion, project_slug AS projectSlug,
+				        event_id AS eventId,
 				        source_instance AS sourceInstance, source_sequence AS sourceSequence,
 				        session_id AS sessionId, kind, occurred_at AS occurredAt,
 				        occurred_at_ms AS occurredAtMs,
@@ -289,7 +474,8 @@ export class ServiceStore {
 	#eventBySequence(sourceInstance: string, sourceSequence: number): EventRow | null {
 		return this.#database
 			.query<EventRow, [string, number]>(
-				`SELECT schema_version AS schemaVersion, event_id AS eventId,
+				`SELECT schema_version AS schemaVersion, project_slug AS projectSlug,
+				        event_id AS eventId,
 				        source_instance AS sourceInstance, source_sequence AS sourceSequence,
 				        session_id AS sessionId, kind, occurred_at AS occurredAt,
 				        occurred_at_ms AS occurredAtMs,
@@ -311,6 +497,7 @@ function principalOwns(owner: SourceOwnerRow, principal: Principal): boolean {
 function immutableEventEquals(row: EventRow, event: WorkEvent): boolean {
 	return (
 		row.schemaVersion === event.schemaVersion &&
+		row.projectSlug === (event.projectSlug ?? null) &&
 		row.eventId === event.eventId &&
 		row.sourceInstance === event.sourceInstance &&
 		row.sourceSequence === event.sourceSequence &&
@@ -320,4 +507,23 @@ function immutableEventEquals(row: EventRow, event: WorkEvent): boolean {
 		row.occurredAtMs === event.occurredAtMs &&
 		row.monotonicDurationMs === (event.monotonicDurationMs ?? null)
 	)
+}
+
+function storedEvent(row: EventRow): StoredWorkEvent {
+	return {
+		schemaVersion: row.schemaVersion,
+		...(row.projectSlug === null ? {} : { projectSlug: row.projectSlug }),
+		eventId: row.eventId,
+		sourceInstance: row.sourceInstance,
+		sourceSequence: row.sourceSequence,
+		sessionId: row.sessionId,
+		kind: row.kind,
+		occurredAt: row.occurredAt,
+		occurredAtMs: row.occurredAtMs,
+		...(row.monotonicDurationMs === null
+			? {}
+			: { monotonicDurationMs: row.monotonicDurationMs }),
+		receivedAt: row.receivedAt,
+		receivedAtMs: row.receivedAtMs,
+	}
 }

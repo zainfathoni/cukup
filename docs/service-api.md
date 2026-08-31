@@ -1,4 +1,4 @@
-# Shared service v1 API
+# Shared service API
 
 The release-candidate service is the cross-source authority for Cukup work time. It is not deployed by this repository change. Production configuration is fixed to:
 
@@ -42,9 +42,39 @@ Returns a sample for client request/response clock-offset estimation:
 
 Clients should bracket this request with monotonic local times and use the midpoint to estimate offset.
 
+## `GET /v1/capabilities`
+
+Returns the migration-aware ingestion floor and the independently switchable schema for future turn starts:
+
+```json
+{
+  "schema_version": 1,
+  "accepted_event_schema_versions": [1, 2],
+  "preferred_new_event_schema_version": 1
+}
+```
+
+The response schema remains 1. Event schemas 1 and 2 are accepted permanently so delayed outbox rows can converge. `preferred_new_event_schema_version` defaults to 1 and is controlled by `CUKUP_NEW_TURN_EVENT_SCHEMA_VERSION`; a future plugin may snapshot 2 only when this value is 2. Changing it back to 1 affects only future starts and never disables replay of queued or in-progress v2 rows.
+
+## `PUT /v1/executor-profile`
+
+Physical bearer callers bind their Bearer Lineage once, before uploading v2 events. The request is an exact closed envelope containing the unmodified local `hostname()` value:
+
+```json
+{"hostname":"workstation-a"}
+```
+
+The hostname must exactly match one canonical lowercase hostname in `CUKUP_FLEET_HOSTNAMES`. The service does not trim, lowercase, or otherwise guess the submitted value. A new binding and an exact retry both return:
+
+```json
+{"executor_label":"workstation-a"}
+```
+
+A different binding for the same active lineage or a label held by another active lineage returns `409 {"error":"executor_profile_conflict"}`. A malformed or unrecognized profile returns `422 {"error":"invalid_executor_profile"}` without reflecting a label. Workload OIDC returns `403 {"error":"physical_bearer_required"}` and never accepts a hostname; OIDC-owned evidence derives the Executor Label `amp-orb`. A physical v2 event submitted before binding is rejected, while existing physical v1 ingestion remains unchanged.
+
 ## `POST /v1/events:batch`
 
-The request root contains only `events` and is limited to 1 MiB. Records for each source must be in nondecreasing source-sequence order.
+The request root contains only `events` and is limited to 1 MiB. Records for each source must be in nondecreasing source-sequence order. Schema v1 remains byte-for-byte unchanged:
 
 ```json
 {
@@ -63,13 +93,33 @@ The request root contains only `events` and is limited to 1 MiB. Records for eac
 }
 ```
 
+Schema v2 has the same fields and adds only optional `project_slug`:
+
+```json
+{
+  "events": [
+    {
+      "schema_version": 2,
+      "event_id": "01990b2e-1c00-7000-8000-000000000002",
+      "source_instance_id": "7ebc7d16-3945-4e30-b46e-2c288d747f6f",
+      "source_sequence": 2,
+      "session_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "kind": "agent.start",
+      "occurred_at": "2026-08-31T05:01:00.000Z",
+      "project_slug": "cukup-service"
+    }
+  ]
+}
+```
+
 - New `event_id` values are UUIDv7. Deterministically migrated legacy events use namespace-derived UUIDv5 values.
 - `source_instance_id` is an independently random RFC 4122 UUIDv4. New `session_id` values are random UUIDv4 values; deterministically migrated legacy sessions use namespace-derived UUIDv5 values. They must reveal no machine, fleet, host, user, repository, project, thread, or message identity.
 - `source_sequence` is a positive safe integer, monotonic within one source.
 - `kind` is `agent.start` or `agent.end`.
 - `monotonic_duration_ms` is optional nonnegative monotonic evidence on a completed turn. When present, aggregation derives the completion endpoint from the start plus this duration so a wall-clock adjustment during the turn cannot distort worked time.
+- v2 `project_slug`, when present, is 1–64 characters matching `[a-z0-9]+(?:-[a-z0-9]+)*`. Absence means Unassigned. v1 does not permit this field.
 
-The schema is closed. Unknown fields are rejected per record, preventing hostnames, usernames, repository/project IDs, thread/message IDs, prompts/content, model names, and fleet-identifying values from crossing the service boundary.
+Each event version is a separate closed schema. Unknown fields are rejected per record, preventing hostnames, usernames, repository/project IDs other than the explicit v2 slug, thread/message IDs, prompts/content, model names, and fleet-identifying values from crossing the event boundary. A v2 end must have the same schema and Project Slug as its accepted start.
 
 The response contains exactly one result in request order for every input event when the root request is valid:
 
@@ -89,13 +139,15 @@ Outcomes:
 - `accepted`: inserted once; the client may remove it from its outbox.
 - `duplicate`: immutable payload exactly matches either identity; the client may remove it.
 - `conflict`: either immutable identity mismatched; accepted data is never overwritten and the client must retain/surface the record.
-- `rejected`: malformed/prohibited/order records, source authorization mismatch, or clock skew; the client must retain/surface the record.
+- `rejected`: malformed/prohibited/order records, source authorization mismatch, missing physical v2 profile, turn-attribution mismatch, or clock skew; the client must retain/surface the record.
 
 The wire result deliberately contains only `event_id` and `status`, matching the plugin protocol. The database still preserves the first `received_at`, and service tests distinguish both immutable conflict identities and every rejection boundary internally.
 
-Exact replay is checked first, so replaying old accepted batches remains a successful no-op. Delayed historical evidence is accepted for offline convergence. Before upload, the plugin uses authenticated `/v1/time` sampling to surface local clocks more than 10 minutes ahead or behind; the service independently rejects evidence dated more than 10 minutes in the future. Timestamps are never silently rewritten, and aggregation clips intervals at current server time.
+Exact replay compares every immutable row field, including event schema and nullable Project Slug, so replaying unchanged old accepted batches remains a successful no-op while reusing either identity with another schema or slug conflicts. Delayed historical v1 and v2 evidence is accepted for offline convergence. Before upload, the plugin uses authenticated `/v1/time` sampling to surface local clocks more than 10 minutes ahead or behind; the service independently rejects evidence dated more than 10 minutes in the future. Timestamps are never silently rewritten, and aggregation clips intervals at current server time.
 
 ## `GET /v1/summary`
+
+The summary response remains schema 1 regardless of the event schemas contributing evidence:
 
 ```json
 {

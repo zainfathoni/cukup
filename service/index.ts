@@ -1,6 +1,11 @@
 import { createApp } from './app.ts'
 import { OidcVerifier } from './auth.ts'
-import { configuredAllowedOidcUserId, defaultServiceDatabasePath } from './config.ts'
+import {
+	configuredAllowedOidcUserId,
+	configuredFleetHostnames,
+	configuredNewTurnEventSchemaVersion,
+	defaultServiceDatabasePath,
+} from './config.ts'
 import { ServiceLogger } from './logger.ts'
 import { ServiceStore } from './store.ts'
 
@@ -20,6 +25,8 @@ if (!directTls && !behindTlsProxy && !loopbackOnly) {
 }
 
 const allowedOidcUserId = configuredAllowedOidcUserId()
+const fleetHostnames = configuredFleetHostnames()
+const preferredNewEventSchemaVersion = configuredNewTurnEventSchemaVersion()
 const store = new ServiceStore(defaultServiceDatabasePath())
 const logger = new ServiceLogger()
 const app = createApp({
@@ -28,6 +35,8 @@ const app = createApp({
 	logger,
 	requireHttps: !loopbackOnly,
 	trustTlsProxy: behindTlsProxy,
+	fleetHostnames,
+	preferredNewEventSchemaVersion,
 })
 
 const server = Bun.serve({

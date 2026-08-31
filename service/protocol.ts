@@ -1,8 +1,9 @@
+import { isCanonicalProjectSlug } from './config.ts'
 import type { IngestOutcome, WorkEvent } from './types.ts'
 
 export const MAX_REQUEST_BYTES = 1_048_576
 
-const EVENT_FIELDS = new Set([
+const EVENT_V1_FIELDS = new Set([
 	'schema_version',
 	'event_id',
 	'source_instance_id',
@@ -12,6 +13,7 @@ const EVENT_FIELDS = new Set([
 	'occurred_at',
 	'monotonic_duration_ms',
 ])
+const EVENT_V2_FIELDS = new Set([...EVENT_V1_FIELDS, 'project_slug'])
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const UUID_V5_OR_V7 =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[57][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -30,6 +32,13 @@ export type ParsedBatchEntry =
 export type BatchResult = {
 	event_id: string
 	status: 'accepted' | 'duplicate' | 'conflict' | 'rejected'
+}
+
+export function parseExecutorProfile(value: unknown): string | undefined {
+	if (!isRecord(value) || Object.keys(value).length !== 1 || typeof value.hostname !== 'string') {
+		return undefined
+	}
+	return value.hostname
 }
 
 export function parseBatch(value: unknown): ParsedBatchEntry[] | undefined {
@@ -65,11 +74,12 @@ function parseEvent(value: unknown, index: number): ParsedBatchEntry {
 		typeof value.event_id === 'string' && UUID_V5_OR_V7.test(value.event_id)
 			? value.event_id
 			: undefined
-	if (Object.keys(value).some((key) => !EVENT_FIELDS.has(key))) {
+	const eventFields = value.schema_version === 2 ? EVENT_V2_FIELDS : EVENT_V1_FIELDS
+	if (Object.keys(value).some((key) => !eventFields.has(key))) {
 		return { index, ...(eventId ? { eventId } : {}), reason: 'prohibited_field' }
 	}
 	if (
-		value.schema_version !== 1 ||
+		(value.schema_version !== 1 && value.schema_version !== 2) ||
 		typeof value.event_id !== 'string' ||
 		!UUID_V5_OR_V7.test(value.event_id) ||
 		typeof value.source_instance_id !== 'string' ||
@@ -84,7 +94,10 @@ function parseEvent(value: unknown, index: number): ParsedBatchEntry {
 		(value.monotonic_duration_ms !== undefined &&
 			(typeof value.monotonic_duration_ms !== 'number' ||
 				!Number.isSafeInteger(value.monotonic_duration_ms) ||
-				value.monotonic_duration_ms < 0))
+				value.monotonic_duration_ms < 0)) ||
+		(value.schema_version === 2 &&
+			value.project_slug !== undefined &&
+			(typeof value.project_slug !== 'string' || !isCanonicalProjectSlug(value.project_slug)))
 	) {
 		return { index, ...(eventId ? { eventId } : {}), reason: 'invalid_event' }
 	}
@@ -94,11 +107,12 @@ function parseEvent(value: unknown, index: number): ParsedBatchEntry {
 		return { index, eventId, reason: 'invalid_event' }
 	}
 	const canonicalEventId = value.event_id.toLowerCase()
+	const schemaVersion = value.schema_version as 1 | 2
 	return {
 		index,
 		eventId: value.event_id,
 		event: {
-			schemaVersion: 1,
+			schemaVersion,
 			eventId: canonicalEventId,
 			sourceInstance: value.source_instance_id.toLowerCase(),
 			sourceSequence: value.source_sequence as number,
@@ -109,6 +123,9 @@ function parseEvent(value: unknown, index: number): ParsedBatchEntry {
 			...(value.monotonic_duration_ms === undefined
 				? {}
 				: { monotonicDurationMs: value.monotonic_duration_ms as number }),
+			...(schemaVersion === 2 && value.project_slug !== undefined
+				? { projectSlug: value.project_slug as string }
+				: {}),
 		},
 	}
 }
