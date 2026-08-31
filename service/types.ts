@@ -1,7 +1,6 @@
 export type EventKind = 'agent.start' | 'agent.end'
 
-export type WorkEvent = {
-	schemaVersion: 1
+type WorkEventFields = {
 	eventId: string
 	sourceInstance: string
 	sourceSequence: number
@@ -12,9 +11,20 @@ export type WorkEvent = {
 	monotonicDurationMs?: number
 }
 
+export type WorkEvent = WorkEventFields & {
+	schemaVersion: 1 | 2
+	projectSlug?: string
+}
+
 export type StoredWorkEvent = WorkEvent & {
 	receivedAt: string
 	receivedAtMs: number
+}
+
+export type ExecutorLabel = string | 'amp-orb' | 'unassigned-executor'
+
+export type AttributedStoredWorkEvent = StoredWorkEvent & {
+	executorLabel: ExecutorLabel
 }
 
 export type Principal =
@@ -30,8 +40,17 @@ export type IngestOutcome =
 	  }
 	| {
 			outcome: 'rejected'
-			reason: 'clock_skew' | 'source_not_authorized' | 'source_sequence_order'
+			reason:
+				| 'clock_skew'
+				| 'executor_profile_required'
+				| 'session_attribution_mismatch'
+				| 'source_not_authorized'
+				| 'source_sequence_order'
 	  }
+
+export type ExecutorBindingOutcome =
+	| { outcome: 'bound'; executorLabel: string }
+	| { outcome: 'conflict' }
 
 export type WorkStatus = 'UNDER' | 'COMPLETE' | 'OVER'
 

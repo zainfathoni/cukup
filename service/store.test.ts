@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { hashBearerToken } from './auth.ts'
 import { MAX_CLOCK_SKEW_MS } from './config.ts'
 import { ServiceStore } from './store.ts'
@@ -39,6 +39,116 @@ function workEvent(overrides: Partial<WorkEvent> = {}): WorkEvent {
 		...overrides,
 	}
 }
+
+function createVersion1Database(path: string): { token: string; tokenId: string } {
+	mkdirSync(dirname(path), { recursive: true })
+	const token = `cukup_v1_${'a'.repeat(43)}`
+	const tokenId = '11111111-1111-4111-8111-111111111111'
+	const database = new Database(path, { create: true, strict: true })
+	database.exec(`
+		CREATE TABLE auth_tokens (
+			token_id TEXT PRIMARY KEY,
+			token_hash TEXT NOT NULL UNIQUE,
+			created_at TEXT NOT NULL,
+			revoked_at TEXT,
+			replaced_by TEXT REFERENCES auth_tokens(token_id)
+		) STRICT;
+		CREATE TABLE source_owners (
+			source_instance TEXT PRIMARY KEY,
+			owner_kind TEXT NOT NULL CHECK (owner_kind IN ('bearer', 'oidc')),
+			owner_id TEXT REFERENCES auth_tokens(token_id),
+			CHECK (
+				(owner_kind = 'bearer' AND owner_id IS NOT NULL) OR
+				(owner_kind = 'oidc' AND owner_id IS NULL)
+			)
+		) STRICT;
+		CREATE TABLE events (
+			event_id TEXT PRIMARY KEY,
+			schema_version INTEGER NOT NULL CHECK (schema_version = 1),
+			source_instance TEXT NOT NULL REFERENCES source_owners(source_instance),
+			source_sequence INTEGER NOT NULL CHECK (source_sequence >= 1),
+			session_id TEXT NOT NULL,
+			kind TEXT NOT NULL CHECK (kind IN ('agent.start', 'agent.end')),
+			occurred_at TEXT NOT NULL,
+			occurred_at_ms INTEGER NOT NULL,
+			monotonic_duration_ms INTEGER CHECK (monotonic_duration_ms IS NULL OR monotonic_duration_ms >= 0),
+			received_at TEXT NOT NULL,
+			received_at_ms INTEGER NOT NULL,
+			UNIQUE (source_instance, source_sequence)
+		) STRICT;
+		PRAGMA user_version = 1;
+	`)
+	database
+		.query('INSERT INTO auth_tokens (token_id, token_hash, created_at) VALUES (?, ?, ?)')
+		.run(tokenId, hashBearerToken(token), new Date(now).toISOString())
+	database
+		.query('INSERT INTO source_owners (source_instance, owner_kind, owner_id) VALUES (?, ?, ?)')
+		.run(sourceA, 'bearer', tokenId)
+	database
+		.query(
+			`INSERT INTO events VALUES (?, 1, ?, 1, ?, 'agent.start', ?, ?, NULL, ?, ?)`,
+		)
+		.run(
+			'01990b2e-1c00-7000-8000-000000000001',
+			sourceA,
+			'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+			new Date(now - 60_000).toISOString(),
+			now - 60_000,
+			new Date(now).toISOString(),
+			now,
+		)
+	database.close()
+	return { token, tokenId }
+}
+
+describe('SQLite schema migration', () => {
+	test('migrates v1 transactionally, preserves evidence, and remains stable across restart', () => {
+		const path = databasePath()
+		const credential = createVersion1Database(path)
+		for (let restart = 0; restart < 2; restart += 1) {
+			const store = new ServiceStore(path)
+			expect(store.authenticateBearer(credential.token)).toEqual({
+				kind: 'bearer',
+				tokenId: credential.tokenId,
+			})
+			expect(store.events()).toEqual([
+				expect.objectContaining({
+					schemaVersion: 1,
+					eventId: '01990b2e-1c00-7000-8000-000000000001',
+					receivedAtMs: now,
+				}),
+			])
+			store.close()
+			const inspected = new Database(path, { readonly: true, strict: true })
+			expect(inspected.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
+				user_version: 2,
+			})
+			expect(
+				inspected
+					.query<{ name: string }, []>(
+						`SELECT name FROM pragma_table_info('events') WHERE name = 'project_slug'`,
+					)
+					.get(),
+			).toEqual({ name: 'project_slug' })
+			inspected.close()
+		}
+	})
+
+	test('refuses a future schema without resetting its migration version', () => {
+		const path = databasePath()
+		const store = new ServiceStore(path)
+		store.close()
+		const future = new Database(path, { strict: true })
+		future.exec('PRAGMA user_version = 3')
+		future.close()
+		expect(() => new ServiceStore(path)).toThrow('newer than supported')
+		const inspected = new Database(path, { readonly: true, strict: true })
+		expect(inspected.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
+			user_version: 3,
+		})
+		inspected.close()
+	})
+})
 
 describe('append-only ingestion', () => {
 	test('preserves receive time for exact event-ID and source-sequence replays', () => {
@@ -86,6 +196,82 @@ describe('append-only ingestion', () => {
 		expect(store.events()).toEqual([
 			expect.objectContaining({ eventId: original.eventId, sessionId: original.sessionId }),
 		])
+		store.close()
+	})
+
+	test('preserves mixed v1/v2 rows and includes schema and slug in exact replay', () => {
+		const path = databasePath()
+		const store = new ServiceStore(path)
+		const issued = store.issueBearer(now)
+		const principal = store.authenticateBearer(issued.token)!
+		expect(store.ingest(principal, workEvent(), now).outcome).toBe('accepted')
+		expect(store.bindExecutorLabel(issued.tokenId, 'zain-macbook')).toEqual({
+			outcome: 'bound',
+			executorLabel: 'zain-macbook',
+		})
+		const v2 = workEvent({
+			schemaVersion: 2,
+			projectSlug: 'cukup-service',
+			eventId: '01990b2e-1c00-7000-8000-000000000002',
+			sourceSequence: 2,
+			sessionId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+			occurredAtMs: now - 24 * 60 * 60 * 1_000,
+		})
+		expect(store.ingest(principal, v2, now).outcome).toBe('accepted')
+		store.close()
+
+		const reopened = new ServiceStore(path)
+		const reopenedPrincipal = reopened.authenticateBearer(issued.token)!
+		expect(reopened.ingest(reopenedPrincipal, workEvent(), now + 1).outcome).toBe('duplicate')
+		expect(reopened.ingest(reopenedPrincipal, v2, now + 1)).toEqual({
+			outcome: 'duplicate',
+			receivedAt: new Date(now).toISOString(),
+		})
+		expect(
+			reopened.ingest(reopenedPrincipal, { ...v2, schemaVersion: 1, projectSlug: undefined }, now + 1),
+		).toEqual({ outcome: 'conflicted', reason: 'event_id_conflict' })
+		expect(
+			reopened.ingest(
+				reopenedPrincipal,
+				{
+					...v2,
+					eventId: '01990b2e-1c00-7000-8000-000000000003',
+					projectSlug: 'another-project',
+				},
+				now + 1,
+			),
+		).toEqual({ outcome: 'conflicted', reason: 'source_sequence_conflict' })
+		expect(reopened.events()).toEqual([
+			expect.objectContaining({ schemaVersion: 1 }),
+			expect.objectContaining({ schemaVersion: 2, projectSlug: 'cukup-service' }),
+		])
+		reopened.close()
+	})
+
+	test('rejects physical v2 before binding and rejects changed turn attribution', () => {
+		const store = new ServiceStore(databasePath())
+		const issued = store.issueBearer(now)
+		const principal = store.authenticateBearer(issued.token)!
+		const start = workEvent({ schemaVersion: 2, projectSlug: 'cukup-service' })
+		expect(store.ingest(principal, start, now)).toEqual({
+			outcome: 'rejected',
+			reason: 'executor_profile_required',
+		})
+		store.bindExecutorLabel(issued.tokenId, 'zain-macbook')
+		expect(store.ingest(principal, start, now).outcome).toBe('accepted')
+		expect(
+			store.ingest(
+				principal,
+				workEvent({
+					schemaVersion: 2,
+					projectSlug: 'changed-project',
+					eventId: '01990b2e-1c00-7000-8000-000000000002',
+					sourceSequence: 2,
+					kind: 'agent.end',
+				}),
+				now,
+			),
+		).toEqual({ outcome: 'rejected', reason: 'session_attribution_mismatch' })
 		store.close()
 	})
 
@@ -177,6 +363,82 @@ describe('authentication and source ownership', () => {
 				now,
 			).outcome,
 		).toBe('accepted')
+		store.close()
+	})
+
+	test('enforces immutable unique bindings and carries labels through atomic rotation', () => {
+		const store = new ServiceStore(databasePath())
+		const first = store.issueBearer(now)
+		const second = store.issueBearer(now + 1)
+		const principal = store.authenticateBearer(first.token)!
+		store.ingest(principal, workEvent(), now)
+		expect(store.attributedEvents()[0]?.executorLabel).toBe('unassigned-executor')
+		expect(store.bindExecutorLabel(first.tokenId, 'zain-macbook')).toEqual({
+			outcome: 'bound',
+			executorLabel: 'zain-macbook',
+		})
+		expect(store.bindExecutorLabel(first.tokenId, 'zain-macbook').outcome).toBe('bound')
+		expect(store.bindExecutorLabel(first.tokenId, 'vikas-mac-mini').outcome).toBe('conflict')
+		expect(store.bindExecutorLabel(second.tokenId, 'zain-macbook').outcome).toBe('conflict')
+		expect(store.attributedEvents()[0]?.executorLabel).toBe('zain-macbook')
+
+		expect(() => store.rotateBearer(first.tokenId, now + 2, second)).toThrow()
+		expect(store.authenticateBearer(first.token)).toEqual({ kind: 'bearer', tokenId: first.tokenId })
+		expect(store.attributedEvents()[0]?.executorLabel).toBe('zain-macbook')
+
+		const replacement = store.rotateBearer(first.tokenId, now + 3)
+		expect(store.authenticateBearer(first.token)).toBeUndefined()
+		const replacementPrincipal = store.authenticateBearer(replacement.token)!
+		expect(replacementPrincipal).toEqual({
+			kind: 'bearer',
+			tokenId: replacement.tokenId,
+		})
+		expect(store.ingest(replacementPrincipal, workEvent(), now + 4).outcome).toBe('duplicate')
+		expect(store.attributedEvents()[0]?.executorLabel).toBe('zain-macbook')
+		expect(store.listBearerMetadata().find((row) => row.tokenId === replacement.tokenId)).toMatchObject({
+			executorLabel: 'zain-macbook',
+			revokedAt: null,
+		})
+		expect(
+			store
+				.listBearerMetadata()
+				.filter((row) => row.executorLabel === 'zain-macbook' && row.revokedAt === null),
+		).toHaveLength(1)
+		store.close()
+	})
+
+	test('derives historical executor attribution from stable source ownership', () => {
+		const store = new ServiceStore(databasePath())
+		const labeled = store.issueBearer(now)
+		const unlabeled = store.issueBearer(now + 1)
+		store.ingest(store.authenticateBearer(labeled.token)!, workEvent(), now)
+		store.ingest(
+			store.authenticateBearer(unlabeled.token)!,
+			workEvent({
+				eventId: '01990b2e-1c00-7000-8000-000000000002',
+				sourceInstance: sourceB,
+			}),
+			now,
+		)
+		store.ingest(
+			{ kind: 'oidc' },
+			workEvent({
+				eventId: '01990b2e-1c00-7000-8000-000000000003',
+				sourceInstance: '9d725e65-8871-43a8-8841-a75218c58e62',
+			}),
+			now,
+		)
+		expect(store.attributedEvents().map((event) => event.executorLabel).sort()).toEqual([
+			'amp-orb',
+			'unassigned-executor',
+			'unassigned-executor',
+		])
+		store.bindExecutorLabel(labeled.tokenId, 'zain-macbook')
+		expect(store.attributedEvents().map((event) => event.executorLabel).sort()).toEqual([
+			'amp-orb',
+			'unassigned-executor',
+			'zain-macbook',
+		])
 		store.close()
 	})
 

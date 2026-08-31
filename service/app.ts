@@ -5,6 +5,7 @@ import {
 	MAX_REQUEST_BYTES,
 	batchResult,
 	parseBatch,
+	parseExecutorProfile,
 	type BatchResult,
 } from './protocol.ts'
 import { ServiceStore } from './store.ts'
@@ -19,6 +20,8 @@ type AppOptions = {
 	logger?: ServiceLogger
 	requireHttps?: boolean
 	trustTlsProxy?: boolean
+	fleetHostnames?: ReadonlySet<string>
+	preferredNewEventSchemaVersion?: 1 | 2
 }
 
 export function createApp(options: AppOptions): { fetch(request: Request): Promise<Response> } {
@@ -26,6 +29,8 @@ export function createApp(options: AppOptions): { fetch(request: Request): Promi
 	const logger = options.logger ?? new ServiceLogger()
 	const requireHttps = options.requireHttps ?? true
 	const trustTlsProxy = options.trustTlsProxy ?? false
+	const fleetHostnames = options.fleetHostnames ?? new Set<string>()
+	const preferredNewEventSchemaVersion = options.preferredNewEventSchemaVersion ?? 1
 
 	return {
 		async fetch(request: Request): Promise<Response> {
@@ -44,7 +49,15 @@ export function createApp(options: AppOptions): { fetch(request: Request): Promi
 					} else {
 						const principal = await authenticate(request, options.store, options.oidcVerifier)
 						response = principal
-							? await authenticatedResponse(request, url, principal, options.store, now)
+							? await authenticatedResponse(
+									request,
+									url,
+									principal,
+									options.store,
+									now,
+									fleetHostnames,
+									preferredNewEventSchemaVersion,
+								)
 							: json(
 									{ error: 'unauthorized' },
 									401,
@@ -79,6 +92,8 @@ async function authenticatedResponse(
 	principal: Principal,
 	store: ServiceStore,
 	now: () => number,
+	fleetHostnames: ReadonlySet<string>,
+	preferredNewEventSchemaVersion: 1 | 2,
 ): Promise<Response> {
 	if (url.pathname === '/v1/time') {
 		return request.method === 'GET'
@@ -90,31 +105,46 @@ async function authenticatedResponse(
 			? json(summarizeWork(store.events(), now()))
 			: json({ error: 'method_not_allowed' }, 405, { allow: 'GET' })
 	}
+	if (url.pathname === '/v1/capabilities') {
+		return request.method === 'GET'
+			? json({
+					schema_version: 1,
+					accepted_event_schema_versions: [1, 2],
+					preferred_new_event_schema_version: preferredNewEventSchemaVersion,
+				})
+			: json({ error: 'method_not_allowed' }, 405, { allow: 'GET' })
+	}
+	if (url.pathname === '/v1/executor-profile') {
+		if (request.method !== 'PUT') {
+			return json({ error: 'method_not_allowed' }, 405, { allow: 'PUT' })
+		}
+		if (principal.kind !== 'bearer') {
+			return json({ error: 'physical_bearer_required' }, 403)
+		}
+		if (!isJsonRequest(request)) return json({ error: 'unsupported_media_type' }, 415)
+		const body = await requestBody(request)
+		if (body.outcome === 'too_large') return json({ error: 'payload_too_large' }, 413)
+		if (body.outcome === 'invalid') return json({ error: 'invalid_request' }, 400)
+		const hostname = parseExecutorProfile(body.value)
+		if (hostname === undefined || !fleetHostnames.has(hostname)) {
+			return json({ error: 'invalid_executor_profile' }, 422)
+		}
+		const result = store.bindExecutorLabel(principal.tokenId, hostname)
+		return result.outcome === 'bound'
+			? json({ executor_label: result.executorLabel })
+			: json({ error: 'executor_profile_conflict' }, 409)
+	}
 	if (url.pathname === '/v1/events:batch') {
 		if (request.method !== 'POST') {
 			return json({ error: 'method_not_allowed' }, 405, { allow: 'POST' })
 		}
-		if (
-			request.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase() !==
-			'application/json'
-		) {
+		if (!isJsonRequest(request)) {
 			return json({ error: 'unsupported_media_type' }, 415)
 		}
-		const contentLength = Number(request.headers.get('content-length'))
-		if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BYTES) {
-			return json({ error: 'payload_too_large' }, 413)
-		}
-		const text = await request.text()
-		if (Buffer.byteLength(text) > MAX_REQUEST_BYTES) {
-			return json({ error: 'payload_too_large' }, 413)
-		}
-		let body: unknown
-		try {
-			body = JSON.parse(text)
-		} catch {
-			return json({ error: 'invalid_request' }, 400)
-		}
-		const entries = parseBatch(body)
+		const body = await requestBody(request)
+		if (body.outcome === 'too_large') return json({ error: 'payload_too_large' }, 413)
+		if (body.outcome === 'invalid') return json({ error: 'invalid_request' }, 400)
+		const entries = parseBatch(body.value)
 		if (!entries) return json({ error: 'invalid_request' }, 400)
 
 		const receivedAtMs = now()
@@ -156,12 +186,41 @@ function logPath(pathname: string): string {
 	if (
 		pathname === '/healthz' ||
 		pathname === '/v1/time' ||
+		pathname === '/v1/capabilities' ||
+		pathname === '/v1/executor-profile' ||
 		pathname === '/v1/events:batch' ||
 		pathname === '/v1/summary'
 	) {
 		return pathname
 	}
 	return pathname.startsWith('/v1/') ? '/v1/*' : 'other'
+}
+
+function isJsonRequest(request: Request): boolean {
+	return (
+		request.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase() ===
+		'application/json'
+	)
+}
+
+async function requestBody(
+	request: Request,
+): Promise<
+	| { outcome: 'valid'; value: unknown }
+	| { outcome: 'invalid' }
+	| { outcome: 'too_large' }
+> {
+	const contentLength = Number(request.headers.get('content-length'))
+	if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BYTES) {
+		return { outcome: 'too_large' }
+	}
+	const text = await request.text()
+	if (Buffer.byteLength(text) > MAX_REQUEST_BYTES) return { outcome: 'too_large' }
+	try {
+		return { outcome: 'valid', value: JSON.parse(text) }
+	} catch {
+		return { outcome: 'invalid' }
+	}
 }
 
 function json(

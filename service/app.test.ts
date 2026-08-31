@@ -63,6 +63,7 @@ function fixture(path = databasePath()): {
 			oidcVerifier: { verify: async (value) => value === workloadToken() },
 			now: () => now,
 			logger: new ServiceLogger((line) => logs.push(line)),
+			fleetHostnames: new Set(['zain-macbook', 'vikas-mac-mini']),
 		}),
 	}
 }
@@ -125,6 +126,115 @@ describe('HTTP boundary', () => {
 			}),
 		)
 		expect(response.status).toBe(200)
+		value.store.close()
+	})
+
+	test('advertises permanent mixed ingestion while defaulting only future starts to v1', async () => {
+		const value = fixture()
+		const response = await value.app.fetch(request('/v1/capabilities', { token: value.token }))
+		expect(response.status).toBe(200)
+		expect(await response.json()).toEqual({
+			schema_version: 1,
+			accepted_event_schema_versions: [1, 2],
+			preferred_new_event_schema_version: 1,
+		})
+
+		const v2Preferred = createApp({
+			store: value.store,
+			oidcVerifier: { verify: async () => false },
+			now: () => now,
+			logger: new ServiceLogger(() => {}),
+			preferredNewEventSchemaVersion: 2,
+		})
+		const enabled = await v2Preferred.fetch(
+			request('/v1/capabilities', { token: value.token }),
+		)
+		expect((await enabled.json() as any).preferred_new_event_schema_version).toBe(2)
+		value.store.close()
+	})
+
+	test('binds a physical executor profile idempotently without exposing labels in errors or logs', async () => {
+		const value = fixture()
+		const bind = (token: string, body: unknown) =>
+			value.app.fetch(
+				request('/v1/executor-profile', {
+					method: 'PUT',
+					token,
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify(body),
+				}),
+			)
+
+		for (let attempt = 0; attempt < 2; attempt += 1) {
+			const response = await bind(value.token, { hostname: 'zain-macbook' })
+			expect(response.status).toBe(200)
+			expect(await response.json()).toEqual({ executor_label: 'zain-macbook' })
+		}
+		const mismatch = await bind(value.token, { hostname: 'vikas-mac-mini' })
+		expect(mismatch.status).toBe(409)
+		expect(await mismatch.json()).toEqual({ error: 'executor_profile_conflict' })
+
+		const second = value.store.issueBearer(now + 1)
+		const duplicate = await bind(second.token, { hostname: 'zain-macbook' })
+		expect(duplicate.status).toBe(409)
+		expect(await duplicate.json()).toEqual({ error: 'executor_profile_conflict' })
+		const unrecognized = await bind(second.token, { hostname: 'unknown-machine' })
+		expect(unrecognized.status).toBe(422)
+		expect(await unrecognized.json()).toEqual({ error: 'invalid_executor_profile' })
+		const extra = await bind(second.token, { hostname: 'vikas-mac-mini', extra: true })
+		expect(extra.status).toBe(422)
+
+		const oidc = await bind(workloadToken(), { hostname: 'vikas-mac-mini' })
+		expect(oidc.status).toBe(403)
+		expect(await oidc.json()).toEqual({ error: 'physical_bearer_required' })
+		for (const label of ['zain-macbook', 'vikas-mac-mini', 'unknown-machine']) {
+			expect(value.logs.join('\n')).not.toContain(label)
+		}
+		value.store.close()
+	})
+
+	test('requires a bound physical profile for v2 while OIDC derives amp-orb', async () => {
+		const value = fixture()
+		const upload = (token: string, event: Record<string, unknown>) =>
+			value.app.fetch(
+				request('/v1/events:batch', {
+					method: 'POST',
+					token,
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify({ events: [event] }),
+				}),
+			)
+		const v2 = wireEvent(1, 'agent.start', { schema_version: 2, project_slug: 'cukup' })
+		expect(await (await upload(value.token, v2)).json()).toEqual({
+			results: [{ event_id: v2.event_id, status: 'rejected' }],
+		})
+		await value.app.fetch(
+			request('/v1/executor-profile', {
+				method: 'PUT',
+				token: value.token,
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ hostname: 'zain-macbook' }),
+			}),
+		)
+		expect(await (await upload(value.token, v2)).json()).toEqual({
+			results: [{ event_id: v2.event_id, status: 'accepted' }],
+		})
+
+		const oidcV2 = wireEvent(1, 'agent.start', {
+			schema_version: 2,
+			project_slug: 'cukup',
+			event_id: '01990b2e-1c00-7000-8000-000000000099',
+			source_instance_id: 'ca3dfd5f-823b-4339-aefd-ade5f762b6f7',
+		})
+		expect((await (await upload(workloadToken(), oidcV2)).json() as any).results[0].status).toBe(
+			'accepted',
+		)
+		expect(value.store.attributedEvents().map((event) => event.executorLabel)).toEqual([
+			'zain-macbook',
+			'amp-orb',
+		])
+		const summary = await value.app.fetch(request('/v1/summary', { token: value.token }))
+		expect((await summary.json() as any).schema_version).toBe(1)
 		value.store.close()
 	})
 
