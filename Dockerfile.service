@@ -21,6 +21,6 @@ ENV CUKUP_DATABASE_PATH=/var/lib/cukup/cukup.sqlite \
 VOLUME ["/var/lib/cukup"]
 EXPOSE 3000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-  CMD ["bun", "-e", "const r=await fetch('http://127.0.0.1:3000/healthz',{headers:{host:process.env.CUKUP_API_HOSTNAME||'api.cukup.dev'}});process.exit(r.ok?0:1)"]
+  CMD ["bun", "-e", "const r=await fetch('http://127.0.0.1:3000/up');process.exit(r.ok?0:1)"]
 
 ENTRYPOINT ["bun", "/app/index.js"]

@@ -89,6 +89,11 @@ describe('HTTP boundary', () => {
 			'content-type',
 			'x-content-type-options',
 		])
+		const readiness = await value.app.fetch(
+			new Request('https://container.internal/up', { headers: { host: 'container.internal' } }),
+		)
+		expect(readiness.status).toBe(200)
+		expect(await readiness.json()).toEqual({ ok: true })
 
 		const unauthenticated = await value.app.fetch(request('/v1/not-real'))
 		expect(unauthenticated.status).toBe(401)

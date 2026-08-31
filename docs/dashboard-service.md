@@ -12,6 +12,8 @@ The service compares the original `Host` with the two configured canonical hostn
 | `CUKUP_DASHBOARD_HOSTNAME` (default `cukup.dev`) | Routes below | Dashboard session cookie only |
 | Anything else | None | Generic `404 not_found` |
 
+`GET /up` is the sole host-agnostic exception. It returns only the same minimal readiness body used by the container and Kamal Proxy health checks, because Kamal 2.10.1 cannot configure a health-check `Host` header. The container port must remain private to Kamal Proxy; all other paths still pass through exact host routing. Public API health remains `GET /healthz` on the API host.
+
 The dashboard host exposes:
 
 - `GET /`: minimal sign-in page without a valid session; the dashboard document with a valid session;
