@@ -1,7 +1,7 @@
 export type LogSink = (line: string) => void
 
 const sensitiveKey =
-	/authorization|credential|token|jwt|claims?|user_id|thread_id|project_slug|executor_label|hostname/i
+	/authorization|cookie|credential|token|jwt|claims?|user_id|thread_id|event_id|source_instance|session_id|project_slug|projects?|executor_label|executors?|labels?|oauth_code|report|request_body/i
 const bearerValue = /Bearer\s+[^\s"']+/gi
 const cukupToken = /cukup_v1_[A-Za-z0-9_-]+/g
 const jwtValue = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g

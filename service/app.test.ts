@@ -72,7 +72,7 @@ function request(
 	path: string,
 	options: RequestInit & { token?: string; origin?: string } = {},
 ): Request {
-	const { token, origin = 'https://cukup.test', ...init } = options
+	const { token, origin = 'https://api.cukup.dev', ...init } = options
 	const headers = new Headers(init.headers)
 	if (token) headers.set('authorization', `Bearer ${token}`)
 	return new Request(`${origin}${path}`, { ...init, headers })
@@ -107,7 +107,7 @@ describe('HTTP boundary', () => {
 			expect(await response.json()).toEqual({ server_time: '2026-08-31T05:00:00.000Z' })
 		}
 		const insecure = await value.app.fetch(
-			request('/v1/time', { token: value.token, origin: 'http://cukup.test' }),
+			request('/v1/time', { token: value.token, origin: 'http://api.cukup.dev' }),
 		)
 		expect(insecure.status).toBe(400)
 
@@ -121,7 +121,7 @@ describe('HTTP boundary', () => {
 		const response = await proxied.fetch(
 			request('/v1/time', {
 				token: value.token,
-				origin: 'http://cukup.test',
+				origin: 'http://api.cukup.dev',
 				headers: { 'x-forwarded-proto': 'https' },
 			}),
 		)

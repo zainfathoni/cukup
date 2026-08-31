@@ -2,10 +2,14 @@ import { createApp } from './app.ts'
 import { OidcVerifier } from './auth.ts'
 import {
 	configuredAllowedOidcUserId,
+	configuredApiHostname,
+	configuredDashboard,
+	configuredDashboardHostname,
 	configuredFleetHostnames,
 	configuredNewTurnEventSchemaVersion,
 	defaultServiceDatabasePath,
 } from './config.ts'
+import { DashboardBackend, type DashboardAssets } from './dashboard/backend.ts'
 import { ServiceLogger } from './logger.ts'
 import { ServiceStore } from './store.ts'
 
@@ -25,10 +29,25 @@ if (!directTls && !behindTlsProxy && !loopbackOnly) {
 }
 
 const allowedOidcUserId = configuredAllowedOidcUserId()
+const apiHostname = configuredApiHostname()
+const dashboardHostname = configuredDashboardHostname()
+const dashboardConfiguration = configuredDashboard(process.env, dashboardHostname)
 const fleetHostnames = configuredFleetHostnames()
 const preferredNewEventSchemaVersion = configuredNewTurnEventSchemaVersion()
 const store = new ServiceStore(defaultServiceDatabasePath())
 const logger = new ServiceLogger()
+let dashboard: DashboardBackend | undefined
+if (dashboardConfiguration) {
+	try {
+		dashboard = new DashboardBackend({
+			config: dashboardConfiguration,
+			store,
+			assets: await loadDashboardAssets(),
+		})
+	} catch {
+		logger.error('dashboard_disabled', { error: 'initialization_failed' })
+	}
+}
 const app = createApp({
 	store,
 	oidcVerifier: new OidcVerifier({ allowedUserId: allowedOidcUserId }),
@@ -37,6 +56,9 @@ const app = createApp({
 	trustTlsProxy: behindTlsProxy,
 	fleetHostnames,
 	preferredNewEventSchemaVersion,
+	apiHostname,
+	dashboardHostname,
+	dashboard,
 })
 
 const server = Bun.serve({
@@ -62,4 +84,23 @@ function parsePort(value: string | undefined): number {
 	const port = value ? Number(value) : 3000
 	if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error('PORT must be 1-65535')
 	return port
+}
+
+async function loadDashboardAssets(): Promise<DashboardAssets> {
+	const builtJavascript = Bun.file(`${import.meta.dir}/dashboard.js`)
+	const builtCss = Bun.file(`${import.meta.dir}/dashboard.css`)
+	if ((await builtJavascript.exists()) && (await builtCss.exists())) {
+		return { javascript: await builtJavascript.text(), css: await builtCss.text() }
+	}
+	const sourceClient = `${import.meta.dir}/dashboard/client.ts`
+	const sourceCss = Bun.file(`${import.meta.dir}/dashboard/dashboard.css`)
+	const build = await Bun.build({
+		entrypoints: [sourceClient],
+		target: 'browser',
+		minify: true,
+	})
+	if (!build.success || build.outputs.length !== 1 || !(await sourceCss.exists())) {
+		throw new Error('Dashboard assets are unavailable')
+	}
+	return { javascript: await build.outputs[0]!.text(), css: await sourceCss.text() }
 }

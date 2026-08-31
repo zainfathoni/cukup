@@ -1,5 +1,7 @@
 import { summarizeWork } from './aggregation.ts'
 import { isBearerToken, type OidcVerifier } from './auth.ts'
+import { DEFAULT_API_HOSTNAME, DEFAULT_DASHBOARD_HOSTNAME } from './config.ts'
+import type { DashboardBackend } from './dashboard/backend.ts'
 import { ServiceLogger } from './logger.ts'
 import {
 	MAX_REQUEST_BYTES,
@@ -22,6 +24,9 @@ type AppOptions = {
 	trustTlsProxy?: boolean
 	fleetHostnames?: ReadonlySet<string>
 	preferredNewEventSchemaVersion?: 1 | 2
+	apiHostname?: string
+	dashboardHostname?: string
+	dashboard?: Pick<DashboardBackend, 'fetch'>
 }
 
 export function createApp(options: AppOptions): { fetch(request: Request): Promise<Response> } {
@@ -31,6 +36,8 @@ export function createApp(options: AppOptions): { fetch(request: Request): Promi
 	const trustTlsProxy = options.trustTlsProxy ?? false
 	const fleetHostnames = options.fleetHostnames ?? new Set<string>()
 	const preferredNewEventSchemaVersion = options.preferredNewEventSchemaVersion ?? 1
+	const apiHostname = options.apiHostname ?? DEFAULT_API_HOSTNAME
+	const dashboardHostname = options.dashboardHostname ?? DEFAULT_DASHBOARD_HOSTNAME
 
 	return {
 		async fetch(request: Request): Promise<Response> {
@@ -38,7 +45,15 @@ export function createApp(options: AppOptions): { fetch(request: Request): Promi
 			const url = new URL(request.url)
 			let response: Response
 			try {
-				if (url.pathname === '/healthz') {
+				const hostname = originalHostname(request, url)
+				if (hostname === dashboardHostname) {
+					response =
+						options.dashboard && (!requireHttps || isSecureRequest(request, trustTlsProxy))
+							? await options.dashboard.fetch(request, url)
+							: json({ error: 'not_found' }, 404)
+				} else if (hostname !== apiHostname) {
+					response = json({ error: 'not_found' }, 404)
+				} else if (url.pathname === '/healthz') {
 					response =
 						request.method === 'GET'
 							? json({ ok: true })
@@ -176,10 +191,12 @@ async function authenticate(
 }
 
 function isSecureRequest(request: Request, trustTlsProxy: boolean): boolean {
-	return (
-		new URL(request.url).protocol === 'https:' ||
-		(trustTlsProxy && request.headers.get('x-forwarded-proto') === 'https')
-	)
+	if (trustTlsProxy) return request.headers.get('x-forwarded-proto') === 'https'
+	return new URL(request.url).protocol === 'https:'
+}
+
+function originalHostname(request: Request, url: URL): string {
+	return request.headers.get('host') ?? url.host
 }
 
 function logPath(pathname: string): string {
@@ -189,7 +206,14 @@ function logPath(pathname: string): string {
 		pathname === '/v1/capabilities' ||
 		pathname === '/v1/executor-profile' ||
 		pathname === '/v1/events:batch' ||
-		pathname === '/v1/summary'
+		pathname === '/v1/summary' ||
+		pathname === '/' ||
+		pathname === '/auth/github' ||
+		pathname === '/auth/github/callback' ||
+		pathname === '/logout' ||
+		pathname === '/dashboard/report' ||
+		pathname === '/assets/dashboard.css' ||
+		pathname === '/assets/dashboard.js'
 	) {
 		return pathname
 	}
