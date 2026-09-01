@@ -112,6 +112,30 @@ function createVersion2Database(path: string): void {
 	database.close()
 }
 
+function createVersion3Database(path: string): void {
+	const current = new ServiceStore(path)
+	current.ingest({ kind: 'oidc' }, workEvent(), now)
+	current.putTargetOverride('2026-09-01', 0, now)
+	current.close()
+	const database = new Database(path, { strict: true })
+	database.exec(`
+		ALTER TABLE target_overrides RENAME TO target_overrides_v4;
+		CREATE TABLE target_overrides (
+			date TEXT PRIMARY KEY CHECK (
+				length(date) = 10 AND
+				date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+			),
+			target_minutes INTEGER NOT NULL CHECK (target_minutes = 0),
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		) STRICT;
+		INSERT INTO target_overrides SELECT * FROM target_overrides_v4;
+		DROP TABLE target_overrides_v4;
+		PRAGMA user_version = 3;
+	`)
+	database.close()
+}
+
 describe('SQLite schema migration', () => {
 	test('migrates v1 transactionally, preserves evidence, and remains stable across restart', () => {
 		const path = databasePath()
@@ -132,7 +156,7 @@ describe('SQLite schema migration', () => {
 			store.close()
 			const inspected = new Database(path, { readonly: true, strict: true })
 			expect(inspected.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
-				user_version: 3,
+				user_version: 4,
 			})
 			expect(
 				inspected
@@ -161,10 +185,73 @@ describe('SQLite schema migration', () => {
 			store.close()
 			const inspected = new Database(path, { readonly: true, strict: true })
 			expect(inspected.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
-				user_version: 3,
+				user_version: 4,
 			})
 			inspected.close()
 		}
+	})
+
+	test('migrates production v3 transactionally without changing evidence or zero-minute overrides', () => {
+		const path = databasePath()
+		createVersion3Database(path)
+		for (let restart = 0; restart < 2; restart += 1) {
+			const store = new ServiceStore(path)
+			expect(store.events()).toEqual([
+				expect.objectContaining({
+					eventId: '01990b2e-1c00-7000-8000-000000000001',
+					receivedAtMs: now,
+				}),
+			])
+			expect(store.targetOverrides()).toEqual(new Map([['2026-09-01', 0]]))
+			store.close()
+			const inspected = new Database(path, { readonly: true, strict: true })
+			expect(inspected.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
+				user_version: 4,
+			})
+			expect(
+				inspected
+					.query<{ targetMinutes: number; createdAt: string; updatedAt: string }, []>(
+						`SELECT target_minutes AS targetMinutes, created_at AS createdAt,
+						        updated_at AS updatedAt FROM target_overrides`,
+					)
+					.get(),
+			).toEqual({
+				targetMinutes: 0,
+				createdAt: '2026-08-31T05:00:00.000Z',
+				updatedAt: '2026-08-31T05:00:00.000Z',
+			})
+			inspected.close()
+		}
+	})
+
+	test('creates v4 directly with the exact target constraint and remains stable across restart', () => {
+		const path = databasePath()
+		const store = new ServiceStore(path)
+		store.putTargetOverride('2026-09-01', 240, now)
+		store.close()
+
+		const database = new Database(path, { strict: true })
+		expect(database.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
+			user_version: 4,
+		})
+		database
+			.query('INSERT INTO target_overrides VALUES (?, ?, ?, ?)')
+			.run('2026-09-02', 0, new Date(now).toISOString(), new Date(now).toISOString())
+		expect(() =>
+			database
+				.query('INSERT INTO target_overrides VALUES (?, ?, ?, ?)')
+				.run('2026-09-03', 1, new Date(now).toISOString(), new Date(now).toISOString()),
+		).toThrow()
+		database.close()
+
+		const reopened = new ServiceStore(path)
+		expect(reopened.targetOverrides()).toEqual(
+			new Map([
+				['2026-09-01', 240],
+				['2026-09-02', 0],
+			]),
+		)
+		reopened.close()
 	})
 
 	test('refuses a future schema without resetting its migration version', () => {
@@ -172,19 +259,19 @@ describe('SQLite schema migration', () => {
 		const store = new ServiceStore(path)
 		store.close()
 		const future = new Database(path, { strict: true })
-		future.exec('PRAGMA user_version = 4')
+		future.exec('PRAGMA user_version = 5')
 		future.close()
 		expect(() => new ServiceStore(path)).toThrow('newer than supported')
 		const inspected = new Database(path, { readonly: true, strict: true })
 		expect(inspected.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
-			user_version: 4,
+			user_version: 5,
 		})
 		inspected.close()
 	})
 })
 
 describe('target overrides', () => {
-	test('stores only an idempotent zero target and audit timestamps across restart and explicit clear', () => {
+	test('updates between full and half days while exact retries preserve audit timestamps', () => {
 		const path = databasePath()
 		const first = new ServiceStore(path)
 		expect(first.putTargetOverride('2026-09-01', 0, now)).toEqual({
@@ -199,7 +286,19 @@ describe('target overrides', () => {
 			createdAt: '2026-08-31T05:00:00.000Z',
 			updatedAt: '2026-08-31T05:00:00.000Z',
 		})
-		expect(first.targetOverrides()).toEqual(new Map([['2026-09-01', 0]]))
+		expect(first.putTargetOverride('2026-09-01', 240, now + 120_000)).toEqual({
+			date: '2026-09-01',
+			targetMinutes: 240,
+			createdAt: '2026-08-31T05:00:00.000Z',
+			updatedAt: '2026-08-31T05:02:00.000Z',
+		})
+		expect(first.putTargetOverride('2026-09-01', 240, now + 180_000)).toEqual({
+			date: '2026-09-01',
+			targetMinutes: 240,
+			createdAt: '2026-08-31T05:00:00.000Z',
+			updatedAt: '2026-08-31T05:02:00.000Z',
+		})
+		expect(first.targetOverrides()).toEqual(new Map([['2026-09-01', 240]]))
 		first.close()
 
 		const inspected = new Database(path, { readonly: true, strict: true })
@@ -212,7 +311,7 @@ describe('target overrides', () => {
 		inspected.close()
 
 		const reopened = new ServiceStore(path)
-		expect(reopened.targetOverrides()).toEqual(new Map([['2026-09-01', 0]]))
+		expect(reopened.targetOverrides()).toEqual(new Map([['2026-09-01', 240]]))
 		expect(reopened.clearTargetOverride('2026-09-01')).toBeTrue()
 		expect(reopened.clearTargetOverride('2026-09-01')).toBeFalse()
 		reopened.close()

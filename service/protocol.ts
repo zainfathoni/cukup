@@ -66,11 +66,15 @@ export function parseTargetOverrideDate(value: string): string | undefined {
 	return day >= 1 && day <= daysInMonth ? value : undefined
 }
 
-export function parseTargetOverride(value: unknown): { targetMinutes: 0 } | undefined {
-	if (!isRecord(value) || Object.keys(value).length !== 1 || value.target_minutes !== 0) {
+export function parseTargetOverride(value: unknown): { targetMinutes: 0 | 240 } | undefined {
+	if (
+		!isRecord(value) ||
+		Object.keys(value).length !== 1 ||
+		(value.target_minutes !== 0 && value.target_minutes !== 240)
+	) {
 		return undefined
 	}
-	return { targetMinutes: 0 }
+	return { targetMinutes: value.target_minutes }
 }
 
 export function parseBatch(value: unknown): ParsedBatchEntry[] | undefined {

@@ -193,12 +193,24 @@ describe('dashboard report aggregation', () => {
 		expect(dayOff.overall.data.today).toMatchObject({ status: 'OVER', target_minutes: 0 })
 		expect(dayOff.overall.data.week.target_minutes).toBe(1_920)
 
+		targetOverrides.set('2026-08-31', 240)
+		const halfDay = buildDashboardReport(fixture(targetOverrides).store, selection, now)
+		if (halfDay.overall.state === 'unavailable') throw new Error('Expected overall summary')
+		expect(halfDay.overall.data.today).toMatchObject({
+			status: 'UNDER',
+			worked_minutes: 105,
+			target_minutes: 240,
+			difference_minutes: 135,
+		})
+		expect(halfDay.overall.data.week.target_minutes).toBe(2_160)
+
 		targetOverrides.clear()
 		const restored = buildDashboardReport(fixture(targetOverrides).store, selection, now)
 		if (restored.overall.state === 'unavailable') throw new Error('Expected overall summary')
 		expect(restored.overall.data.today).toMatchObject({ status: 'UNDER', target_minutes: 480 })
 		expect(restored.overall.data.week.target_minutes).toBe(2_400)
 		expect(readySeries(restored)).toEqual(readySeries(dayOff))
+		expect(readySeries(halfDay)).toEqual(readySeries(dayOff))
 	})
 
 	test('derives concurrency from matching raw intervals instead of displayed-series sums', () => {

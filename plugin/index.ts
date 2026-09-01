@@ -193,7 +193,7 @@ export default function (amp: PluginAPI) {
 		{
 			title: 'Set day off',
 			category: 'cukup',
-			description: 'Mark or clear an authoritative day-off target override.',
+			description: 'Set or clear an authoritative full- or half-day target override.',
 		},
 		async (ctx) => {
 			const date = await ctx.ui.input({
@@ -210,16 +210,27 @@ export default function (amp: PluginAPI) {
 			const action = await ctx.ui.select({
 				title: 'Set day off',
 				message: `Asia/Jakarta date: **${date}**`,
-				options: ['Mark day off', 'Clear / undo'],
+				options: ['Full day off (0m)', 'Half day (4h)', 'Clear / undo'],
 			})
-			if (action !== 'Mark day off' && action !== 'Clear / undo') return
-			const marking = action === 'Mark day off'
+			const targetMinutes =
+				action === 'Full day off (0m)' ? 0 : action === 'Half day (4h)' ? 240 : undefined
+			const clearing = action === 'Clear / undo'
+			if (targetMinutes === undefined && !clearing) return
+			const targetLabel = targetMinutes === 0 ? '0m' : '240m (4h)'
 			const confirmed = await ctx.ui.confirm({
-				title: marking ? `Mark ${date} as day off?` : `Clear day off for ${date}?`,
-				message: marking
-					? 'The authoritative target will be **0m**. Work-time evidence remains unchanged.'
-					: 'The authoritative target will return to the default for that weekday. Work-time evidence remains unchanged.',
-				confirmButtonText: marking ? 'Mark day off' : 'Clear / undo',
+				title: clearing
+					? `Clear day off for ${date}?`
+					: targetMinutes === 0
+						? `Set full day off for ${date}?`
+						: `Set half day for ${date}?`,
+				message: clearing
+					? 'The authoritative target will return to the default for that weekday. Work-time evidence remains unchanged.'
+					: `The authoritative target will be **${targetLabel}**. Work-time evidence remains unchanged.`,
+				confirmButtonText: clearing
+					? 'Clear / undo'
+					: targetMinutes === 0
+						? 'Set full day off'
+						: 'Set half day',
 			})
 			if (!confirmed) return
 			if (!client) {
@@ -228,8 +239,8 @@ export default function (amp: PluginAPI) {
 			}
 			try {
 				const token = await tokenProvider.getToken()
-				if (marking) await client.putTargetOverride(token, date)
-				else await client.clearTargetOverride(token, date)
+				if (targetMinutes === undefined) await client.clearTargetOverride(token, date)
+				else await client.putTargetOverride(token, date, targetMinutes)
 			} catch (error) {
 				const detail =
 					error instanceof TokenProviderError || error instanceof ServiceRequestError
@@ -239,9 +250,9 @@ export default function (amp: PluginAPI) {
 				return
 			}
 			await ctx.ui.notify(
-				marking
-					? `Authoritative target for ${date} is now 0m.`
-					: `Authoritative day-off override for ${date} is cleared.`,
+				targetMinutes === undefined
+					? `Authoritative day-off override for ${date} is cleared.`
+					: `Authoritative target for ${date} is now ${targetLabel}.`,
 			)
 		},
 	)

@@ -70,7 +70,7 @@ export type WorkSummary = {
 
 export type TargetOverride = {
 	date: string
-	targetMinutes: 0
+	targetMinutes: 0 | 240
 	createdAt: string
 	updatedAt: string
 }

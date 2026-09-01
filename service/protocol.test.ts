@@ -143,7 +143,7 @@ describe('event protocol validation', () => {
 		expect(parseExecutorProfile({ hostname: 1 })).toBeUndefined()
 	})
 
-	test('accepts only a real exact civil date and the closed zero-target override', () => {
+	test('accepts only a real exact civil date and the closed full- or half-day override', () => {
 		for (const date of ['2026-09-01', '2024-02-29']) {
 			expect(parseTargetOverrideDate(date)).toBe(date)
 		}
@@ -158,9 +158,12 @@ describe('event protocol validation', () => {
 			expect(parseTargetOverrideDate(date)).toBeUndefined()
 		}
 		expect(parseTargetOverride({ target_minutes: 0 })).toEqual({ targetMinutes: 0 })
+		expect(parseTargetOverride({ target_minutes: 240 })).toEqual({ targetMinutes: 240 })
 		for (const body of [
 			{},
 			{ target_minutes: 1 },
+			{ target_minutes: 239 },
+			{ target_minutes: 241 },
 			{ target_minutes: 0, reason: 'private' },
 			{ target_minutes: '0' },
 		]) {

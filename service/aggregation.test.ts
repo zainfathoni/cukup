@@ -167,6 +167,12 @@ describe('timezone-aware summaries', () => {
 			),
 		]
 		const dayOff = summarizeWork(evidence, mondayNow, undefined, overrides)
+		const halfDay = summarizeWork(
+			evidence,
+			mondayNow,
+			undefined,
+			new Map([['2026-08-31', 240]]),
+		)
 		const restored = summarizeWork(evidence, mondayNow)
 		expect(dayOff.daily).toEqual({
 			status: 'OVER',
@@ -174,6 +180,13 @@ describe('timezone-aware summaries', () => {
 			target_minutes: 0,
 			difference_minutes: 15,
 		})
+		expect(halfDay.daily).toEqual({
+			status: 'UNDER',
+			worked_minutes: 15,
+			target_minutes: 240,
+			difference_minutes: 225,
+		})
+		expect(halfDay.weekly.target_minutes).toBe(2_160)
 		expect(restored.daily).toEqual({
 			status: 'UNDER',
 			worked_minutes: 15,
@@ -182,6 +195,7 @@ describe('timezone-aware summaries', () => {
 		})
 		expect(restored.weekly.target_minutes).toBe(2_400)
 		expect(restored.weekly.worked_minutes).toBe(dayOff.weekly.worked_minutes)
+		expect(halfDay.weekly.worked_minutes).toBe(dayOff.weekly.worked_minutes)
 	})
 
 	test('resolves 23-hour and 25-hour civil days without depending on the process timezone', () => {

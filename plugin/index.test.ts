@@ -166,9 +166,9 @@ describe('work-hours plugin', () => {
 				const request = { url, init: init ?? {} }
 				mutations.push(request)
 				order.push(String(init?.method))
-				return init?.method === 'PUT'
-					? Response.json({ date: '2026-09-01', target_minutes: 0 })
-					: new Response(null, { status: 204 })
+				if (init?.method !== 'PUT') return new Response(null, { status: 204 })
+				const target_minutes = JSON.parse(String(init.body)).target_minutes
+				return Response.json({ date: '2026-09-01', target_minutes })
 			}
 			return new Response(null, { status: 404 })
 		}) as typeof fetch
@@ -191,9 +191,10 @@ describe('work-hours plugin', () => {
 			system: { executor: { kind: 'local' }, user: { workspace: {} } },
 			$: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
 		}
-		const inputs = ['2026-09-01', '2026-09-01', '2026-02-29']
+		const inputs = ['2026-09-01', '2026-09-01', '2026-09-01', '2026-02-29']
 		const inputOptions: Array<{ initialValue?: string; submitButtonText?: string }> = []
-		const selections = ['Mark day off', 'Clear / undo']
+		const selections = ['Full day off (0m)', 'Half day (4h)', 'Clear / undo']
+		const selectionOptions: string[][] = []
 		const confirmations: Array<{ title: string; message?: string }> = []
 		const notifications: string[] = []
 		const context = {
@@ -202,7 +203,10 @@ describe('work-hours plugin', () => {
 					inputOptions.push(options)
 					return inputs.shift()
 				},
-				select: async () => selections.shift(),
+				select: async (options: { options: string[] }) => {
+					selectionOptions.push(options.options)
+					return selections.shift()
+				},
 				confirm: async (options: { title: string; message?: string }) => {
 					confirmations.push(options)
 					order.push('confirm')
@@ -217,23 +221,35 @@ describe('work-hours plugin', () => {
 			await commands.get('day-off-set')?.(context)
 			await commands.get('day-off-set')?.(context)
 			await commands.get('day-off-set')?.(context)
+			await commands.get('day-off-set')?.(context)
 			expect(inputOptions[0]).toMatchObject({
 				initialValue: jakartaDateString(Date.now()),
 				submitButtonText: 'Preview',
 			})
+			expect(selectionOptions).toEqual([
+				['Full day off (0m)', 'Half day (4h)', 'Clear / undo'],
+				['Full day off (0m)', 'Half day (4h)', 'Clear / undo'],
+				['Full day off (0m)', 'Half day (4h)', 'Clear / undo'],
+			])
 			expect(confirmations.map((confirmation) => confirmation.title)).toEqual([
-				'Mark 2026-09-01 as day off?',
+				'Set full day off for 2026-09-01?',
+				'Set half day for 2026-09-01?',
 				'Clear day off for 2026-09-01?',
 			])
 			expect(confirmations.every((confirmation) => confirmation.message?.includes('evidence remains unchanged'))).toBeTrue()
-			expect(order).toEqual(['confirm', 'PUT', 'confirm', 'DELETE'])
+			expect(confirmations[0]?.message).toContain('**0m**')
+			expect(confirmations[1]?.message).toContain('**240m (4h)**')
+			expect(order).toEqual(['confirm', 'PUT', 'confirm', 'PUT', 'confirm', 'DELETE'])
 			expect(mutations.map(({ url, init }) => [url, init.method])).toEqual([
+				['https://api.cukup.dev/v1/target-overrides/2026-09-01', 'PUT'],
 				['https://api.cukup.dev/v1/target-overrides/2026-09-01', 'PUT'],
 				['https://api.cukup.dev/v1/target-overrides/2026-09-01', 'DELETE'],
 			])
 			expect(JSON.parse(String(mutations[0]?.init.body))).toEqual({ target_minutes: 0 })
+			expect(JSON.parse(String(mutations[1]?.init.body))).toEqual({ target_minutes: 240 })
 			expect(notifications).toEqual([
 				'Authoritative target for 2026-09-01 is now 0m.',
+				'Authoritative target for 2026-09-01 is now 240m (4h).',
 				'Authoritative day-off override for 2026-09-01 is cleared.',
 				'Enter a real date in exact YYYY-MM-DD format.',
 			])

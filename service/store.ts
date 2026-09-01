@@ -13,7 +13,7 @@ import type {
 	WorkEvent,
 } from './types.ts'
 
-const DATABASE_VERSION = 3
+const DATABASE_VERSION = 4
 
 const EXECUTOR_LABEL_CHECK = `
 	CHECK (
@@ -56,6 +56,17 @@ const EVENTS_V2_TABLE = `
 			))
 		),
 		UNIQUE (source_instance, source_sequence)
+	) STRICT`
+
+const TARGET_OVERRIDES_V4_TABLE = `
+	CREATE TABLE target_overrides (
+		date TEXT PRIMARY KEY CHECK (
+			length(date) = 10 AND
+			date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+		),
+		target_minutes INTEGER NOT NULL CHECK (target_minutes IN (0, 240)),
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
 	) STRICT`
 
 type EventRow = {
@@ -216,14 +227,21 @@ export class ServiceStore {
 			.all()
 	}
 
-	putTargetOverride(date: string, targetMinutes: 0, nowMs = Date.now()): TargetOverride {
+	putTargetOverride(
+		date: string,
+		targetMinutes: TargetOverride['targetMinutes'],
+		nowMs = Date.now(),
+	): TargetOverride {
 		const at = new Date(nowMs).toISOString()
 		this.#database
 			.query(
 				`INSERT INTO target_overrides (
 					date, target_minutes, created_at, updated_at
 				) VALUES (?, ?, ?, ?)
-				ON CONFLICT (date) DO NOTHING`,
+				ON CONFLICT (date) DO UPDATE SET
+					target_minutes = excluded.target_minutes,
+					updated_at = excluded.updated_at
+				WHERE target_overrides.target_minutes <> excluded.target_minutes`,
 			)
 			.run(date, targetMinutes, at, at)
 		return this.#database
@@ -480,17 +498,19 @@ export class ServiceStore {
 				`)
 			}
 
-			this.#database.exec(`
-				CREATE TABLE target_overrides (
-					date TEXT PRIMARY KEY CHECK (
-						length(date) = 10 AND
-						date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
-					),
-					target_minutes INTEGER NOT NULL CHECK (target_minutes = 0),
-					created_at TEXT NOT NULL,
-					updated_at TEXT NOT NULL
-				) STRICT;
+			if (version === 3) {
+				this.#database.exec(`
+					ALTER TABLE target_overrides RENAME TO target_overrides_v3;
+					${TARGET_OVERRIDES_V4_TABLE};
+					INSERT INTO target_overrides (date, target_minutes, created_at, updated_at)
+					SELECT date, target_minutes, created_at, updated_at FROM target_overrides_v3;
+					DROP TABLE target_overrides_v3;
+				`)
+			} else {
+				this.#database.exec(`${TARGET_OVERRIDES_V4_TABLE};`)
+			}
 
+			this.#database.exec(`
 				CREATE UNIQUE INDEX IF NOT EXISTS auth_tokens_active_executor_label
 					ON auth_tokens(executor_label)
 					WHERE revoked_at IS NULL AND executor_label IS NOT NULL;

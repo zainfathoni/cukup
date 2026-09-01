@@ -144,8 +144,8 @@ async function authenticatedResponse(
 		if (body.outcome === 'invalid') return json({ error: 'invalid_request' }, 400)
 		const targetOverride = parseTargetOverride(body.value)
 		if (!targetOverride) return json({ error: 'invalid_request' }, 400)
-		store.putTargetOverride(date, targetOverride.targetMinutes, now())
-		return json({ date, target_minutes: targetOverride.targetMinutes })
+		const stored = store.putTargetOverride(date, targetOverride.targetMinutes, now())
+		return json({ date: stored.date, target_minutes: stored.targetMinutes })
 	}
 	if (url.pathname === '/v1/capabilities') {
 		return request.method === 'GET'

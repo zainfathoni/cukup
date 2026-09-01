@@ -109,24 +109,30 @@ describe('CukupServiceClient', () => {
 		})
 	})
 
-	test('marks and clears an exact day-off target through the strict authenticated boundary', async () => {
+	test('sets and clears exact full- and half-day targets through the strict authenticated boundary', async () => {
 		const requests: Array<{ url: string; init: RequestInit }> = []
 		const client = new CukupServiceClient('https://cukup.dev', async (url, init) => {
 			requests.push({ url, init })
-			return init.method === 'PUT'
-				? Response.json({ date: '2026-09-01', target_minutes: 0 })
-				: new Response(null, { status: 204 })
+			if (init.method !== 'PUT') return new Response(null, { status: 204 })
+			const target_minutes = JSON.parse(String(init.body)).target_minutes
+			return Response.json({ date: '2026-09-01', target_minutes })
 		})
 		expect(await client.putTargetOverride(token, '2026-09-01')).toEqual({
 			date: '2026-09-01',
 			target_minutes: 0,
 		})
+		expect(await client.putTargetOverride(token, '2026-09-01', 240)).toEqual({
+			date: '2026-09-01',
+			target_minutes: 240,
+		})
 		await client.clearTargetOverride(token, '2026-09-01')
 		expect(requests.map(({ url, init }) => [url, init.method])).toEqual([
+			['https://cukup.dev/v1/target-overrides/2026-09-01', 'PUT'],
 			['https://cukup.dev/v1/target-overrides/2026-09-01', 'PUT'],
 			['https://cukup.dev/v1/target-overrides/2026-09-01', 'DELETE'],
 		])
 		expect(JSON.parse(String(requests[0]?.init.body))).toEqual({ target_minutes: 0 })
+		expect(JSON.parse(String(requests[1]?.init.body))).toEqual({ target_minutes: 240 })
 		for (const request of requests) {
 			expect(new Headers(request.init.headers).get('authorization')).toBe(`Bearer ${token}`)
 		}
@@ -135,7 +141,14 @@ describe('CukupServiceClient', () => {
 			expect(isTargetOverrideDate(date)).toBeFalse()
 			await expect(client.putTargetOverride(token, date)).rejects.toMatchObject({ kind: 'protocol' })
 		}
-		expect(requests).toHaveLength(2)
+		expect(requests).toHaveLength(3)
+
+		const mismatched = new CukupServiceClient('https://cukup.dev', async () =>
+			Response.json({ date: '2026-09-01', target_minutes: 0 }),
+		)
+		await expect(mismatched.putTargetOverride(token, '2026-09-01', 240)).rejects.toMatchObject({
+			kind: 'protocol',
+		})
 	})
 
 	test('treats a missing capability endpoint as v1-only compatibility', async () => {
