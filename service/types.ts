@@ -67,3 +67,10 @@ export type WorkSummary = {
 	daily: SummaryPeriod
 	weekly: SummaryPeriod
 }
+
+export type TargetOverride = {
+	date: string
+	targetMinutes: 0
+	createdAt: string
+	updatedAt: string
+}

@@ -3,6 +3,7 @@ import {
 	IDLE_GRACE_MS,
 	classifyWork,
 	formatStatus,
+	jakartaDateString,
 	jakartaDayBounds,
 	latestUnmatchedStarts,
 	localDayBounds,
@@ -139,5 +140,7 @@ describe('status and target formatting', () => {
 		expect(new Date(fridayLateUTC.startMs).toISOString()).toBe('2026-08-28T17:00:00.000Z')
 		expect(fridayLateUTC.endMs - fridayLateUTC.startMs).toBe(24 * hour)
 		expect(fridayLateUTC.weekend).toBeTrue()
+		expect(jakartaDateString(Date.parse('2026-08-28T16:59:59.999Z'))).toBe('2026-08-28')
+		expect(jakartaDateString(Date.parse('2026-08-28T17:00:00.000Z'))).toBe('2026-08-29')
 	})
 })

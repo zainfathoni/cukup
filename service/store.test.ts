@@ -101,6 +101,17 @@ function createVersion1Database(path: string): { token: string; tokenId: string 
 	return { token, tokenId }
 }
 
+function createVersion2Database(path: string): void {
+	const current = new ServiceStore(path)
+	current.close()
+	const database = new Database(path, { strict: true })
+	database.exec(`
+		DROP TABLE target_overrides;
+		PRAGMA user_version = 2;
+	`)
+	database.close()
+}
+
 describe('SQLite schema migration', () => {
 	test('migrates v1 transactionally, preserves evidence, and remains stable across restart', () => {
 		const path = databasePath()
@@ -121,7 +132,7 @@ describe('SQLite schema migration', () => {
 			store.close()
 			const inspected = new Database(path, { readonly: true, strict: true })
 			expect(inspected.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
-				user_version: 2,
+				user_version: 3,
 			})
 			expect(
 				inspected
@@ -130,6 +141,28 @@ describe('SQLite schema migration', () => {
 					)
 					.get(),
 			).toEqual({ name: 'project_slug' })
+			expect(
+				inspected
+					.query<{ name: string }, []>(
+						`SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'target_overrides'`,
+					)
+					.get(),
+			).toEqual({ name: 'target_overrides' })
+			inspected.close()
+		}
+	})
+
+	test('migrates the current v2 generation once and remains stable across restart', () => {
+		const path = databasePath()
+		createVersion2Database(path)
+		for (let restart = 0; restart < 2; restart += 1) {
+			const store = new ServiceStore(path)
+			expect(store.targetOverrides()).toEqual(new Map())
+			store.close()
+			const inspected = new Database(path, { readonly: true, strict: true })
+			expect(inspected.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
+				user_version: 3,
+			})
 			inspected.close()
 		}
 	})
@@ -139,14 +172,53 @@ describe('SQLite schema migration', () => {
 		const store = new ServiceStore(path)
 		store.close()
 		const future = new Database(path, { strict: true })
-		future.exec('PRAGMA user_version = 3')
+		future.exec('PRAGMA user_version = 4')
 		future.close()
 		expect(() => new ServiceStore(path)).toThrow('newer than supported')
 		const inspected = new Database(path, { readonly: true, strict: true })
 		expect(inspected.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
-			user_version: 3,
+			user_version: 4,
 		})
 		inspected.close()
+	})
+})
+
+describe('target overrides', () => {
+	test('stores only an idempotent zero target and audit timestamps across restart and explicit clear', () => {
+		const path = databasePath()
+		const first = new ServiceStore(path)
+		expect(first.putTargetOverride('2026-09-01', 0, now)).toEqual({
+			date: '2026-09-01',
+			targetMinutes: 0,
+			createdAt: '2026-08-31T05:00:00.000Z',
+			updatedAt: '2026-08-31T05:00:00.000Z',
+		})
+		expect(first.putTargetOverride('2026-09-01', 0, now + 60_000)).toEqual({
+			date: '2026-09-01',
+			targetMinutes: 0,
+			createdAt: '2026-08-31T05:00:00.000Z',
+			updatedAt: '2026-08-31T05:00:00.000Z',
+		})
+		expect(first.targetOverrides()).toEqual(new Map([['2026-09-01', 0]]))
+		first.close()
+
+		const inspected = new Database(path, { readonly: true, strict: true })
+		expect(
+			inspected
+				.query<{ name: string }, []>(`SELECT name FROM pragma_table_info('target_overrides')`)
+				.all()
+				.map((column) => column.name),
+		).toEqual(['date', 'target_minutes', 'created_at', 'updated_at'])
+		inspected.close()
+
+		const reopened = new ServiceStore(path)
+		expect(reopened.targetOverrides()).toEqual(new Map([['2026-09-01', 0]]))
+		expect(reopened.clearTargetOverride('2026-09-01')).toBeTrue()
+		expect(reopened.clearTargetOverride('2026-09-01')).toBeFalse()
+		reopened.close()
+		const cleared = new ServiceStore(path)
+		expect(cleared.targetOverrides()).toEqual(new Map())
+		cleared.close()
 	})
 })
 

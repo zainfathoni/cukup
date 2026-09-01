@@ -4,7 +4,8 @@ The release-candidate service is the cross-source authority for Cukup work time.
 
 - timezone: `Asia/Jakarta`;
 - week start: Monday;
-- targets: 8 hours Monday–Friday and 0 hours Saturday–Sunday;
+- default targets: 8 hours Monday–Friday and 0 hours Saturday–Sunday;
+- authoritative exact-date overrides: 0 hours for explicitly marked Asia/Jakarta civil dates;
 - completed-turn grace: 15 minutes;
 - unmatched-start crash cap: 15 minutes;
 - maximum client clock skew: 10 minutes.
@@ -71,6 +72,28 @@ The hostname must exactly match one canonical lowercase hostname in `CUKUP_FLEET
 ```
 
 A different binding for the same active lineage or a label held by another active lineage returns `409 {"error":"executor_profile_conflict"}`. A malformed or unrecognized profile returns `422 {"error":"invalid_executor_profile"}` without reflecting a label. Workload OIDC returns `403 {"error":"physical_bearer_required"}` and never accepts a hostname; OIDC-owned evidence derives the Executor Label `amp-orb`. A physical v2 event submitted before binding is rejected, while existing physical v1 ingestion remains unchanged.
+
+## `PUT /v1/target-overrides/:date` and `DELETE /v1/target-overrides/:date`
+
+These authenticated API-host routes set or clear the authoritative target for one exact Asia/Jakarta civil date. Both physical bearer and allowed workload OIDC principals may call them. `:date` must be one real date in exact `YYYY-MM-DD` form; query parameters and additional path segments are rejected.
+
+PUT accepts only this closed JSON body:
+
+```json
+{"target_minutes":0}
+```
+
+A new mark and an exact retry both return `200` with exactly:
+
+```json
+{"date":"2026-09-01","target_minutes":0}
+```
+
+DELETE has no request body and returns `204` whether the override existed or was already absent. PUT and DELETE are therefore safe to retry. There is no reason field, list endpoint, or dashboard mutation route. SQLite stores only the date, zero target, and audit timestamps; it does not store free text.
+
+Malformed dates or bodies use the generic `400 {"error":"invalid_request"}` response. Normal authenticated-route transport, media-type, size, method, and unexpected-failure errors apply without echoing the date or body. Logs collapse every dynamic path to `/v1/target-overrides/:date` and never include submitted dates or target bodies.
+
+An override changes only target calculation. Existing work-time evidence and worked minutes are unchanged. If the date is today, the daily target is zero; if it is in the current Monday–Sunday week, the weekly target is reduced by that date's default target. Clearing restores the default target immediately. `/v1/summary` and the dashboard Overall Working Time panel apply the same override map while retaining their schema-1 response shapes. The dashboard remains read-only.
 
 ## `POST /v1/events:batch`
 
@@ -168,7 +191,7 @@ The summary response remains schema 1 regardless of the event schemas contributi
 }
 ```
 
-`difference_minutes` is the absolute difference from target: remaining when `UNDER`, zero when `COMPLETE`, and overage when `OVER`. A zero-target day with zero work is `COMPLETE`; work on a zero-target day is `OVER`. The fixed Asia/Jakarta timezone and Monday week boundary are server configuration rather than extra response fields.
+`difference_minutes` is the absolute difference from target: remaining when `UNDER`, zero when `COMPLETE`, and overage when `OVER`. A zero-target day with zero work is `COMPLETE`; work on a zero-target day is `OVER`. Exact-date overrides affect daily and current-week targets but do not add fields to this response. The fixed Asia/Jakarta timezone and Monday week boundary are server configuration rather than extra response fields.
 
 For each random `(source_instance_id, session_id)`, a completed turn contributes `[start, end + 15 minutes)`. An unmatched start contributes at most 15 minutes. All endpoints are clipped at `as_of`; overlapping intervals from every source are unioned globally before overlap is calculated. The union is clipped at timezone-derived local day and Monday-week boundaries, including DST transitions in any IANA timezone supported by the generic aggregation module.
 

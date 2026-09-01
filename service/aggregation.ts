@@ -102,6 +102,7 @@ export function summarizeWork(
 	events: readonly StoredWorkEvent[],
 	nowMs: number,
 	config: AggregationConfig = defaultConfig,
+	targetOverrides: ReadonlyMap<string, number> = new Map(),
 ): WorkSummary {
 	if (config.dailyTargetMinutes.length !== 7) {
 		throw new Error('Daily targets must contain Sunday through Saturday')
@@ -115,10 +116,12 @@ export function summarizeWork(
 	const weekEndMs = startOfZonedDay(weekEndDate, config.timezone)
 	const intervals = buildGlobalIntervals(events, nowMs, config)
 
-	const dailyTargetMs = targetMinutes(localToday, config.dailyTargetMinutes) * 60_000
+	const dailyTargetMs = targetMinutes(localToday, config.dailyTargetMinutes, targetOverrides) * 60_000
 	let weeklyTargetMs = 0
 	for (let offset = 0; offset < 7; offset += 1) {
-		weeklyTargetMs += targetMinutes(addDays(weekStartDate, offset), config.dailyTargetMinutes) * 60_000
+		weeklyTargetMs +=
+			targetMinutes(addDays(weekStartDate, offset), config.dailyTargetMinutes, targetOverrides) *
+			60_000
 	}
 
 	return {
@@ -180,8 +183,19 @@ export function addDays(date: CivilDate, amount: number): CivilDate {
 	return { year: value.getUTCFullYear(), month: value.getUTCMonth() + 1, day: value.getUTCDate() }
 }
 
-function targetMinutes(date: CivilDate, targets: readonly number[]): number {
-	return targets[new Date(Date.UTC(date.year, date.month - 1, date.day)).getUTCDay()]!
+function targetMinutes(
+	date: CivilDate,
+	targets: readonly number[],
+	overrides: ReadonlyMap<string, number>,
+): number {
+	return (
+		overrides.get(civilDateString(date)) ??
+		targets[new Date(Date.UTC(date.year, date.month - 1, date.day)).getUTCDay()]!
+	)
+}
+
+function civilDateString(date: CivilDate): string {
+	return `${String(date.year).padStart(4, '0')}-${String(date.month).padStart(2, '0')}-${String(date.day).padStart(2, '0')}`
 }
 
 function mondayOffset(date: CivilDate): number {

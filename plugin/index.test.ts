@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import workHoursPlugin, { executorProfileFor } from './index.ts'
 import { PROJECT_SLUG_CONFIG_KEY } from './project.ts'
+import { jakartaDateString } from './tracker.ts'
 
 const temporaryDirectories: string[] = []
 
@@ -24,6 +25,7 @@ describe('work-hours plugin', () => {
 		const handlers = new Map<string, (event: any, context?: any) => unknown>()
 		const commands = new Map<string, (context: any) => unknown>()
 		const commandCategories = new Map<string, string>()
+		const commandTitles = new Map<string, string>()
 		const disposers: Array<() => unknown> = []
 		const notifications: string[] = []
 		const statusDialogs: Array<{ title: string; message?: string; options: string[] }> = []
@@ -35,11 +37,12 @@ describe('work-hours plugin', () => {
 			},
 			registerCommand(
 				id: string,
-				options: { category: string; availability?: unknown },
+				options: { category: string; title: string; availability?: unknown },
 				handler: (context: any) => unknown,
 			) {
 				commands.set(id, handler)
 				commandCategories.set(id, options.category)
+				commandTitles.set(id, options.title)
 				commandAvailability.set(id, options.availability)
 				return { unsubscribe() {}, setAvailability() {} }
 			},
@@ -78,9 +81,11 @@ describe('work-hours plugin', () => {
 			expect([...commands.keys()]).toEqual([
 				'work-hours-status',
 				'project-slug-set',
+				'day-off-set',
 				'work-hours-set-target',
 			])
-			expect([...commandCategories.values()]).toEqual(['cukup', 'cukup', 'cukup'])
+			expect([...commandCategories.values()]).toEqual(['cukup', 'cukup', 'cukup', 'cukup'])
+			expect(commandTitles.get('day-off-set')).toBe('Set day off')
 			expect(commandAvailability.get('project-slug-set')).toEqual({ type: 'enabled' })
 
 			const event = {
@@ -104,6 +109,131 @@ describe('work-hours plugin', () => {
 			await Promise.all(disposers.map((dispose) => dispose()))
 			if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME
 			else process.env.XDG_STATE_HOME = previousStateHome
+		}
+	})
+
+	test('validates, previews, confirms, marks, and explicitly clears an authoritative Jakarta day off', async () => {
+		const stateHome = mkdtempSync(join(tmpdir(), 'amp-work-hours-plugin-test-'))
+		temporaryDirectories.push(stateHome)
+		const token = `cukup_v1_${'a'.repeat(43)}`
+		const tokenFile = join(stateHome, 'token')
+		writeFileSync(tokenFile, `${token}\n`, { mode: 0o600 })
+		chmodSync(tokenFile, 0o600)
+		const previousStateHome = process.env.XDG_STATE_HOME
+		const previousTokenFile = process.env.CUKUP_TOKEN_FILE
+		const previousServiceURL = process.env.CUKUP_SERVICE_URL
+		const previousFetch = globalThis.fetch
+		process.env.XDG_STATE_HOME = stateHome
+		process.env.CUKUP_TOKEN_FILE = tokenFile
+		process.env.CUKUP_SERVICE_URL = 'https://api.cukup.dev'
+
+		const mutations: Array<{ url: string; init: RequestInit }> = []
+		const order: string[] = []
+		globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+			const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+			if (url.endsWith('/v1/capabilities')) {
+				return Response.json({
+					schema_version: 1,
+					accepted_event_schema_versions: [1, 2],
+					preferred_new_event_schema_version: 1,
+				})
+			}
+			if (url.endsWith('/v1/time')) {
+				return Response.json({ server_time: new Date().toISOString() })
+			}
+			if (url.endsWith('/v1/summary')) {
+				return Response.json({
+					schema_version: 1,
+					as_of: new Date().toISOString(),
+					daily: { status: 'UNDER', worked_minutes: 0, target_minutes: 480, difference_minutes: 480 },
+					weekly: { status: 'UNDER', worked_minutes: 0, target_minutes: 2_400, difference_minutes: 2_400 },
+				})
+			}
+			if (url.endsWith('/v1/target-overrides/2026-09-01')) {
+				const request = { url, init: init ?? {} }
+				mutations.push(request)
+				order.push(String(init?.method))
+				return init?.method === 'PUT'
+					? Response.json({ date: '2026-09-01', target_minutes: 0 })
+					: new Response(null, { status: 204 })
+			}
+			return new Response(null, { status: 404 })
+		}) as typeof fetch
+
+		const commands = new Map<string, (context: any) => unknown>()
+		const disposers: Array<() => unknown> = []
+		const amp = {
+			on() { return { unsubscribe() {} } },
+			registerCommand(id: string, _options: unknown, handler: (context: any) => unknown) {
+				commands.set(id, handler)
+				return { unsubscribe() {}, setAvailability() {} }
+			},
+			onDispose(callback: () => unknown) { disposers.push(callback); return { unsubscribe() {} } },
+			threads: { get: () => ({ state: { get: async () => 'idle' } }) },
+			configuration: {
+				get: async () => ({}),
+				update: async () => {},
+				delete: async () => {},
+			},
+			system: { executor: { kind: 'local' }, user: { workspace: {} } },
+			$: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
+		}
+		const inputs = ['2026-09-01', '2026-09-01', '2026-02-29']
+		const inputOptions: Array<{ initialValue?: string; submitButtonText?: string }> = []
+		const selections = ['Mark day off', 'Clear / undo']
+		const confirmations: Array<{ title: string; message?: string }> = []
+		const notifications: string[] = []
+		const context = {
+			ui: {
+				input: async (options: { initialValue?: string; submitButtonText?: string }) => {
+					inputOptions.push(options)
+					return inputs.shift()
+				},
+				select: async () => selections.shift(),
+				confirm: async (options: { title: string; message?: string }) => {
+					confirmations.push(options)
+					order.push('confirm')
+					return true
+				},
+				notify: async (message: string) => { notifications.push(message) },
+			},
+		}
+
+		try {
+			workHoursPlugin(amp as never)
+			await commands.get('day-off-set')?.(context)
+			await commands.get('day-off-set')?.(context)
+			await commands.get('day-off-set')?.(context)
+			expect(inputOptions[0]).toMatchObject({
+				initialValue: jakartaDateString(Date.now()),
+				submitButtonText: 'Preview',
+			})
+			expect(confirmations.map((confirmation) => confirmation.title)).toEqual([
+				'Mark 2026-09-01 as day off?',
+				'Clear day off for 2026-09-01?',
+			])
+			expect(confirmations.every((confirmation) => confirmation.message?.includes('evidence remains unchanged'))).toBeTrue()
+			expect(order).toEqual(['confirm', 'PUT', 'confirm', 'DELETE'])
+			expect(mutations.map(({ url, init }) => [url, init.method])).toEqual([
+				['https://api.cukup.dev/v1/target-overrides/2026-09-01', 'PUT'],
+				['https://api.cukup.dev/v1/target-overrides/2026-09-01', 'DELETE'],
+			])
+			expect(JSON.parse(String(mutations[0]?.init.body))).toEqual({ target_minutes: 0 })
+			expect(notifications).toEqual([
+				'Authoritative target for 2026-09-01 is now 0m.',
+				'Authoritative day-off override for 2026-09-01 is cleared.',
+				'Enter a real date in exact YYYY-MM-DD format.',
+			])
+			expect(notifications.join('\n')).not.toContain(token)
+		} finally {
+			await Promise.all(disposers.map((dispose) => dispose()))
+			globalThis.fetch = previousFetch
+			if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME
+			else process.env.XDG_STATE_HOME = previousStateHome
+			if (previousTokenFile === undefined) delete process.env.CUKUP_TOKEN_FILE
+			else process.env.CUKUP_TOKEN_FILE = previousTokenFile
+			if (previousServiceURL === undefined) delete process.env.CUKUP_SERVICE_URL
+			else process.env.CUKUP_SERVICE_URL = previousServiceURL
 		}
 	})
 

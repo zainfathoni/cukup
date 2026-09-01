@@ -316,6 +316,91 @@ describe('HTTP boundary', () => {
 		value.store.close()
 	})
 
+	test('sets and clears an idempotent authoritative day off for bearer and workload callers', async () => {
+		const value = fixture()
+		const date = '2026-08-31'
+		const put = (token: string, body: unknown = { target_minutes: 0 }) =>
+			value.app.fetch(
+				request(`/v1/target-overrides/${date}`, {
+					method: 'PUT',
+					token,
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify(body),
+				}),
+			)
+
+		for (const token of [value.token, workloadToken()]) {
+			const response = await put(token)
+			expect(response.status).toBe(200)
+			expect(await response.json()).toEqual({ date, target_minutes: 0 })
+		}
+		expect(value.store.targetOverrides()).toEqual(new Map([[date, 0]]))
+		expect(value.store.events()).toEqual([])
+
+		const dayOff = await value.app.fetch(request('/v1/summary', { token: value.token }))
+		expect(await dayOff.json()).toEqual({
+			schema_version: 1,
+			as_of: '2026-08-31T05:00:00.000Z',
+			daily: {
+				status: 'COMPLETE',
+				worked_minutes: 0,
+				target_minutes: 0,
+				difference_minutes: 0,
+			},
+			weekly: {
+				status: 'UNDER',
+				worked_minutes: 0,
+				target_minutes: 1_920,
+				difference_minutes: 1_920,
+			},
+		})
+
+		for (const token of [workloadToken(), value.token]) {
+			const response = await value.app.fetch(
+				request(`/v1/target-overrides/${date}`, { method: 'DELETE', token }),
+			)
+			expect(response.status).toBe(204)
+			expect(await response.text()).toBe('')
+		}
+		const restored = await value.app.fetch(request('/v1/summary', { token: value.token }))
+		const restoredBody = (await restored.json()) as any
+		expect(restoredBody.schema_version).toBe(1)
+		expect(restoredBody.daily).toMatchObject({ status: 'UNDER', target_minutes: 480 })
+		expect(restoredBody.weekly.target_minutes).toBe(2_400)
+
+		for (const [path, method, body, status] of [
+			[`/v1/target-overrides/2026-02-29`, 'PUT', { target_minutes: 0 }, 400],
+			[`/v1/target-overrides/${date}?reason=private`, 'PUT', { target_minutes: 0 }, 400],
+			[`/v1/target-overrides/${date}`, 'PUT', { target_minutes: 0, reason: 'private' }, 400],
+			[`/v1/target-overrides/${date}`, 'DELETE', { target_minutes: 0 }, 400],
+			[`/v1/target-overrides/${date}`, 'GET', undefined, 405],
+		] as const) {
+			const response = await value.app.fetch(
+				request(path, {
+					method,
+					token: value.token,
+					...(body === undefined
+						? {}
+						: {
+								headers: { 'content-type': 'application/json' },
+								body: JSON.stringify(body),
+							}),
+				}),
+			)
+			expect(response.status).toBe(status)
+			expect(await response.json()).toEqual({
+				error: status === 405 ? 'method_not_allowed' : 'invalid_request',
+			})
+		}
+		const logs = value.logs.join('\n')
+		expect(logs).toContain('/v1/target-overrides/:date')
+		expect(logs).not.toContain(date)
+		expect(logs).not.toContain('2026-02-29')
+		expect(logs).not.toContain('reason')
+		expect(logs).not.toContain('target_minutes')
+		value.store.close()
+	})
+
 	test('uses generic request and internal error responses without credential leakage', async () => {
 		const value = fixture()
 		const wrongMethod = await value.app.fetch(
@@ -377,6 +462,14 @@ test('persists authenticated ingestion across a clean store restart', async () =
 			body: JSON.stringify({ events: [wireEvent(1)] }),
 		}),
 	)
+	await first.app.fetch(
+		request('/v1/target-overrides/2026-08-31', {
+			method: 'PUT',
+			token: first.token,
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ target_minutes: 0 }),
+		}),
+	)
 	first.store.close()
 
 	const reopened = new ServiceStore(path)
@@ -388,7 +481,11 @@ test('persists authenticated ingestion across a clean store restart', async () =
 	})
 	const response = await app.fetch(request('/v1/summary', { token: first.token }))
 	expect(response.status).toBe(200)
-	expect((await response.json() as any).daily.worked_minutes).toBe(10)
+	expect((await response.json() as any).daily).toMatchObject({
+		status: 'OVER',
+		worked_minutes: 10,
+		target_minutes: 0,
+	})
 	reopened.close()
 })
 

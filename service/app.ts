@@ -8,6 +8,8 @@ import {
 	batchResult,
 	parseBatch,
 	parseExecutorProfile,
+	parseTargetOverride,
+	parseTargetOverrideDate,
 	type BatchResult,
 } from './protocol.ts'
 import { ServiceStore } from './store.ts'
@@ -122,8 +124,28 @@ async function authenticatedResponse(
 	}
 	if (url.pathname === '/v1/summary') {
 		return request.method === 'GET'
-			? json(summarizeWork(store.events(), now()))
+			? json(summarizeWork(store.events(), now(), undefined, store.targetOverrides()))
 			: json({ error: 'method_not_allowed' }, 405, { allow: 'GET' })
+	}
+	if (url.pathname.startsWith('/v1/target-overrides/')) {
+		const date = parseTargetOverrideDate(url.pathname.slice('/v1/target-overrides/'.length))
+		if (date === undefined || url.search !== '') return json({ error: 'invalid_request' }, 400)
+		if (request.method === 'DELETE') {
+			if (request.body !== null) return json({ error: 'invalid_request' }, 400)
+			store.clearTargetOverride(date)
+			return empty(204)
+		}
+		if (request.method !== 'PUT') {
+			return json({ error: 'method_not_allowed' }, 405, { allow: 'PUT, DELETE' })
+		}
+		if (!isJsonRequest(request)) return json({ error: 'unsupported_media_type' }, 415)
+		const body = await requestBody(request)
+		if (body.outcome === 'too_large') return json({ error: 'payload_too_large' }, 413)
+		if (body.outcome === 'invalid') return json({ error: 'invalid_request' }, 400)
+		const targetOverride = parseTargetOverride(body.value)
+		if (!targetOverride) return json({ error: 'invalid_request' }, 400)
+		store.putTargetOverride(date, targetOverride.targetMinutes, now())
+		return json({ date, target_minutes: targetOverride.targetMinutes })
 	}
 	if (url.pathname === '/v1/capabilities') {
 		return request.method === 'GET'
@@ -205,6 +227,9 @@ function originalHostname(request: Request, url: URL): string {
 }
 
 function logPath(pathname: string): string {
+	if (pathname.startsWith('/v1/target-overrides/')) {
+		return '/v1/target-overrides/:date'
+	}
 	if (
 		pathname === '/up' ||
 		pathname === '/healthz' ||
@@ -264,6 +289,16 @@ function json(
 			'cache-control': 'no-store',
 			'x-content-type-options': 'nosniff',
 			...headers,
+		},
+	})
+}
+
+function empty(status: number): Response {
+	return new Response(null, {
+		status,
+		headers: {
+			'cache-control': 'no-store',
+			'x-content-type-options': 'nosniff',
 		},
 	})
 }

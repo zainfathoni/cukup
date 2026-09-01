@@ -4,10 +4,11 @@ import { join } from 'node:path'
 import {
 	createFileTokenProvider,
 	createOidcTokenProvider,
+	TokenProviderError,
 	unavailableTokenProvider,
 	type TokenProvider,
 } from './auth.ts'
-import { CukupServiceClient } from './protocol.ts'
+import { CukupServiceClient, isTargetOverrideDate, ServiceRequestError } from './protocol.ts'
 import {
 	PROJECT_SLUG_CONFIG_KEY,
 	normalizeProjectSlug,
@@ -20,6 +21,7 @@ import {
 	classifyWork,
 	formatMinutes,
 	formatStatus,
+	jakartaDateString,
 	jakartaDayBounds,
 	latestUnmatchedStarts,
 	parseDailyTarget,
@@ -187,6 +189,64 @@ export default function (amp: PluginAPI) {
 	)
 
 	amp.registerCommand(
+		'day-off-set',
+		{
+			title: 'Set day off',
+			category: 'cukup',
+			description: 'Mark or clear an authoritative day-off target override.',
+		},
+		async (ctx) => {
+			const date = await ctx.ui.input({
+				title: 'Set day off',
+				helpText: 'Enter the exact Asia/Jakarta civil date in YYYY-MM-DD format.',
+				initialValue: jakartaDateString(now()),
+				submitButtonText: 'Preview',
+			})
+			if (date === undefined) return
+			if (!isTargetOverrideDate(date)) {
+				await ctx.ui.notify('Enter a real date in exact YYYY-MM-DD format.')
+				return
+			}
+			const action = await ctx.ui.select({
+				title: 'Set day off',
+				message: `Asia/Jakarta date: **${date}**`,
+				options: ['Mark day off', 'Clear / undo'],
+			})
+			if (action !== 'Mark day off' && action !== 'Clear / undo') return
+			const marking = action === 'Mark day off'
+			const confirmed = await ctx.ui.confirm({
+				title: marking ? `Mark ${date} as day off?` : `Clear day off for ${date}?`,
+				message: marking
+					? 'The authoritative target will be **0m**. Work-time evidence remains unchanged.'
+					: 'The authoritative target will return to the default for that weekday. Work-time evidence remains unchanged.',
+				confirmButtonText: marking ? 'Mark day off' : 'Clear / undo',
+			})
+			if (!confirmed) return
+			if (!client) {
+				await ctx.ui.notify('Authoritative day-off update failed. The Cukup service is unavailable.')
+				return
+			}
+			try {
+				const token = await tokenProvider.getToken()
+				if (marking) await client.putTargetOverride(token, date)
+				else await client.clearTargetOverride(token, date)
+			} catch (error) {
+				const detail =
+					error instanceof TokenProviderError || error instanceof ServiceRequestError
+						? ` ${error.message}`
+						: ''
+				await ctx.ui.notify(`Authoritative day-off update failed.${detail}`)
+				return
+			}
+			await ctx.ui.notify(
+				marking
+					? `Authoritative target for ${date} is now 0m.`
+					: `Authoritative day-off override for ${date} is cleared.`,
+			)
+		},
+	)
+
+	amp.registerCommand(
 		'work-hours-set-target',
 		{
 			title: 'Set local fallback target',
@@ -196,7 +256,7 @@ export default function (amp: PluginAPI) {
 		async (ctx) => {
 			const input = await ctx.ui.input({
 				title: 'Set local fallback weekday target',
-				helpText: 'The authoritative service remains fixed at 8:00 Mon–Fri and 0:00 weekends.',
+				helpText: 'The authoritative default remains 8:00 Mon–Fri and 0:00 weekends.',
 				initialValue: formatTargetInput(store.weekdayTargetMinutes()),
 				submitButtonText: 'Save fallback target',
 			})

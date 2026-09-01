@@ -50,6 +50,11 @@ export type ServiceCapabilities = {
 	preferredNewEventSchemaVersion: 1 | 2
 }
 
+export type TargetOverride = {
+	date: string
+	target_minutes: 0
+}
+
 export type ClockSample = {
 	offsetMs: number
 	roundTripMs: number
@@ -160,6 +165,32 @@ export class CukupServiceClient {
 		return parseSummary(await responseJSON(response))
 	}
 
+	async putTargetOverride(token: string, date: string): Promise<TargetOverride> {
+		if (!isTargetOverrideDate(date)) throw new ServiceRequestError('protocol', false)
+		const response = await this.#request(`/v1/target-overrides/${date}`, token, {
+			method: 'PUT',
+			body: JSON.stringify({ target_minutes: 0 }),
+		})
+		const body = await responseJSON(response)
+		if (
+			!isRecord(body) ||
+			Object.keys(body).length !== 2 ||
+			body.date !== date ||
+			body.target_minutes !== 0
+		) {
+			throw new ServiceRequestError('protocol', false)
+		}
+		return { date, target_minutes: 0 }
+	}
+
+	async clearTargetOverride(token: string, date: string): Promise<void> {
+		if (!isTargetOverrideDate(date)) throw new ServiceRequestError('protocol', false)
+		const response = await this.#request(`/v1/target-overrides/${date}`, token, {
+			method: 'DELETE',
+		})
+		if (response.status !== 204) throw new ServiceRequestError('protocol', false)
+	}
+
 	async #request(
 		path: string,
 		token: string,
@@ -225,6 +256,30 @@ export function validateServiceURL(value: string): URL {
 		throw new Error('CUKUP_SERVICE_URL must use HTTPS except for a loopback deployment proxy.')
 	}
 	return url
+}
+
+export function isTargetOverrideDate(value: string): boolean {
+	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+	if (!match) return false
+	const year = Number(match[1])
+	const month = Number(match[2])
+	const day = Number(match[3])
+	if (year < 1 || month < 1 || month > 12) return false
+	const daysInMonth = [
+		31,
+		year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28,
+		31,
+		30,
+		31,
+		30,
+		31,
+		31,
+		30,
+		31,
+		30,
+		31,
+	][month - 1]!
+	return day >= 1 && day <= daysInMonth
 }
 
 function parseSummaryPeriod(value: unknown): SummaryPeriod {

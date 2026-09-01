@@ -45,6 +45,7 @@ test('creates a verified online SQLite snapshot and restores an independently re
 	const principal = store.authenticateBearer(issued.token)!
 	store.bindExecutorLabel(issued.tokenId, 'zain-macbook')
 	store.ingest(principal, event(1, { schemaVersion: 2, projectSlug: 'cukup-service' }), now)
+	store.putTargetOverride('2026-08-31', 0, now)
 
 	const backup = backupDatabase(sourcePath, backupDirectory, {
 		nowMs: now,
@@ -54,7 +55,7 @@ test('creates a verified online SQLite snapshot and restores an independently re
 		backup_id: 'snapshot',
 		created_at: '2026-08-31T05:00:00.000Z',
 		integrity_check: 'ok',
-		sqlite_user_version: 2,
+		sqlite_user_version: 3,
 	})
 	expect(verifyBackup(backup.databasePath, backup.metadataPath)).toEqual(backup.metadata)
 
@@ -74,7 +75,7 @@ test('creates a verified online SQLite snapshot and restores an independently re
 	copyFileSync(backup.metadataPath, retrievedMetadata)
 	const restoredPath = join(directory, 'clean-restore', 'service.sqlite')
 	restoreDatabase(retrievedDatabase, restoredPath, { metadataPath: retrievedMetadata })
-	expect(inspectDatabase(restoredPath)).toEqual({ integrity: 'ok', userVersion: 2 })
+	expect(inspectDatabase(restoredPath)).toEqual({ integrity: 'ok', userVersion: 3 })
 
 	const restored = new ServiceStore(restoredPath)
 	expect(restored.authenticateBearer(issued.token)).toEqual({
@@ -87,10 +88,11 @@ test('creates a verified online SQLite snapshot and restores an independently re
 		projectSlug: 'cukup-service',
 		executorLabel: 'zain-macbook',
 	})
+	expect(restored.targetOverrides()).toEqual(new Map([['2026-08-31', 0]]))
 	restored.close()
 })
 
-test('restores both pre-migration and post-migration backups into clean restartable databases', () => {
+test('restores v1, v2, and v3 backups into clean restartable databases', () => {
 	const directory = workspace()
 	const versionOnePath = join(directory, 'version-one.sqlite')
 	const versionOne = new Database(versionOnePath, { create: true, strict: true })
@@ -149,19 +151,46 @@ test('restores both pre-migration and post-migration backups into clean restarta
 	expect(upgraded.events()).toHaveLength(1)
 	expect(upgraded.attributedEvents()[0]?.executorLabel).toBe('amp-orb')
 	upgraded.close()
-	expect(inspectDatabase(upgradedPath).userVersion).toBe(2)
+	expect(inspectDatabase(upgradedPath).userVersion).toBe(3)
 
+	const versionTwoPath = join(directory, 'version-two.sqlite')
+	const current = new ServiceStore(versionTwoPath)
+	current.close()
+	const versionTwo = new Database(versionTwoPath, { strict: true })
+	versionTwo.exec(`
+		DROP TABLE target_overrides;
+		PRAGMA user_version = 2;
+	`)
+	versionTwo.close()
+	const versionTwoBackup = backupDatabase(versionTwoPath, join(directory, 'v2-backups'), {
+		nowMs: now,
+		backupId: 'version-two',
+	})
+	expect(versionTwoBackup.metadata.sqlite_user_version).toBe(2)
+	const versionTwoRestoredPath = join(directory, 'v2-restored', 'service.sqlite')
+	restoreDatabase(versionTwoBackup.databasePath, versionTwoRestoredPath, {
+		metadataPath: versionTwoBackup.metadataPath,
+	})
+	const versionTwoRestored = new ServiceStore(versionTwoRestoredPath)
+	expect(versionTwoRestored.targetOverrides()).toEqual(new Map())
+	versionTwoRestored.close()
+	expect(inspectDatabase(versionTwoRestoredPath).userVersion).toBe(3)
+
+	const upgradedWithOverride = new ServiceStore(upgradedPath)
+	upgradedWithOverride.putTargetOverride('2026-08-31', 0, now)
+	upgradedWithOverride.close()
 	const post = backupDatabase(upgradedPath, join(directory, 'post-backups'), {
 		nowMs: now + 1,
 		backupId: 'post-migration',
 	})
-	expect(post.metadata.sqlite_user_version).toBe(2)
+	expect(post.metadata.sqlite_user_version).toBe(3)
 	const postRestoredPath = join(directory, 'post-restored', 'service.sqlite')
 	restoreDatabase(post.databasePath, postRestoredPath, { metadataPath: post.metadataPath })
 	const postRestored = new ServiceStore(postRestoredPath)
 	expect(postRestored.events()).toEqual([
 		expect.objectContaining({ schemaVersion: 1, sourceSequence: 1 }),
 	])
+	expect(postRestored.targetOverrides()).toEqual(new Map([['2026-08-31', 0]]))
 	postRestored.close()
 })
 

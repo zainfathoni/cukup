@@ -20,6 +20,7 @@ const UUID_V5_OR_V7 =
 const UUID_V4_OR_V5 =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[45][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const UTC_MILLISECONDS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
+const CIVIL_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
 
 export type ParsedBatchEntry =
 	| { index: number; eventId?: string; event: WorkEvent }
@@ -39,6 +40,37 @@ export function parseExecutorProfile(value: unknown): string | undefined {
 		return undefined
 	}
 	return value.hostname
+}
+
+export function parseTargetOverrideDate(value: string): string | undefined {
+	const match = CIVIL_DATE.exec(value)
+	if (!match) return undefined
+	const year = Number(match[1])
+	const month = Number(match[2])
+	const day = Number(match[3])
+	if (year < 1 || month < 1 || month > 12) return undefined
+	const daysInMonth = [
+		31,
+		isLeapYear(year) ? 29 : 28,
+		31,
+		30,
+		31,
+		30,
+		31,
+		31,
+		30,
+		31,
+		30,
+		31,
+	][month - 1]!
+	return day >= 1 && day <= daysInMonth ? value : undefined
+}
+
+export function parseTargetOverride(value: unknown): { targetMinutes: 0 } | undefined {
+	if (!isRecord(value) || Object.keys(value).length !== 1 || value.target_minutes !== 0) {
+		return undefined
+	}
+	return { targetMinutes: 0 }
 }
 
 export function parseBatch(value: unknown): ParsedBatchEntry[] | undefined {
@@ -132,4 +164,8 @@ function parseEvent(value: unknown, index: number): ParsedBatchEntry {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isLeapYear(year: number): boolean {
+	return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
 }
