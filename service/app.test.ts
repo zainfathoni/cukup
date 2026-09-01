@@ -316,10 +316,10 @@ describe('HTTP boundary', () => {
 		value.store.close()
 	})
 
-	test('sets and clears an idempotent authoritative day off for bearer and workload callers', async () => {
+	test('sets full- and half-day targets and clears them for bearer and workload callers', async () => {
 		const value = fixture()
 		const date = '2026-08-31'
-		const put = (token: string, body: unknown = { target_minutes: 0 }) =>
+		const put = (token: string, body: unknown) =>
 			value.app.fetch(
 				request(`/v1/target-overrides/${date}`, {
 					method: 'PUT',
@@ -330,7 +330,7 @@ describe('HTTP boundary', () => {
 			)
 
 		for (const token of [value.token, workloadToken()]) {
-			const response = await put(token)
+			const response = await put(token, { target_minutes: 0 })
 			expect(response.status).toBe(200)
 			expect(await response.json()).toEqual({ date, target_minutes: 0 })
 		}
@@ -356,6 +356,31 @@ describe('HTTP boundary', () => {
 		})
 
 		for (const token of [workloadToken(), value.token]) {
+			const response = await put(token, { target_minutes: 240 })
+			expect(response.status).toBe(200)
+			expect(await response.json()).toEqual({ date, target_minutes: 240 })
+		}
+		expect(value.store.targetOverrides()).toEqual(new Map([[date, 240]]))
+		expect(value.store.events()).toEqual([])
+		const halfDay = await value.app.fetch(request('/v1/summary', { token: value.token }))
+		expect(await halfDay.json()).toEqual({
+			schema_version: 1,
+			as_of: '2026-08-31T05:00:00.000Z',
+			daily: {
+				status: 'UNDER',
+				worked_minutes: 0,
+				target_minutes: 240,
+				difference_minutes: 240,
+			},
+			weekly: {
+				status: 'UNDER',
+				worked_minutes: 0,
+				target_minutes: 2_160,
+				difference_minutes: 2_160,
+			},
+		})
+
+		for (const token of [workloadToken(), value.token]) {
 			const response = await value.app.fetch(
 				request(`/v1/target-overrides/${date}`, { method: 'DELETE', token }),
 			)
@@ -372,6 +397,8 @@ describe('HTTP boundary', () => {
 			[`/v1/target-overrides/2026-02-29`, 'PUT', { target_minutes: 0 }, 400],
 			[`/v1/target-overrides/${date}?reason=private`, 'PUT', { target_minutes: 0 }, 400],
 			[`/v1/target-overrides/${date}`, 'PUT', { target_minutes: 0, reason: 'private' }, 400],
+			[`/v1/target-overrides/${date}`, 'PUT', { target_minutes: 1 }, 400],
+			[`/v1/target-overrides/${date}`, 'PUT', { target_minutes: 480 }, 400],
 			[`/v1/target-overrides/${date}`, 'DELETE', { target_minutes: 0 }, 400],
 			[`/v1/target-overrides/${date}`, 'GET', undefined, 405],
 		] as const) {
@@ -470,6 +497,15 @@ test('persists authenticated ingestion across a clean store restart', async () =
 			body: JSON.stringify({ target_minutes: 0 }),
 		}),
 	)
+	await first.app.fetch(
+		request('/v1/target-overrides/2026-08-31', {
+			method: 'PUT',
+			token: first.token,
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ target_minutes: 240 }),
+		}),
+	)
+	expect(first.store.events()).toHaveLength(1)
 	first.store.close()
 
 	const reopened = new ServiceStore(path)
@@ -482,9 +518,10 @@ test('persists authenticated ingestion across a clean store restart', async () =
 	const response = await app.fetch(request('/v1/summary', { token: first.token }))
 	expect(response.status).toBe(200)
 	expect((await response.json() as any).daily).toMatchObject({
-		status: 'OVER',
+		status: 'UNDER',
 		worked_minutes: 10,
-		target_minutes: 0,
+		target_minutes: 240,
+		difference_minutes: 230,
 	})
 	reopened.close()
 })

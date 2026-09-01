@@ -5,7 +5,7 @@ The release-candidate service is the cross-source authority for Cukup work time.
 - timezone: `Asia/Jakarta`;
 - week start: Monday;
 - default targets: 8 hours Monday–Friday and 0 hours Saturday–Sunday;
-- authoritative exact-date overrides: 0 hours for explicitly marked Asia/Jakarta civil dates;
+- authoritative exact-date overrides: exactly 0 or 4 hours for explicitly selected Asia/Jakarta civil dates;
 - completed-turn grace: 15 minutes;
 - unmatched-start crash cap: 15 minutes;
 - maximum client clock skew: 10 minutes.
@@ -77,23 +77,23 @@ A different binding for the same active lineage or a label held by another activ
 
 These authenticated API-host routes set or clear the authoritative target for one exact Asia/Jakarta civil date. Both physical bearer and allowed workload OIDC principals may call them. `:date` must be one real date in exact `YYYY-MM-DD` form; query parameters and additional path segments are rejected.
 
-PUT accepts only this closed JSON body:
+PUT accepts only a closed JSON body whose target is exactly `0` (full day off) or `240` (half day):
 
 ```json
-{"target_minutes":0}
+{"target_minutes":240}
 ```
 
-A new mark and an exact retry both return `200` with exactly:
+A new value, a change from the other allowed value, and an exact retry return `200` with exactly the stored value:
 
 ```json
-{"date":"2026-09-01","target_minutes":0}
+{"date":"2026-09-01","target_minutes":240}
 ```
 
-DELETE has no request body and returns `204` whether the override existed or was already absent. PUT and DELETE are therefore safe to retry. There is no reason field, list endpoint, or dashboard mutation route. SQLite stores only the date, zero target, and audit timestamps; it does not store free text.
+Changing the value preserves `created_at` and advances `updated_at`; an exact retry changes neither timestamp. DELETE has no request body and returns `204` whether the override existed or was already absent. PUT and DELETE are therefore safe to retry. There is no reason field, list endpoint, or dashboard mutation route. SQLite stores only the date, selected target, and audit timestamps; it does not store free text.
 
 Malformed dates or bodies use the generic `400 {"error":"invalid_request"}` response. Normal authenticated-route transport, media-type, size, method, and unexpected-failure errors apply without echoing the date or body. Logs collapse every dynamic path to `/v1/target-overrides/:date` and never include submitted dates or target bodies.
 
-An override changes only target calculation. Existing work-time evidence and worked minutes are unchanged. If the date is today, the daily target is zero; if it is in the current Monday–Sunday week, the weekly target is reduced by that date's default target. Clearing restores the default target immediately. `/v1/summary` and the dashboard Overall Working Time panel apply the same override map while retaining their schema-1 response shapes. The dashboard remains read-only.
+An override changes only target calculation. Existing work-time evidence and worked minutes are unchanged. If the date is today, the daily target is the selected 0 or 240 minutes; if it is in the current Monday–Sunday week, that value replaces the date's default target. One weekday half-day therefore changes a standard 2,400-minute week to 2,160 minutes. Worked minutes below, equal to, or above the selected target remain `UNDER`, `COMPLETE`, or `OVER`. Clearing restores the default target immediately. `/v1/summary` and the dashboard Overall Working Time panel apply the same override map while retaining their schema-1 response shapes. The dashboard remains read-only.
 
 ## `POST /v1/events:batch`
 
