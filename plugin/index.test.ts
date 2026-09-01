@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -8,11 +8,24 @@ import { PROJECT_SLUG_CONFIG_KEY } from './project.ts'
 import { jakartaDateString } from './tracker.ts'
 
 const temporaryDirectories: string[] = []
+let previousTokenFile: string | undefined
+let previousServiceURL: string | undefined
+
+beforeEach(() => {
+	previousTokenFile = process.env.CUKUP_TOKEN_FILE
+	previousServiceURL = process.env.CUKUP_SERVICE_URL
+	process.env.CUKUP_TOKEN_FILE = '/nonexistent/cukup-plugin-test-token'
+	process.env.CUKUP_SERVICE_URL = 'https://api.cukup.dev'
+})
 
 afterEach(() => {
 	for (const directory of temporaryDirectories.splice(0)) {
 		rmSync(directory, { recursive: true, force: true })
 	}
+	if (previousTokenFile === undefined) delete process.env.CUKUP_TOKEN_FILE
+	else process.env.CUKUP_TOKEN_FILE = previousTokenFile
+	if (previousServiceURL === undefined) delete process.env.CUKUP_SERVICE_URL
+	else process.env.CUKUP_SERVICE_URL = previousServiceURL
 })
 
 describe('work-hours plugin', () => {
