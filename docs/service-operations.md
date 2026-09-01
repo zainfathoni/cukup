@@ -45,9 +45,11 @@ docker build -f Dockerfile.service -t cukup-service-rc .
 
 After explicit deployment approval, verify minimal health through the final HTTPS hostname, then authenticated `/v1/time`, a disposable ingestion source, summary, and persistence across one normal restart. Do not paste the credential, JWT, headers, or response containing identity data into Fleet, GitHub, or an Amp thread.
 
-Record the deployed immutable image reference and the prior known-good migration-aware reference for every release. SQLite `user_version=2` is the permanent compatibility floor: it transactionally preserves v1 rows while adding mixed v1/v2 events, nullable Project Slugs, physical labels, and attribution indexes. Startup is restart-safe, never lowers `user_version`, and fails closed on a schema newer than the binary supports. Never roll back to the old v1-only binary after migration.
+Record the deployed immutable image reference and the prior known-good migration-aware reference for every release. SQLite `user_version=3` is the target-override rollout floor. A fresh database is created at v3; production v1 upgrades transactionally through the mixed-event changes, and current v2 upgrades by adding only `target_overrides(date, target_minutes, created_at, updated_at)`. The table accepts only target zero and no reason or other free text. Startup is restart-safe, never lowers `user_version`, and fails closed on a schema newer than the binary supports. Once v3 has opened the persistent database, do not roll back to a v1- or v2-only binary.
 
-To roll back attribution, set `CUKUP_NEW_TURN_EVENT_SCHEMA_VERSION=1` so only future turns start as v1. The service must continue accepting delayed and in-progress v2 events. To roll back application code, deploy only a tested migration-aware reference against the existing persistent volume, then verify authenticated capabilities, time, mixed v1/v2 delayed replay, summary schema 1, labeled token rotation, and one further normal restart. Do not replace SQLite merely to roll back application behavior: restore a backup only for a diagnosed data incident, using the stopped-service procedure below.
+To roll back attribution, set `CUKUP_NEW_TURN_EVENT_SCHEMA_VERSION=1` so only future turns start as v1. The service must continue accepting delayed and in-progress v2 events. To roll back application code after v3 migration, deploy only a tested v3-aware reference against the existing persistent volume, then verify authenticated capabilities, time, mixed v1/v2 delayed replay, target set/clear, summary schema 1, labeled token rotation, and one further normal restart. Do not replace SQLite merely to roll back application behavior: restore a backup only for a diagnosed data incident, using the stopped-service procedure below.
+
+Roll out the v3 service before publishing a plugin that exposes `cukup: Set day off`. Older plugins remain compatible. The new command receives a generic protocol failure from an older service because the route does not exist, so it must not be published first. Before rollout, take and verify a v1 or v2 backup; after the first v3 start, exercise one temporary target set/clear with an approved credential, verify both summary and dashboard Overall targets, restart once, then take, retrieve, verify, and clean-restore a v3 backup. Do not log or paste the exercised date, body, credential, or response.
 
 ## Physical-machine bearer lifecycle
 
@@ -79,7 +81,7 @@ bun run service:token list /var/lib/cukup/cukup.sqlite
 
 ## Integrity and online backup
 
-The service uses WAL mode and restrictive directory/database permissions. `backup` opens the live source read-only and executes SQLite `VACUUM INTO`, producing a transactionally consistent online snapshot without copying WAL files. It then runs full `PRAGMA integrity_check`, records SQLite schema version, size, SHA-256, creation time, and backup ID in adjacent JSON metadata, and publishes both files atomically.
+The service uses WAL mode and restrictive directory/database permissions. `backup` opens the live source read-only and executes SQLite `VACUUM INTO`, producing a transactionally consistent online snapshot without copying WAL files. The snapshot includes target overrides and their audit timestamps with the rest of SQLite. It then runs full `PRAGMA integrity_check`, records SQLite schema version, size, SHA-256, creation time, and backup ID in adjacent JSON metadata, and publishes both files atomically.
 
 ```bash
 bun run service:db integrity /var/lib/cukup/cukup.sqlite
@@ -105,7 +107,7 @@ Perform a clean restore drill periodically and before claiming production readin
 1. Retrieve one database/metadata pair from the off-site system into a new protected directory.
 2. Verify it before touching any service database.
 3. Restore to a new path, run integrity, start an isolated service against it, and authenticate with a designated drill credential.
-4. Confirm expected mixed-schema event count, summary schema 1, executor attribution, and token rotation; record only nonsensitive evidence (backup ID, dates, integrity result, and pass/fail).
+4. Confirm expected mixed-schema event count, summary schema 1, executor attribution, target overrides, and token rotation; record only nonsensitive evidence (backup ID, backup creation time, integrity result, and pass/fail).
 
 ```bash
 bun run service:db verify /retrieved/BACKUP.sqlite /retrieved/BACKUP.json
@@ -120,12 +122,12 @@ bun run service:db restore /retrieved/BACKUP.sqlite /var/lib/cukup/cukup.sqlite 
 bun run service:db integrity /var/lib/cukup/cukup.sqlite
 ```
 
-`--replace` removes stale WAL/SHM sidecars before the atomic replacement. Never run it against a live service. A restored pre-migration `user_version=1` backup upgrades transactionally on startup; a post-migration backup remains version 2. Restart, verify `/healthz`, authenticated `/v1/capabilities` and `/v1/time`, delayed v1/v2 replay, summary schema 1, labeled rotation, and persistence through one further normal restart. If integrity, checksum, authentication, attribution, or expected summary fails, stop and retain all artifacts; do not overwrite the backup or attempt repeated blind restores.
+`--replace` removes stale WAL/SHM sidecars before the atomic replacement. Never run it against a live service. Restored `user_version=1` and `user_version=2` backups upgrade transactionally to v3 on startup; a v3 backup restarts unchanged with its overrides intact. Restart, verify `/healthz`, authenticated `/v1/capabilities` and `/v1/time`, delayed v1/v2 replay, target set/clear, summary schema 1, labeled rotation, and persistence through one further normal restart. If integrity, checksum, authentication, attribution, target, or expected summary fails, stop and retain all artifacts; do not overwrite the backup or attempt repeated blind restores.
 
 ## Incident boundaries
 
 - Revoke only the affected physical token; other machine credentials and OIDC remain independent.
 - Change the allowed OIDC user only as an intentional auth-policy change, then restart the service. Existing JWTs for the old user fail without database mutation.
-- Logs contain method, pathname, status, duration, and redacted internal errors. They intentionally omit headers, bodies, event IDs, source/session IDs, JWT claims, and database details.
+- Logs contain method, route template, status, duration, and redacted internal errors. They intentionally omit headers, bodies, target-override dates, event IDs, source/session IDs, JWT claims, and database details.
 - Treat unexpected conflict or clock-skew outcomes as visible client incidents. Never mutate accepted events to make a retry pass.
 - The unauthenticated health response is liveness only. Use authenticated checks and database integrity tooling for diagnosis.

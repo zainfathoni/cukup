@@ -26,6 +26,7 @@ import type {
 export type DashboardReportStore = {
 	events(): StoredWorkEvent[]
 	attributedEvents(): AttributedStoredWorkEvent[]
+	targetOverrides(): ReadonlyMap<string, number>
 	listBearerMetadata(): Array<{
 		revokedAt: string | null
 		executorLabel: string | null
@@ -113,7 +114,7 @@ export function buildDashboardReport(
 		available_projects: labels.projects,
 		available_executors: labels.executors,
 		overall: buildPanel('Working-time summary is unavailable.', () => {
-			const summary = summarizeWork(store.events(), nowMs)
+			const summary = summarizeWork(store.events(), nowMs, undefined, store.targetOverrides())
 			return { today: summary.daily, week: summary.weekly }
 		}),
 		timeline: buildPanel('Activity timeline is unavailable.', () =>

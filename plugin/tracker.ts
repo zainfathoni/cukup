@@ -151,6 +151,11 @@ export function jakartaDayBounds(nowMs: number): { startMs: number; endMs: numbe
 	return { startMs, endMs: startMs + 24 * 60 * 60 * 1_000, weekend: day === 0 || day === 6 }
 }
 
+export function jakartaDateString(nowMs: number): string {
+	const shifted = new Date(nowMs + 7 * 60 * 60 * 1_000)
+	return `${String(shifted.getUTCFullYear()).padStart(4, '0')}-${String(shifted.getUTCMonth() + 1).padStart(2, '0')}-${String(shifted.getUTCDate()).padStart(2, '0')}`
+}
+
 export function parseDailyTarget(input: string): number | undefined {
 	const match = /^(\d{1,2}):([0-5]\d)$/.exec(input.trim())
 	if (!match) return undefined

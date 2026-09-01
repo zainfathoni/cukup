@@ -4,6 +4,7 @@ import {
 	CukupServiceClient,
 	EVENT_SCHEMA_VERSION_V1,
 	EVENT_SCHEMA_VERSION_V2,
+	isTargetOverrideDate,
 	SUMMARY_SCHEMA_VERSION,
 	ServiceRequestError,
 	type OutboxEvent,
@@ -106,6 +107,35 @@ describe('CukupServiceClient', () => {
 		expect(JSON.parse(String(requests[1]?.init.body))).toEqual({
 			hostname: 'fleet-host-1',
 		})
+	})
+
+	test('marks and clears an exact day-off target through the strict authenticated boundary', async () => {
+		const requests: Array<{ url: string; init: RequestInit }> = []
+		const client = new CukupServiceClient('https://cukup.dev', async (url, init) => {
+			requests.push({ url, init })
+			return init.method === 'PUT'
+				? Response.json({ date: '2026-09-01', target_minutes: 0 })
+				: new Response(null, { status: 204 })
+		})
+		expect(await client.putTargetOverride(token, '2026-09-01')).toEqual({
+			date: '2026-09-01',
+			target_minutes: 0,
+		})
+		await client.clearTargetOverride(token, '2026-09-01')
+		expect(requests.map(({ url, init }) => [url, init.method])).toEqual([
+			['https://cukup.dev/v1/target-overrides/2026-09-01', 'PUT'],
+			['https://cukup.dev/v1/target-overrides/2026-09-01', 'DELETE'],
+		])
+		expect(JSON.parse(String(requests[0]?.init.body))).toEqual({ target_minutes: 0 })
+		for (const request of requests) {
+			expect(new Headers(request.init.headers).get('authorization')).toBe(`Bearer ${token}`)
+		}
+
+		for (const date of ['2026-02-29', '2026-9-01', '2026-09-01/extra']) {
+			expect(isTargetOverrideDate(date)).toBeFalse()
+			await expect(client.putTargetOverride(token, date)).rejects.toMatchObject({ kind: 'protocol' })
+		}
+		expect(requests).toHaveLength(2)
 	})
 
 	test('treats a missing capability endpoint as v1-only compatibility', async () => {

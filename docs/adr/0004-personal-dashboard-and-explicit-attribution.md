@@ -8,6 +8,12 @@ Cukup will add a single-owner dashboard at `cukup.dev` while retaining `api.cuku
 
 Project attribution is an explicit optional Project Slug: a lowercase kebab-case identifier stored in Amp workspace-scoped plugin configuration and durably snapshotted with event schema at turn start. Event schema v2 carries the optional slug; v1 remains accepted and historical project-less evidence stays Unassigned. Physical Executor Labels come from canonical Fleet hostnames, are validated against a deployment allowlist, and bind once to one active Bearer Lineage rather than being trusted per event. OIDC-owned sources use `amp-orb`. Historical executor attribution is derived through stable source ownership across rotating bearer credentials without rewriting events; unlabeled physical history remains visible as `unassigned-executor`.
 
+## Approved target-override addendum
+
+The narrowly approved day-off workflow does not turn the dashboard into an editor. An authenticated API-host boundary, available to the same personal bearer and allowed workload OIDC principals as the service, may set one exact Asia/Jakarta civil date's authoritative target to zero or explicitly clear it. The request is closed and stores only date, zero target, and audit timestamps—never a free-text reason. The plugin exposes the validated, previewed, confirmed `cukup: Set day off` workflow; dashboard routes remain read-only.
+
+Overrides affect only authoritative target calculation. Evidence and worked minutes remain immutable, so zero work against target zero is `COMPLETE` and positive work is `OVER`. Both schema-1 `/v1/summary` and the dashboard schema-1 Overall Working Time panel use the same daily and Monday-week target reduction; clearing restores the default target. Filtered Project and Executor activity remains targetless and unaffected. Dynamic mutation routes are logged only as a route template without dates or bodies. SQLite v3 adds the override table through restart-safe migration from supported v1 and v2 databases and includes it in the existing verified backup and clean-restore boundary.
+
 ## Considered alternatives
 
 - Raw workspace paths, Git remotes, and inferred project names were rejected because project disclosure must be explicit.

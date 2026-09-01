@@ -47,7 +47,7 @@ function session(options: {
 	return values
 }
 
-function fixture(): {
+function fixture(targetOverrides = new Map<string, number>()): {
 	store: DashboardReportStore
 	events: AttributedStoredWorkEvent[]
 	credentials: Credential[]
@@ -102,6 +102,7 @@ function fixture(): {
 		store: {
 			events: () => events.map(({ executorLabel: _, ...event }) => event),
 			attributedEvents: () => events,
+			targetOverrides: () => targetOverrides,
 			listBearerMetadata: () => credentials,
 		},
 	}
@@ -182,6 +183,22 @@ describe('dashboard report aggregation', () => {
 			expect(targetless).not.toHaveProperty('status')
 			expect(targetless).not.toHaveProperty('target_minutes')
 		}
+	})
+
+	test('applies and clears overrides only in the authoritative overall target panel', () => {
+		const targetOverrides = new Map([['2026-08-31', 0]])
+		const selection: DashboardSelection = { projects: [], executors: [], range: { preset: 7 } }
+		const dayOff = buildDashboardReport(fixture(targetOverrides).store, selection, now)
+		if (dayOff.overall.state === 'unavailable') throw new Error('Expected overall summary')
+		expect(dayOff.overall.data.today).toMatchObject({ status: 'OVER', target_minutes: 0 })
+		expect(dayOff.overall.data.week.target_minutes).toBe(1_920)
+
+		targetOverrides.clear()
+		const restored = buildDashboardReport(fixture(targetOverrides).store, selection, now)
+		if (restored.overall.state === 'unavailable') throw new Error('Expected overall summary')
+		expect(restored.overall.data.today).toMatchObject({ status: 'UNDER', target_minutes: 480 })
+		expect(restored.overall.data.week.target_minutes).toBe(2_400)
+		expect(readySeries(restored)).toEqual(readySeries(dayOff))
 	})
 
 	test('derives concurrency from matching raw intervals instead of displayed-series sums', () => {

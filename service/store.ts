@@ -9,10 +9,11 @@ import type {
 	IngestOutcome,
 	Principal,
 	StoredWorkEvent,
+	TargetOverride,
 	WorkEvent,
 } from './types.ts'
 
-const DATABASE_VERSION = 2
+const DATABASE_VERSION = 3
 
 const EXECUTOR_LABEL_CHECK = `
 	CHECK (
@@ -213,6 +214,44 @@ export class ServiceStore {
 				 FROM auth_tokens ORDER BY created_at, token_id`,
 			)
 			.all()
+	}
+
+	putTargetOverride(date: string, targetMinutes: 0, nowMs = Date.now()): TargetOverride {
+		const at = new Date(nowMs).toISOString()
+		this.#database
+			.query(
+				`INSERT INTO target_overrides (
+					date, target_minutes, created_at, updated_at
+				) VALUES (?, ?, ?, ?)
+				ON CONFLICT (date) DO NOTHING`,
+			)
+			.run(date, targetMinutes, at, at)
+		return this.#database
+			.query<
+				TargetOverride,
+				[string]
+			>(
+				`SELECT date, target_minutes AS targetMinutes,
+				        created_at AS createdAt, updated_at AS updatedAt
+				 FROM target_overrides WHERE date = ?`,
+			)
+			.get(date)!
+	}
+
+	clearTargetOverride(date: string): boolean {
+		return this.#database.query('DELETE FROM target_overrides WHERE date = ?').run(date).changes === 1
+	}
+
+	targetOverrides(): ReadonlyMap<string, number> {
+		return new Map(
+			this.#database
+				.query<{ date: string; targetMinutes: number }, []>(
+					`SELECT date, target_minutes AS targetMinutes
+					 FROM target_overrides ORDER BY date`,
+				)
+				.all()
+				.map((row) => [row.date, row.targetMinutes]),
+		)
 	}
 
 	ingest(principal: Principal, event: WorkEvent, receivedAtMs: number): IngestOutcome {
@@ -442,13 +481,23 @@ export class ServiceStore {
 			}
 
 			this.#database.exec(`
-				CREATE UNIQUE INDEX auth_tokens_active_executor_label
+				CREATE TABLE target_overrides (
+					date TEXT PRIMARY KEY CHECK (
+						length(date) = 10 AND
+						date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+					),
+					target_minutes INTEGER NOT NULL CHECK (target_minutes = 0),
+					created_at TEXT NOT NULL,
+					updated_at TEXT NOT NULL
+				) STRICT;
+
+				CREATE UNIQUE INDEX IF NOT EXISTS auth_tokens_active_executor_label
 					ON auth_tokens(executor_label)
 					WHERE revoked_at IS NULL AND executor_label IS NOT NULL;
-				CREATE INDEX source_owners_bearer_owner
+				CREATE INDEX IF NOT EXISTS source_owners_bearer_owner
 					ON source_owners(owner_id) WHERE owner_kind = 'bearer';
-				CREATE INDEX events_occurred_at_ms ON events(occurred_at_ms);
-				CREATE INDEX events_project_slug_occurred_at_ms
+				CREATE INDEX IF NOT EXISTS events_occurred_at_ms ON events(occurred_at_ms);
+				CREATE INDEX IF NOT EXISTS events_project_slug_occurred_at_ms
 					ON events(project_slug, occurred_at_ms) WHERE project_slug IS NOT NULL;
 				PRAGMA user_version = ${DATABASE_VERSION};
 			`)

@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { parseBatch, parseExecutorProfile } from './protocol.ts'
+import {
+	parseBatch,
+	parseExecutorProfile,
+	parseTargetOverride,
+	parseTargetOverrideDate,
+} from './protocol.ts'
 
 const baseEvent = {
 	schema_version: 1,
@@ -136,5 +141,30 @@ describe('event protocol validation', () => {
 		expect(parseExecutorProfile({ hostname: 'workstation-a' })).toBe('workstation-a')
 		expect(parseExecutorProfile({ hostname: 'workstation-a', extra: true })).toBeUndefined()
 		expect(parseExecutorProfile({ hostname: 1 })).toBeUndefined()
+	})
+
+	test('accepts only a real exact civil date and the closed zero-target override', () => {
+		for (const date of ['2026-09-01', '2024-02-29']) {
+			expect(parseTargetOverrideDate(date)).toBe(date)
+		}
+		for (const date of [
+			'2026-9-01',
+			'2026-09-1',
+			'2026-02-29',
+			'2026-04-31',
+			'0000-01-01',
+			' 2026-09-01',
+		]) {
+			expect(parseTargetOverrideDate(date)).toBeUndefined()
+		}
+		expect(parseTargetOverride({ target_minutes: 0 })).toEqual({ targetMinutes: 0 })
+		for (const body of [
+			{},
+			{ target_minutes: 1 },
+			{ target_minutes: 0, reason: 'private' },
+			{ target_minutes: '0' },
+		]) {
+			expect(parseTargetOverride(body)).toBeUndefined()
+		}
 	})
 })

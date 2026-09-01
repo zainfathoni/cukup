@@ -8,6 +8,12 @@ The local plugin vertical slice stores minimal evidence in executor-local SQLite
 
 The shared privacy boundary excludes prompts/content, host/user/fleet identity from events, model names, repository identifiers, paths, and local Amp thread/message IDs. Shared events use random source/session UUIDs and may carry only an explicit optional v2 Project Slug; physical Executor Labels bind separately to authenticated bearer lineages. Amp workload JWT claims are a transient authentication-layer exception and never enter shared event records or logs. See [the service API contract](docs/service-api.md), [dashboard service contract](docs/dashboard-service.md), [operations runbook](docs/service-operations.md), [ADR 0002](docs/adr/0002-shared-service-release-candidate.md), and [ADR 0004](docs/adr/0004-personal-dashboard-and-explicit-attribution.md).
 
+## Marking a day off
+
+The Amp command palette entry `cukup: Set day off` changes the shared authoritative target for one Asia/Jakarta date. It defaults to today's Jakarta civil date, requires an exact real `YYYY-MM-DD`, previews either **Mark day off** or **Clear / undo**, and asks for confirmation before making an authenticated request. Marking sets that date's target to 0 minutes; clearing restores the normal weekday or weekend target. Existing work evidence and worked minutes never change, so zero work is `COMPLETE` and any work is `OVER` on a marked date. The daily and Monday–Sunday weekly values in both Cukup status and the dashboard Overall panel reflect the change.
+
+The command uses the same protected physical bearer or Amp workload OIDC credential as synchronization and never displays it. A success notification confirms the authoritative mutation; a generic failure means the service did not confirm it. The dashboard itself remains read-only. The existing **Set local fallback target** command remains non-authoritative and affects only offline fallback display.
+
 ## Repository ownership
 
 This repository is the canonical development source for the plugin, service, architecture, and deployment code. The Amp Global User Plugins repository is only the reviewed publication target. Fleet tracks cross-machine coordination and rollout:

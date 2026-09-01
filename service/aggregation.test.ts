@@ -145,6 +145,45 @@ describe('timezone-aware summaries', () => {
 		})
 	})
 
+	test('reduces and restores daily and Monday-week targets without changing evidence', () => {
+		const mondayNow = Date.parse('2026-08-31T05:00:00.000Z')
+		const overrides = new Map([['2026-08-31', 0]])
+		const complete = summarizeWork([], mondayNow, undefined, overrides)
+		expect(complete.daily).toEqual({
+			status: 'COMPLETE',
+			worked_minutes: 0,
+			target_minutes: 0,
+			difference_minutes: 0,
+		})
+		expect(complete.weekly.target_minutes).toBe(1_920)
+
+		const evidence = [
+			event(
+				1,
+				sourceA,
+				'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+				'agent.start',
+				mondayNow - 30 * minute,
+			),
+		]
+		const dayOff = summarizeWork(evidence, mondayNow, undefined, overrides)
+		const restored = summarizeWork(evidence, mondayNow)
+		expect(dayOff.daily).toEqual({
+			status: 'OVER',
+			worked_minutes: 15,
+			target_minutes: 0,
+			difference_minutes: 15,
+		})
+		expect(restored.daily).toEqual({
+			status: 'UNDER',
+			worked_minutes: 15,
+			target_minutes: 480,
+			difference_minutes: 465,
+		})
+		expect(restored.weekly.target_minutes).toBe(2_400)
+		expect(restored.weekly.worked_minutes).toBe(dayOff.weekly.worked_minutes)
+	})
+
 	test('resolves 23-hour and 25-hour civil days without depending on the process timezone', () => {
 		const springStart = startOfZonedDay({ year: 2026, month: 3, day: 8 }, 'America/New_York')
 		const springEnd = startOfZonedDay({ year: 2026, month: 3, day: 9 }, 'America/New_York')
