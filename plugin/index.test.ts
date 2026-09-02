@@ -1,21 +1,23 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import workHoursPlugin, { executorProfileFor } from './index.ts'
-import { PROJECT_SLUG_CONFIG_KEY } from './project.ts'
 import { jakartaDateString } from './tracker.ts'
 
 const temporaryDirectories: string[] = []
 let previousTokenFile: string | undefined
 let previousServiceURL: string | undefined
+let previousProjectID: string | undefined
 
 beforeEach(() => {
 	previousTokenFile = process.env.CUKUP_TOKEN_FILE
 	previousServiceURL = process.env.CUKUP_SERVICE_URL
+	previousProjectID = process.env.AMP_PROJECT_ID
 	process.env.CUKUP_TOKEN_FILE = '/nonexistent/cukup-plugin-test-token'
 	process.env.CUKUP_SERVICE_URL = 'https://api.cukup.dev'
+	process.env.AMP_PROJECT_ID = 'project-test'
 })
 
 afterEach(() => {
@@ -26,6 +28,8 @@ afterEach(() => {
 	else process.env.CUKUP_TOKEN_FILE = previousTokenFile
 	if (previousServiceURL === undefined) delete process.env.CUKUP_SERVICE_URL
 	else process.env.CUKUP_SERVICE_URL = previousServiceURL
+	if (previousProjectID === undefined) delete process.env.AMP_PROJECT_ID
+	else process.env.AMP_PROJECT_ID = previousProjectID
 })
 
 describe('work-hours plugin', () => {
@@ -69,13 +73,17 @@ describe('work-hours plugin', () => {
 				},
 			},
 			configuration: {
-				get: async () => ({ [PROJECT_SLUG_CONFIG_KEY]: 'cukup-plugin' }),
+				get: async () => ({}),
 				update: async () => {},
 				delete: async () => {},
 			},
 			system: { executor: { kind: 'local' }, user: { workspace: null }, workspaceRoot: {} },
 			helpers: { filePathFromURI: () => '/workspaces/cukup-plugin' },
-				$: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
+			$: async () => ({
+				exitCode: 0,
+				stdout: JSON.stringify({ id: 'project-test', name: 'Cukup Plugin' }),
+				stderr: '',
+			}),
 		}
 		const context = {
 			ui: {
@@ -99,7 +107,8 @@ describe('work-hours plugin', () => {
 			])
 			expect([...commandCategories.values()]).toEqual(['cukup', 'cukup', 'cukup', 'cukup'])
 			expect(commandTitles.get('day-off-set')).toBe('Set day off or half day')
-			expect(commandAvailability.get('project-slug-set')).toEqual({ type: 'enabled' })
+			expect(commandTitles.get('project-slug-set')).toBe('Project attribution')
+			expect(commandAvailability.get('project-slug-set')).toBeUndefined()
 
 			const event = {
 				thread: { id: 'T-smoke' },
@@ -327,19 +336,14 @@ describe('work-hours plugin', () => {
 		}
 	})
 
-	test('offers a mobile-safe workspace suggestion, normalizes custom slugs, and explicitly clears only workspace configuration', async () => {
+	test('retries failed resolution, then verifies and caches the exact Amp Project without workspace configuration', async () => {
 		const stateHome = mkdtempSync(join(tmpdir(), 'amp-work-hours-plugin-test-'))
 		temporaryDirectories.push(stateHome)
 		const previousStateHome = process.env.XDG_STATE_HOME
 		process.env.XDG_STATE_HOME = stateHome
 		const commands = new Map<string, (context: any) => unknown>()
 		const disposers: Array<() => unknown> = []
-		const updates: Array<{ partial: Record<string, unknown>; target: string }> = []
-		const deletions: Array<{ key: string; target: string }> = []
-		const configuration: Record<string, unknown> = { [PROJECT_SLUG_CONFIG_KEY]: 'old-project' }
-		const workspacePath = join(stateHome, 'Cukup Workspace')
-		mkdirSync(workspacePath)
-		writeFileSync(join(workspacePath, 'package.json'), JSON.stringify({ name: '@zain/cukup-package' }))
+		let projectLookups = 0
 		const amp = {
 			on() { return { unsubscribe() {} } },
 			registerCommand(id: string, _options: unknown, handler: (context: any) => unknown) {
@@ -349,78 +353,51 @@ describe('work-hours plugin', () => {
 			onDispose(callback: () => unknown) { disposers.push(callback); return { unsubscribe() {} } },
 			threads: { get: () => ({ state: { get: async () => 'idle' } }) },
 			configuration: {
-				get: async () => ({ ...configuration }),
-				update: async (partial: Record<string, unknown>, target: string) => {
-					updates.push({ partial, target })
-					Object.assign(configuration, partial)
-				},
-				delete: async (key: string, target: string) => {
-					deletions.push({ key, target })
-					delete configuration[key]
-				},
+				get: async () => { throw new Error('configuration must not be read') },
+				update: async () => { throw new Error('configuration must not be written') },
+				delete: async () => { throw new Error('configuration must not be written') },
 			},
 			system: {
 				executor: { kind: 'local' },
 				user: { workspace: null },
 				workspaceRoot: {},
 			},
-			helpers: { filePathFromURI: () => workspacePath },
-			$: async () => { throw new Error('shell and remotes must not be read') },
+			$: async (_strings: TemplateStringsArray, projectID: string) => {
+				projectLookups += 1
+				if (projectLookups === 1) return { exitCode: 1, stdout: '', stderr: 'temporary failure' }
+				return {
+					exitCode: 0,
+					stdout: JSON.stringify({ id: projectID, name: 'Cukup Lead' }),
+					stderr: '',
+				}
+			},
 		}
-		const selections = [
-			'Use project name (cukup-package)',
-			'  New_Project   Name ',
-			'Clear / undo',
-		]
-		const selectionDialogs: Array<{ options: string[]; allowOther?: boolean; message?: string }> = []
-		const confirmations: Array<{ title: string; message?: string }> = []
-		const notifications: string[] = []
+		const selectionDialogs: Array<{ title: string; options: string[]; message?: string }> = []
 		const context = {
 			ui: {
-				select: async (options: { options: string[]; allowOther?: boolean; message?: string }) => {
+				select: async (options: { title: string; options: string[]; message?: string }) => {
 					selectionDialogs.push(options)
-					return selections.shift()
+					return 'Close'
 				},
-				confirm: async (options: { title: string; message?: string }) => {
-					confirmations.push(options)
-					return true
-				},
-				notify: async (message: string) => { notifications.push(message) },
 			},
 		}
 
 		try {
 			workHoursPlugin(amp as never)
 			await commands.get('project-slug-set')?.(context)
-			expect(selectionDialogs[0]).toMatchObject({
-				options: [
-					'Use project name (cukup-package)',
-					'Use workspace name (cukup-workspace)',
-					'Clear / undo',
-				],
-				allowOther: true,
+			await commands.get('project-slug-set')?.(context)
+			await commands.get('project-slug-set')?.(context)
+			expect(projectLookups).toBe(2)
+			expect(selectionDialogs).toHaveLength(3)
+			expect(selectionDialogs[0]?.message).toContain('No valid Amp Project could be resolved.')
+			expect(selectionDialogs[1]).toMatchObject({
+				title: 'Cukup project attribution',
+				options: ['Close'],
 			})
-			expect(selectionDialogs[0]?.message).toContain('enter a custom value in **Other**')
-			expect(confirmations[0]?.message).toContain('**cukup-package**')
-			expect(updates).toEqual([
-				{ partial: { [PROJECT_SLUG_CONFIG_KEY]: 'cukup-package' }, target: 'workspace' },
-			])
-			expect(notifications.at(-1)).toBe('Project Slug set to cukup-package.')
-
-			await commands.get('project-slug-set')?.(context)
-			expect(confirmations[1]?.message).toContain('**new-project-name**')
-			expect(updates).toEqual([
-				{ partial: { [PROJECT_SLUG_CONFIG_KEY]: 'cukup-package' }, target: 'workspace' },
-				{ partial: { [PROJECT_SLUG_CONFIG_KEY]: 'new-project-name' }, target: 'workspace' },
-			])
-			expect(notifications.at(-1)).toBe('Project Slug set to new-project-name.')
-
-			await commands.get('project-slug-set')?.(context)
-			expect(confirmations[2]).toMatchObject({ title: 'Clear project slug?' })
-			expect(deletions).toEqual([{ key: PROJECT_SLUG_CONFIG_KEY, target: 'workspace' }])
-			expect(notifications.at(-1)).toBe(
-				'Project Slug cleared. Future turns will be Unassigned.',
-			)
+			expect(selectionDialogs[1]?.message).toContain('Amp Project: **Cukup Lead**')
+			expect(selectionDialogs[1]?.message).toContain('Project Slug: **cukup-lead**')
+			expect(selectionDialogs[1]?.message).toContain('No repository setting is used.')
+			expect(selectionDialogs[2]?.message).toBe(selectionDialogs[1]?.message)
 		} finally {
 			await Promise.all(disposers.map((dispose) => dispose()))
 			if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME
@@ -428,17 +405,18 @@ describe('work-hours plugin', () => {
 		}
 	})
 
-	test('hides Project Slug configuration without an open workspace', async () => {
+	test('fails visibly to Unassigned without an Amp Project and never accesses configuration', async () => {
+		delete process.env.AMP_PROJECT_ID
 		const stateHome = mkdtempSync(join(tmpdir(), 'amp-work-hours-plugin-test-'))
 		temporaryDirectories.push(stateHome)
 		const previousStateHome = process.env.XDG_STATE_HOME
 		process.env.XDG_STATE_HOME = stateHome
-		const availability = new Map<string, unknown>()
+		const commands = new Map<string, (context: any) => unknown>()
 		const disposers: Array<() => unknown> = []
 		const amp = {
 			on() { return { unsubscribe() {} } },
-			registerCommand(id: string, options: { availability?: unknown }) {
-				availability.set(id, options.availability)
+			registerCommand(id: string, _options: unknown, handler: (context: any) => unknown) {
+				commands.set(id, handler)
 				return { unsubscribe() {}, setAvailability() {} }
 			},
 			onDispose(callback: () => unknown) { disposers.push(callback); return { unsubscribe() {} } },
@@ -451,10 +429,15 @@ describe('work-hours plugin', () => {
 			system: { executor: { kind: 'unknown' }, user: { workspace: null }, workspaceRoot: null },
 			$: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
 		}
+		let message = ''
 
 		try {
 			workHoursPlugin(amp as never)
-			expect(availability.get('project-slug-set')).toEqual({ type: 'hidden' })
+			await commands.get('project-slug-set')?.({
+				ui: { select: async (options: { message: string }) => { message = options.message } },
+			})
+			expect(message).toContain('No valid Amp Project could be resolved.')
+			expect(message).toContain('**Unassigned**')
 		} finally {
 			await Promise.all(disposers.map((dispose) => dispose()))
 			if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME

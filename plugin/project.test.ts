@@ -1,9 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import {
+	ampProjectAttributionFromJSON,
 	MAX_PROJECT_SLUG_LENGTH,
-	PROJECT_SLUG_CONFIG_KEY,
 	normalizeProjectSlug,
-	projectSlugFromConfiguration,
 } from './project.ts'
 
 describe('Project Slug', () => {
@@ -21,11 +20,19 @@ describe('Project Slug', () => {
 		expect(normalizeProjectSlug('a'.repeat(MAX_PROJECT_SLUG_LENGTH + 1))).toBeUndefined()
 	})
 
-	test('uses only an already-canonical configured value', () => {
-		expect(projectSlugFromConfiguration({ [PROJECT_SLUG_CONFIG_KEY]: 'cukup-plugin' })).toBe(
-			'cukup-plugin',
-		)
-		expect(projectSlugFromConfiguration({ [PROJECT_SLUG_CONFIG_KEY]: 'Cukup Plugin' })).toBeNull()
-		expect(projectSlugFromConfiguration({ workspaceRoot: '/private/path' })).toBeNull()
+	test('accepts only the exact Amp Project identity and a normalizable project name', () => {
+		expect(
+			ampProjectAttributionFromJSON(
+				JSON.stringify({ id: 'project-1', name: 'BookThatApp React' }),
+				'project-1',
+			),
+		).toEqual({ id: 'project-1', name: 'BookThatApp React', slug: 'bookthatapp-react' })
+		expect(
+			ampProjectAttributionFromJSON(JSON.stringify({ id: 'other', name: 'Cukup' }), 'project-1'),
+		).toBeUndefined()
+		expect(
+			ampProjectAttributionFromJSON(JSON.stringify({ id: 'project-1', name: 'Cukup!' }), 'project-1'),
+		).toBeUndefined()
+		expect(ampProjectAttributionFromJSON('not-json', 'project-1')).toBeUndefined()
 	})
 })
