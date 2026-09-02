@@ -1,4 +1,5 @@
 import type { PluginAPI, PluginExecutorKind, ThreadID } from '@ampcode/plugin'
+import { readFileSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
 import { basename, join } from 'node:path'
 import {
@@ -145,12 +146,11 @@ export default function (amp: PluginAPI) {
 		async (ctx) => {
 			if (!hasAmpWorkspace(amp)) return
 			const current = await configuredProjectSlug(amp)
-			const suggested = suggestedProjectSlug(amp)
-			const suggestedOption = suggested ? `Use workspace name (${suggested})` : undefined
+			const suggestions = projectSlugSuggestions(amp)
 			const selection = await ctx.ui.select({
 				title: 'Set project slug',
-				message: `Current Project Slug: **${current ?? 'Unassigned'}**\n\nChoose the workspace name, or enter a custom value in **Other**. Custom values normalize to lowercase kebab-case.`,
-				options: [...(suggestedOption ? [suggestedOption] : []), 'Clear / undo'],
+				message: `Current Project Slug: **${current ?? 'Unassigned'}**\n\nChoose a detected name, or enter a custom value in **Other**. Custom values normalize to lowercase kebab-case.`,
+				options: [...suggestions.keys(), 'Clear / undo'],
 				allowOther: true,
 			})
 			if (selection === 'Clear / undo') {
@@ -165,9 +165,7 @@ export default function (amp: PluginAPI) {
 				return
 			}
 			if (selection === undefined) return
-			const normalized = normalizeProjectSlug(
-				selection === suggestedOption && suggested ? suggested : selection,
-			)
+			const normalized = normalizeProjectSlug(suggestions.get(selection) ?? selection)
 			if (!normalized) {
 				await ctx.ui.notify(
 					'Project Slug must normalize to lowercase kebab-case, use no punctuation, and be at most 64 characters.',
@@ -301,14 +299,30 @@ function hasAmpWorkspace(amp: PluginAPI): boolean {
 	return amp.system.workspaceRoot != null
 }
 
-function suggestedProjectSlug(amp: PluginAPI): string | null {
+function projectSlugSuggestions(amp: PluginAPI): Map<string, string> {
+	const suggestions = new Map<string, string>()
 	const workspaceRoot = amp.system.workspaceRoot
-	if (workspaceRoot == null) return null
+	if (workspaceRoot == null) return suggestions
 	try {
-		return normalizeProjectSlug(basename(amp.helpers.filePathFromURI(workspaceRoot))) ?? null
+		const workspacePath = amp.helpers.filePathFromURI(workspaceRoot)
+		try {
+			const parsed = JSON.parse(readFileSync(join(workspacePath, 'package.json'), 'utf8')) as unknown
+			if (parsed && typeof parsed === 'object' && 'name' in parsed && typeof parsed.name === 'string') {
+				const projectName = parsed.name.split('/').at(-1)
+				const projectSlug = projectName && normalizeProjectSlug(projectName)
+				if (projectSlug) suggestions.set(`Use project name (${projectSlug})`, projectSlug)
+			}
+		} catch {
+			// Not every workspace has a package.json.
+		}
+		const workspaceSlug = normalizeProjectSlug(basename(workspacePath))
+		if (workspaceSlug && workspaceSlug !== 'repo' && ![...suggestions.values()].includes(workspaceSlug)) {
+			suggestions.set(`Use workspace name (${workspaceSlug})`, workspaceSlug)
+		}
 	} catch {
-		return null
+		// Leave custom entry available when the workspace path cannot be interpreted.
 	}
+	return suggestions
 }
 
 async function configuredProjectSlug(amp: PluginAPI): Promise<string | null> {
