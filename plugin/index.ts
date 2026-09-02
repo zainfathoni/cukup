@@ -1,7 +1,6 @@
 import type { PluginAPI, PluginExecutorKind, ThreadID } from '@ampcode/plugin'
-import { readFileSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
-import { basename, join } from 'node:path'
+import { join } from 'node:path'
 import {
 	createFileTokenProvider,
 	createOidcTokenProvider,
@@ -11,9 +10,8 @@ import {
 } from './auth.ts'
 import { CukupServiceClient, isTargetOverrideDate, ServiceRequestError } from './protocol.ts'
 import {
-	PROJECT_SLUG_CONFIG_KEY,
-	normalizeProjectSlug,
-	projectSlugFromConfiguration,
+	ampProjectAttributionFromJSON,
+	type AmpProjectAttribution,
 } from './project.ts'
 import { formatStatusDisplay } from './status.ts'
 import { WorkHoursStore } from './store.ts'
@@ -40,6 +38,7 @@ export default function (amp: PluginAPI) {
 	const serviceURL = process.env.CUKUP_SERVICE_URL?.trim() || 'https://api.cukup.dev'
 	const client = createClient(serviceURL, now)
 	const tokenProvider = selectTokenProvider(amp)
+	const resolveProjectAttribution = createProjectAttributionResolver(amp)
 	const sync = new SyncEngine({
 		store,
 		client,
@@ -48,12 +47,19 @@ export default function (amp: PluginAPI) {
 		executorProfile: executorProfileFor(amp.system.executor.kind),
 	})
 	const monotonicStarts = new Map<string, number>()
+	let projectAttributionWarningShown = false
 
 	amp.on('agent.start', async (event, ctx) => {
 		const eventKey = turnKey({ threadId: event.thread.id, messageId: String(event.id) })
 		const startedAt = monotonicNow()
 		try {
-			const projectSlug = await configuredProjectSlug(amp)
+			const projectAttribution = await resolveProjectAttribution()
+			if (!projectAttribution && !projectAttributionWarningShown) {
+				projectAttributionWarningShown = true
+				void ctx.ui
+					.notify('Cukup could not resolve this Amp Project. New attributed turns will be Unassigned.')
+					.catch(() => {})
+			}
 			const recorded = store.record(
 				{
 					threadId: event.thread.id,
@@ -62,7 +68,7 @@ export default function (amp: PluginAPI) {
 					atMs: now(),
 				},
 				undefined,
-				sync.attributionForNewTurn(projectSlug),
+				sync.attributionForNewTurn(projectAttribution?.slug ?? null),
 			)
 			if (recorded) monotonicStarts.set(eventKey, startedAt)
 			sync.kick()
@@ -138,48 +144,19 @@ export default function (amp: PluginAPI) {
 	amp.registerCommand(
 		'project-slug-set',
 		{
-			title: 'Set project slug',
+			title: 'Project attribution',
 			category: 'cukup',
-			description: 'Set or clear the explicit Project Slug for future turns in this workspace.',
-			availability: hasAmpWorkspace(amp) ? { type: 'enabled' } : { type: 'hidden' },
+			description: 'Show the automatically resolved Amp Project attribution for future turns.',
 		},
 		async (ctx) => {
-			if (!hasAmpWorkspace(amp)) return
-			const current = await configuredProjectSlug(amp)
-			const suggestions = projectSlugSuggestions(amp)
-			const selection = await ctx.ui.select({
-				title: 'Set project slug',
-				message: `Current Project Slug: **${current ?? 'Unassigned'}**\n\nChoose a detected name, or enter a custom value in **Other**. Custom values normalize to lowercase kebab-case.`,
-				options: [...suggestions.keys(), 'Clear / undo'],
-				allowOther: true,
+			const projectAttribution = await resolveProjectAttribution()
+			await ctx.ui.select({
+				title: 'Cukup project attribution',
+				message: projectAttribution
+					? `Amp Project: **${projectAttribution.name}**\n\nProject Slug: **${projectAttribution.slug}**\n\nThis is resolved from the immutable Amp Project ID and applies across its machines and orbs. No repository setting is used.`
+					: 'No valid Amp Project could be resolved. Future attributed turns will be **Unassigned** rather than guessed from a checkout path or package name.',
+				options: ['Close'],
 			})
-			if (selection === 'Clear / undo') {
-				const confirmed = await ctx.ui.confirm({
-					title: 'Clear project slug?',
-					message: 'Future turns in this workspace will be **Unassigned**. Existing turns are unchanged.',
-					confirmButtonText: 'Clear',
-				})
-				if (!confirmed) return
-				await amp.configuration.delete(PROJECT_SLUG_CONFIG_KEY, 'workspace')
-				await ctx.ui.notify('Project Slug cleared. Future turns will be Unassigned.')
-				return
-			}
-			if (selection === undefined) return
-			const normalized = normalizeProjectSlug(suggestions.get(selection) ?? selection)
-			if (!normalized) {
-				await ctx.ui.notify(
-					'Project Slug must normalize to lowercase kebab-case, use no punctuation, and be at most 64 characters.',
-				)
-				return
-			}
-			const confirmed = await ctx.ui.confirm({
-				title: 'Save project slug?',
-				message: `Normalized Project Slug: **${normalized}**\n\nOnly future turns are affected.`,
-				confirmButtonText: 'Save',
-			})
-			if (!confirmed) return
-			await amp.configuration.update({ [PROJECT_SLUG_CONFIG_KEY]: normalized }, 'workspace')
-			await ctx.ui.notify(`Project Slug set to ${normalized}.`)
 		},
 	)
 
@@ -295,42 +272,27 @@ export function executorProfileFor(
 	return undefined
 }
 
-function hasAmpWorkspace(amp: PluginAPI): boolean {
-	return amp.system.workspaceRoot != null
-}
-
-function projectSlugSuggestions(amp: PluginAPI): Map<string, string> {
-	const suggestions = new Map<string, string>()
-	const workspaceRoot = amp.system.workspaceRoot
-	if (workspaceRoot == null) return suggestions
-	try {
-		const workspacePath = amp.helpers.filePathFromURI(workspaceRoot)
-		try {
-			const parsed = JSON.parse(readFileSync(join(workspacePath, 'package.json'), 'utf8')) as unknown
-			if (parsed && typeof parsed === 'object' && 'name' in parsed && typeof parsed.name === 'string') {
-				const projectName = parsed.name.split('/').at(-1)
-				const projectSlug = projectName && normalizeProjectSlug(projectName)
-				if (projectSlug) suggestions.set(`Use project name (${projectSlug})`, projectSlug)
-			}
-		} catch {
-			// Not every workspace has a package.json.
+function createProjectAttributionResolver(
+	amp: PluginAPI,
+	projectID = process.env.AMP_PROJECT_ID?.trim(),
+): () => Promise<AmpProjectAttribution | undefined> {
+	let resolved: Promise<AmpProjectAttribution | undefined> | undefined
+	return () => {
+		if (!projectID) return Promise.resolve(undefined)
+		if (!resolved) {
+			resolved = amp.$`amp projects get ${projectID} --json`
+				.then((result) =>
+					result.exitCode === 0
+						? ampProjectAttributionFromJSON(result.stdout, projectID)
+						: undefined,
+				)
+				.catch(() => undefined)
+				.then((projectAttribution) => {
+					if (!projectAttribution) resolved = undefined
+					return projectAttribution
+				})
 		}
-		const workspaceSlug = normalizeProjectSlug(basename(workspacePath))
-		if (workspaceSlug && workspaceSlug !== 'repo' && ![...suggestions.values()].includes(workspaceSlug)) {
-			suggestions.set(`Use workspace name (${workspaceSlug})`, workspaceSlug)
-		}
-	} catch {
-		// Leave custom entry available when the workspace path cannot be interpreted.
-	}
-	return suggestions
-}
-
-async function configuredProjectSlug(amp: PluginAPI): Promise<string | null> {
-	if (!hasAmpWorkspace(amp)) return null
-	try {
-		return projectSlugFromConfiguration(await amp.configuration.get())
-	} catch {
-		return null
+		return resolved
 	}
 }
 

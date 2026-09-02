@@ -23,4 +23,6 @@ Content-Type: application/json
 
 The success response is `{"executor_label":"<same exact hostname>"}`. A mismatch or rejection leaves events pending and is surfaced as a protocol/authentication failure. Remote executors never read or send a hostname; their ADR-fixed plugin executor label is `amp-orb`.
 
-Project Slugs use only the `cukup.project-slug` Amp configuration key with the `workspace` target. The plugin does not inspect workspace roots, paths, Git configuration, or remotes. Outbox and turn-session SQLite rows are authoritative for event schema and Project Slug replay; current binary constants are not.
+Project Slugs come from the exact Amp Project selected for the executor. The plugin passes the immutable `AMP_PROJECT_ID` to the supported `amp projects get <id> --json` boundary, requires the returned ID to match exactly, and normalizes only that Project's name. Successful resolution is cached for the plugin process; failed resolution is retried and remains visibly Unassigned rather than falling back to a workspace path, package name, Git remote, or repository setting. The project ID is never included in Cukup events or logs.
+
+Outbox and turn-session SQLite rows remain authoritative for event schema and Project Slug replay; current binary constants and later Project renames never rewrite an existing turn snapshot.

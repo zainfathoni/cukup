@@ -1,5 +1,7 @@
 # Personal dashboard and explicit attribution plan
 
+> Historical implementation plan: ADR 0005 supersedes the per-checkout Project Slug configuration described below. Current plugins derive future attribution from the exact Amp Project identity and never persist a repository setting.
+
 ## Outcome
 
 Deliver a responsive personal dashboard at `https://cukup.dev` that remains available independently of Amp executor connectivity. It reports authoritative Jakarta daily/weekly Working Time, filterable Project Activity and Executor Activity, trends, freshness, and executor operational context without exposing prompts, Amp identifiers, workspace paths, Git remotes, source IDs, token IDs, or bearer values.

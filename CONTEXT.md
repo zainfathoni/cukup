@@ -13,8 +13,8 @@ The service-calculated daily or weekly classification of Working Time against it
 _Avoid_: Local estimate, cached total
 
 **Project Slug**:
-An explicit, opt-in, lowercase kebab-case classification attached to Working Time for project filtering across executors.
-_Avoid_: Project Label, repository path, Git remote, inferred project
+A lowercase kebab-case classification derived from the exact Amp Project identity and attached to Working Time for consistent project filtering across executors.
+_Avoid_: Project Label, repository path, Git remote, package name, per-checkout setting
 
 **Project Activity**:
 The union of work intervals carrying one Project Slug. Project Activity is intentionally non-additive across slugs when concurrent projects overlap.
