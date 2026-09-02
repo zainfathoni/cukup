@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import workHoursPlugin, { executorProfileFor } from './index.ts'
@@ -337,6 +337,9 @@ describe('work-hours plugin', () => {
 		const updates: Array<{ partial: Record<string, unknown>; target: string }> = []
 		const deletions: Array<{ key: string; target: string }> = []
 		const configuration: Record<string, unknown> = { [PROJECT_SLUG_CONFIG_KEY]: 'old-project' }
+		const workspacePath = join(stateHome, 'Cukup Workspace')
+		mkdirSync(workspacePath)
+		writeFileSync(join(workspacePath, 'package.json'), JSON.stringify({ name: '@zain/cukup-package' }))
 		const amp = {
 			on() { return { unsubscribe() {} } },
 			registerCommand(id: string, _options: unknown, handler: (context: any) => unknown) {
@@ -361,11 +364,11 @@ describe('work-hours plugin', () => {
 				user: { workspace: null },
 				workspaceRoot: {},
 			},
-			helpers: { filePathFromURI: () => '/workspaces/Cukup Plugin' },
+			helpers: { filePathFromURI: () => workspacePath },
 			$: async () => { throw new Error('shell and remotes must not be read') },
 		}
 		const selections = [
-			'Use workspace name (cukup-plugin)',
+			'Use project name (cukup-package)',
 			'  New_Project   Name ',
 			'Clear / undo',
 		]
@@ -390,20 +393,24 @@ describe('work-hours plugin', () => {
 			workHoursPlugin(amp as never)
 			await commands.get('project-slug-set')?.(context)
 			expect(selectionDialogs[0]).toMatchObject({
-				options: ['Use workspace name (cukup-plugin)', 'Clear / undo'],
+				options: [
+					'Use project name (cukup-package)',
+					'Use workspace name (cukup-workspace)',
+					'Clear / undo',
+				],
 				allowOther: true,
 			})
 			expect(selectionDialogs[0]?.message).toContain('enter a custom value in **Other**')
-			expect(confirmations[0]?.message).toContain('**cukup-plugin**')
+			expect(confirmations[0]?.message).toContain('**cukup-package**')
 			expect(updates).toEqual([
-				{ partial: { [PROJECT_SLUG_CONFIG_KEY]: 'cukup-plugin' }, target: 'workspace' },
+				{ partial: { [PROJECT_SLUG_CONFIG_KEY]: 'cukup-package' }, target: 'workspace' },
 			])
-			expect(notifications.at(-1)).toBe('Project Slug set to cukup-plugin.')
+			expect(notifications.at(-1)).toBe('Project Slug set to cukup-package.')
 
 			await commands.get('project-slug-set')?.(context)
 			expect(confirmations[1]?.message).toContain('**new-project-name**')
 			expect(updates).toEqual([
-				{ partial: { [PROJECT_SLUG_CONFIG_KEY]: 'cukup-plugin' }, target: 'workspace' },
+				{ partial: { [PROJECT_SLUG_CONFIG_KEY]: 'cukup-package' }, target: 'workspace' },
 				{ partial: { [PROJECT_SLUG_CONFIG_KEY]: 'new-project-name' }, target: 'workspace' },
 			])
 			expect(notifications.at(-1)).toBe('Project Slug set to new-project-name.')
