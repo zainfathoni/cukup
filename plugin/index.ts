@@ -196,12 +196,21 @@ export default function (amp: PluginAPI) {
 			description: 'Set or clear an authoritative full- or half-day target override.',
 		},
 		async (ctx) => {
-			const date = await ctx.ui.input({
+			const today = jakartaDateString(now())
+			const dateChoice = await ctx.ui.select({
 				title: 'Set day off',
-				helpText: 'Enter the exact Asia/Jakarta civil date in YYYY-MM-DD format.',
-				initialValue: jakartaDateString(now()),
-				submitButtonText: 'Preview',
+				message: `Today in Asia/Jakarta: **${today}**`,
+				options: ['Today', 'Choose another date'],
 			})
+			if (dateChoice === undefined) return
+			const date = dateChoice === 'Today'
+				? today
+				: await ctx.ui.input({
+					title: 'Choose another date',
+					helpText: 'Enter the exact Asia/Jakarta civil date in YYYY-MM-DD format.',
+					initialValue: today,
+					submitButtonText: 'Preview',
+				})
 			if (date === undefined) return
 			if (!isTargetOverrideDate(date)) {
 				await ctx.ui.notify('Enter a real date in exact YYYY-MM-DD format.')

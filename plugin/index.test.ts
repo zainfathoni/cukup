@@ -139,6 +139,7 @@ describe('work-hours plugin', () => {
 		process.env.XDG_STATE_HOME = stateHome
 		process.env.CUKUP_TOKEN_FILE = tokenFile
 		process.env.CUKUP_SERVICE_URL = 'https://api.cukup.dev'
+		const today = jakartaDateString(Date.now())
 
 		const mutations: Array<{ url: string; init: RequestInit }> = []
 		const order: string[] = []
@@ -162,13 +163,13 @@ describe('work-hours plugin', () => {
 					weekly: { status: 'UNDER', worked_minutes: 0, target_minutes: 2_400, difference_minutes: 2_400 },
 				})
 			}
-			if (url.endsWith('/v1/target-overrides/2026-09-01')) {
+			if (url.includes('/v1/target-overrides/')) {
 				const request = { url, init: init ?? {} }
 				mutations.push(request)
 				order.push(String(init?.method))
 				if (init?.method !== 'PUT') return new Response(null, { status: 204 })
 				const target_minutes = JSON.parse(String(init.body)).target_minutes
-				return Response.json({ date: '2026-09-01', target_minutes })
+				return Response.json({ date: url.slice(url.lastIndexOf('/') + 1), target_minutes })
 			}
 			return new Response(null, { status: 404 })
 		}) as typeof fetch
@@ -191,9 +192,17 @@ describe('work-hours plugin', () => {
 			system: { executor: { kind: 'local' }, user: { workspace: {} } },
 			$: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
 		}
-		const inputs = ['2026-09-01', '2026-09-01', '2026-09-01', '2026-02-29']
+		const inputs = ['2026-09-01', '2026-09-01', '2026-02-29']
 		const inputOptions: Array<{ initialValue?: string; submitButtonText?: string }> = []
-		const selections = ['Full day off (0m)', 'Half day (4h)', 'Clear / undo']
+		const selections = [
+			'Today',
+			'Full day off (0m)',
+			'Choose another date',
+			'Half day (4h)',
+			'Choose another date',
+			'Clear / undo',
+			'Choose another date',
+		]
 		const selectionOptions: string[][] = []
 		const confirmations: Array<{ title: string; message?: string }> = []
 		const notifications: string[] = []
@@ -223,16 +232,20 @@ describe('work-hours plugin', () => {
 			await commands.get('day-off-set')?.(context)
 			await commands.get('day-off-set')?.(context)
 			expect(inputOptions[0]).toMatchObject({
-				initialValue: jakartaDateString(Date.now()),
+				initialValue: today,
 				submitButtonText: 'Preview',
 			})
 			expect(selectionOptions).toEqual([
+				['Today', 'Choose another date'],
 				['Full day off (0m)', 'Half day (4h)', 'Clear / undo'],
+				['Today', 'Choose another date'],
 				['Full day off (0m)', 'Half day (4h)', 'Clear / undo'],
+				['Today', 'Choose another date'],
 				['Full day off (0m)', 'Half day (4h)', 'Clear / undo'],
+				['Today', 'Choose another date'],
 			])
 			expect(confirmations.map((confirmation) => confirmation.title)).toEqual([
-				'Set full day off for 2026-09-01?',
+				`Set full day off for ${today}?`,
 				'Set half day for 2026-09-01?',
 				'Clear day off for 2026-09-01?',
 			])
@@ -241,14 +254,14 @@ describe('work-hours plugin', () => {
 			expect(confirmations[1]?.message).toContain('**240m (4h)**')
 			expect(order).toEqual(['confirm', 'PUT', 'confirm', 'PUT', 'confirm', 'DELETE'])
 			expect(mutations.map(({ url, init }) => [url, init.method])).toEqual([
-				['https://api.cukup.dev/v1/target-overrides/2026-09-01', 'PUT'],
+				[`https://api.cukup.dev/v1/target-overrides/${today}`, 'PUT'],
 				['https://api.cukup.dev/v1/target-overrides/2026-09-01', 'PUT'],
 				['https://api.cukup.dev/v1/target-overrides/2026-09-01', 'DELETE'],
 			])
 			expect(JSON.parse(String(mutations[0]?.init.body))).toEqual({ target_minutes: 0 })
 			expect(JSON.parse(String(mutations[1]?.init.body))).toEqual({ target_minutes: 240 })
 			expect(notifications).toEqual([
-				'Authoritative target for 2026-09-01 is now 0m.',
+				`Authoritative target for ${today} is now 0m.`,
 				'Authoritative target for 2026-09-01 is now 240m (4h).',
 				'Authoritative day-off override for 2026-09-01 is cleared.',
 				'Enter a real date in exact YYYY-MM-DD format.',
