@@ -1,6 +1,6 @@
 import type { PluginAPI, PluginExecutorKind, ThreadID } from '@ampcode/plugin'
 import { homedir, hostname } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import {
 	createFileTokenProvider,
 	createOidcTokenProvider,
@@ -145,12 +145,15 @@ export default function (amp: PluginAPI) {
 		async (ctx) => {
 			if (!hasAmpWorkspace(amp)) return
 			const current = await configuredProjectSlug(amp)
-			const action = await ctx.ui.select({
+			const suggested = suggestedProjectSlug(amp)
+			const suggestedOption = suggested ? `Use workspace name (${suggested})` : undefined
+			const selection = await ctx.ui.select({
 				title: 'Set project slug',
-				message: `Current Project Slug: **${current ?? 'Unassigned'}**`,
-				options: ['Set or change', 'Clear'],
+				message: `Current Project Slug: **${current ?? 'Unassigned'}**\n\nChoose the workspace name, or enter a custom value in **Other**. Custom values normalize to lowercase kebab-case.`,
+				options: [...(suggestedOption ? [suggestedOption] : []), 'Clear / undo'],
+				allowOther: true,
 			})
-			if (action === 'Clear') {
+			if (selection === 'Clear / undo') {
 				const confirmed = await ctx.ui.confirm({
 					title: 'Clear project slug?',
 					message: 'Future turns in this workspace will be **Unassigned**. Existing turns are unchanged.',
@@ -161,16 +164,10 @@ export default function (amp: PluginAPI) {
 				await ctx.ui.notify('Project Slug cleared. Future turns will be Unassigned.')
 				return
 			}
-			if (action !== 'Set or change') return
-
-			const input = await ctx.ui.input({
-				title: 'Set project slug',
-				helpText: 'Lowercase letters, numbers, spaces, underscores, and dashes; maximum 64 characters after normalization.',
-				initialValue: current ?? '',
-				submitButtonText: 'Preview',
-			})
-			if (input === undefined) return
-			const normalized = normalizeProjectSlug(input)
+			if (selection === undefined) return
+			const normalized = normalizeProjectSlug(
+				selection === suggestedOption && suggested ? suggested : selection,
+			)
 			if (!normalized) {
 				await ctx.ui.notify(
 					'Project Slug must normalize to lowercase kebab-case, use no punctuation, and be at most 64 characters.',
@@ -199,19 +196,12 @@ export default function (amp: PluginAPI) {
 			const today = jakartaDateString(now())
 			const dateChoice = await ctx.ui.select({
 				title: 'Set day off or half day',
-				message: `Today in Asia/Jakarta: **${today}**`,
-				options: ['Today', 'Choose another date'],
+				message: `Today in Asia/Jakarta: **${today}**\n\nChoose **Today**, or enter another YYYY-MM-DD date in **Other**.`,
+				options: ['Today'],
+				allowOther: true,
 			})
 			if (dateChoice === undefined) return
-			const date = dateChoice === 'Today'
-				? today
-				: await ctx.ui.input({
-					title: 'Choose another date',
-					helpText: 'Enter the exact Asia/Jakarta civil date in YYYY-MM-DD format.',
-					initialValue: today,
-					submitButtonText: 'Preview',
-				})
-			if (date === undefined) return
+			const date = dateChoice === 'Today' ? today : dateChoice
 			if (!isTargetOverrideDate(date)) {
 				await ctx.ui.notify('Enter a real date in exact YYYY-MM-DD format.')
 				return
@@ -274,11 +264,11 @@ export default function (amp: PluginAPI) {
 			description: 'Set the non-authoritative local fallback target in H:MM format.',
 		},
 		async (ctx) => {
-			const input = await ctx.ui.input({
+			const input = await ctx.ui.select({
 				title: 'Set local fallback weekday target',
-				helpText: 'The authoritative default remains 8:00 Mon–Fri and 0:00 weekends.',
-				initialValue: formatTargetInput(store.weekdayTargetMinutes()),
-				submitButtonText: 'Save fallback target',
+				message: 'Choose the authoritative default, or enter another H:MM value in **Other**.',
+				options: ['8:00'],
+				allowOther: true,
 			})
 			if (input === undefined) return
 			const minutes = parseDailyTarget(input)
@@ -309,6 +299,16 @@ export function executorProfileFor(
 
 function hasAmpWorkspace(amp: PluginAPI): boolean {
 	return amp.system.workspaceRoot != null
+}
+
+function suggestedProjectSlug(amp: PluginAPI): string | null {
+	const workspaceRoot = amp.system.workspaceRoot
+	if (workspaceRoot == null) return null
+	try {
+		return normalizeProjectSlug(basename(amp.helpers.filePathFromURI(workspaceRoot))) ?? null
+	} catch {
+		return null
+	}
 }
 
 async function configuredProjectSlug(amp: PluginAPI): Promise<string | null> {
@@ -363,8 +363,4 @@ async function calculateLocalFallback(
 			targetMinutes,
 		),
 	)
-}
-
-function formatTargetInput(minutes: number): string {
-	return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}`
 }

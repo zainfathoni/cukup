@@ -74,16 +74,16 @@ describe('work-hours plugin', () => {
 				delete: async () => {},
 			},
 			system: { executor: { kind: 'local' }, user: { workspace: null }, workspaceRoot: {} },
+			helpers: { filePathFromURI: () => '/workspaces/cukup-plugin' },
 				$: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
 		}
 		const context = {
 			ui: {
 				notify: async (message: string) => notifications.push(message),
-				input: async () => '0:01',
 				confirm: async () => true,
 				select: async (options: { title: string; message?: string; options: string[] }) => {
 					statusDialogs.push(options)
-					return 'Close'
+					return options.title === 'Set local fallback weekday target' ? '0:01' : 'Close'
 				},
 			},
 		}
@@ -192,28 +192,22 @@ describe('work-hours plugin', () => {
 			system: { executor: { kind: 'local' }, user: { workspace: {} } },
 			$: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
 		}
-		const inputs = ['2026-09-01', '2026-09-01', '2026-02-29']
-		const inputOptions: Array<{ initialValue?: string; submitButtonText?: string }> = []
 		const selections = [
 			'Today',
 			'Full day off (0m)',
-			'Choose another date',
+			'2026-09-01',
 			'Half day (4h)',
-			'Choose another date',
+			'2026-09-01',
 			'Clear / undo',
-			'Choose another date',
+			'2026-02-29',
 		]
-		const selectionOptions: string[][] = []
+		const selectionDialogs: Array<{ options: string[]; allowOther?: boolean }> = []
 		const confirmations: Array<{ title: string; message?: string }> = []
 		const notifications: string[] = []
 		const context = {
 			ui: {
-				input: async (options: { initialValue?: string; submitButtonText?: string }) => {
-					inputOptions.push(options)
-					return inputs.shift()
-				},
-				select: async (options: { options: string[] }) => {
-					selectionOptions.push(options.options)
+				select: async (options: { options: string[]; allowOther?: boolean }) => {
+					selectionDialogs.push(options)
 					return selections.shift()
 				},
 				confirm: async (options: { title: string; message?: string }) => {
@@ -231,19 +225,20 @@ describe('work-hours plugin', () => {
 			await commands.get('day-off-set')?.(context)
 			await commands.get('day-off-set')?.(context)
 			await commands.get('day-off-set')?.(context)
-			expect(inputOptions[0]).toMatchObject({
-				initialValue: today,
-				submitButtonText: 'Preview',
-			})
-			expect(selectionOptions).toEqual([
-				['Today', 'Choose another date'],
+			expect(selectionDialogs.map(({ options }) => options)).toEqual([
+				['Today'],
 				['Full day off (0m)', 'Half day (4h)', 'Clear / undo'],
-				['Today', 'Choose another date'],
+				['Today'],
 				['Full day off (0m)', 'Half day (4h)', 'Clear / undo'],
-				['Today', 'Choose another date'],
+				['Today'],
 				['Full day off (0m)', 'Half day (4h)', 'Clear / undo'],
-				['Today', 'Choose another date'],
+				['Today'],
 			])
+			expect(
+				selectionDialogs
+					.filter(({ options }) => options[0] === 'Today')
+					.every(({ allowOther }) => allowOther),
+			).toBeTrue()
 			expect(confirmations.map((confirmation) => confirmation.title)).toEqual([
 				`Set full day off for ${today}?`,
 				'Set half day for 2026-09-01?',
@@ -332,7 +327,7 @@ describe('work-hours plugin', () => {
 		}
 	})
 
-	test('normalizes, previews, saves, and explicitly clears only workspace Project Slug configuration', async () => {
+	test('offers a mobile-safe workspace suggestion, normalizes custom slugs, and explicitly clears only workspace configuration', async () => {
 		const stateHome = mkdtempSync(join(tmpdir(), 'amp-work-hours-plugin-test-'))
 		temporaryDirectories.push(stateHome)
 		const previousStateHome = process.env.XDG_STATE_HOME
@@ -366,15 +361,23 @@ describe('work-hours plugin', () => {
 				user: { workspace: null },
 				workspaceRoot: {},
 			},
+			helpers: { filePathFromURI: () => '/workspaces/Cukup Plugin' },
 			$: async () => { throw new Error('shell and remotes must not be read') },
 		}
-		const selections = ['Set or change', 'Clear']
+		const selections = [
+			'Use workspace name (cukup-plugin)',
+			'  New_Project   Name ',
+			'Clear / undo',
+		]
+		const selectionDialogs: Array<{ options: string[]; allowOther?: boolean; message?: string }> = []
 		const confirmations: Array<{ title: string; message?: string }> = []
 		const notifications: string[] = []
 		const context = {
 			ui: {
-				select: async () => selections.shift(),
-				input: async () => '  New_Project   Name ',
+				select: async (options: { options: string[]; allowOther?: boolean; message?: string }) => {
+					selectionDialogs.push(options)
+					return selections.shift()
+				},
 				confirm: async (options: { title: string; message?: string }) => {
 					confirmations.push(options)
 					return true
@@ -386,14 +389,27 @@ describe('work-hours plugin', () => {
 		try {
 			workHoursPlugin(amp as never)
 			await commands.get('project-slug-set')?.(context)
-			expect(confirmations[0]?.message).toContain('**new-project-name**')
+			expect(selectionDialogs[0]).toMatchObject({
+				options: ['Use workspace name (cukup-plugin)', 'Clear / undo'],
+				allowOther: true,
+			})
+			expect(selectionDialogs[0]?.message).toContain('enter a custom value in **Other**')
+			expect(confirmations[0]?.message).toContain('**cukup-plugin**')
 			expect(updates).toEqual([
+				{ partial: { [PROJECT_SLUG_CONFIG_KEY]: 'cukup-plugin' }, target: 'workspace' },
+			])
+			expect(notifications.at(-1)).toBe('Project Slug set to cukup-plugin.')
+
+			await commands.get('project-slug-set')?.(context)
+			expect(confirmations[1]?.message).toContain('**new-project-name**')
+			expect(updates).toEqual([
+				{ partial: { [PROJECT_SLUG_CONFIG_KEY]: 'cukup-plugin' }, target: 'workspace' },
 				{ partial: { [PROJECT_SLUG_CONFIG_KEY]: 'new-project-name' }, target: 'workspace' },
 			])
 			expect(notifications.at(-1)).toBe('Project Slug set to new-project-name.')
 
 			await commands.get('project-slug-set')?.(context)
-			expect(confirmations[1]).toMatchObject({ title: 'Clear project slug?' })
+			expect(confirmations[2]).toMatchObject({ title: 'Clear project slug?' })
 			expect(deletions).toEqual([{ key: PROJECT_SLUG_CONFIG_KEY, target: 'workspace' }])
 			expect(notifications.at(-1)).toBe(
 				'Project Slug cleared. Future turns will be Unassigned.',
