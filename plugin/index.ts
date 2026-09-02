@@ -191,14 +191,14 @@ export default function (amp: PluginAPI) {
 	amp.registerCommand(
 		'day-off-set',
 		{
-			title: 'Set day off',
+			title: 'Set day off or half day',
 			category: 'cukup',
 			description: 'Set or clear an authoritative full- or half-day target override.',
 		},
 		async (ctx) => {
 			const today = jakartaDateString(now())
 			const dateChoice = await ctx.ui.select({
-				title: 'Set day off',
+				title: 'Set day off or half day',
 				message: `Today in Asia/Jakarta: **${today}**`,
 				options: ['Today', 'Choose another date'],
 			})
@@ -308,7 +308,7 @@ export function executorProfileFor(
 }
 
 function hasAmpWorkspace(amp: PluginAPI): boolean {
-	return amp.system.user?.workspace != null
+	return amp.system.workspaceRoot != null
 }
 
 async function configuredProjectSlug(amp: PluginAPI): Promise<string | null> {

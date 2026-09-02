@@ -73,7 +73,7 @@ describe('work-hours plugin', () => {
 				update: async () => {},
 				delete: async () => {},
 			},
-			system: { executor: { kind: 'local' }, user: { workspace: {} } },
+			system: { executor: { kind: 'local' }, user: { workspace: null }, workspaceRoot: {} },
 				$: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
 		}
 		const context = {
@@ -98,7 +98,7 @@ describe('work-hours plugin', () => {
 				'work-hours-set-target',
 			])
 			expect([...commandCategories.values()]).toEqual(['cukup', 'cukup', 'cukup', 'cukup'])
-			expect(commandTitles.get('day-off-set')).toBe('Set day off')
+			expect(commandTitles.get('day-off-set')).toBe('Set day off or half day')
 			expect(commandAvailability.get('project-slug-set')).toEqual({ type: 'enabled' })
 
 			const event = {
@@ -363,8 +363,8 @@ describe('work-hours plugin', () => {
 			},
 			system: {
 				executor: { kind: 'local' },
-				user: { workspace: {} },
-				get workspaceRoot() { throw new Error('workspaceRoot must not be read') },
+				user: { workspace: null },
+				workspaceRoot: {},
 			},
 			$: async () => { throw new Error('shell and remotes must not be read') },
 		}
@@ -405,7 +405,7 @@ describe('work-hours plugin', () => {
 		}
 	})
 
-	test('hides Project Slug configuration without an Amp workspace', async () => {
+	test('hides Project Slug configuration without an open workspace', async () => {
 		const stateHome = mkdtempSync(join(tmpdir(), 'amp-work-hours-plugin-test-'))
 		temporaryDirectories.push(stateHome)
 		const previousStateHome = process.env.XDG_STATE_HOME
@@ -425,7 +425,7 @@ describe('work-hours plugin', () => {
 				delete: async () => { throw new Error('configuration must not be written') },
 			},
 			threads: { get: () => ({ state: { get: async () => 'idle' } }) },
-			system: { executor: { kind: 'unknown' }, user: { workspace: null } },
+			system: { executor: { kind: 'unknown' }, user: { workspace: null }, workspaceRoot: null },
 			$: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
 		}
 
