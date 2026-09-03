@@ -30,7 +30,7 @@ Required deployment inputs:
 - `KAMAL_REGISTRY_USERNAME` and Kamal secret `KAMAL_REGISTRY_PASSWORD`;
 - Kamal secret `CUKUP_OIDC_ALLOWED_USER_ID`, containing only the exact permitted Amp `user_id`;
 - Kamal secret `CUKUP_FLEET_HOSTNAMES`, containing the comma-separated exact canonical lowercase hostnames permitted to bind physical credentials;
-- `CUKUP_NEW_TURN_EVENT_SCHEMA_VERSION`, which must remain `1` until a separately reviewed plugin rollout is ready to snapshot v2 for future turns.
+- `CUKUP_NEW_TURN_EVENT_SCHEMA_VERSION`, currently `2` after the plugin attribution rollout passed orb and physical-runner canaries. Set it back to `1` to make only future turns use v1 without disabling delayed v2 replay.
 
 The fixed OIDC issuer and audience are code constants, not deployment overrides. The container accepts HTTP only behind Kamal Proxy and requires the single exact value `X-Forwarded-Proto: https` on secure API and dashboard routes; Kamal Proxy owns public TLS. Routing uses the preserved original `Host` and never trusts `X-Forwarded-Host`. Direct Bun TLS is available outside this asset by setting both `CUKUP_TLS_CERT_PATH` and `CUKUP_TLS_KEY_PATH`. Never expose container port 3000 publicly because proxy-header trust relies on that network boundary.
 
