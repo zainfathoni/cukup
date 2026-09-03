@@ -16,11 +16,12 @@ The service compares the original `Host` with the two configured canonical hostn
 
 The dashboard host exposes:
 
-- `GET /`: minimal sign-in page without a valid session; the dashboard document with a valid session;
+- `GET /`: minimal sign-in page without a valid session; the dashboard document with a valid session, whose first paint uses the 30-day trend range;
 - `GET /auth/github`: starts GitHub OAuth with a random state value and S256 PKCE;
 - `GET /auth/github/callback`: accepts the one exact configured callback, exchanges the authorization code, fetches the authenticated GitHub user, and compares the numeric `id`;
 - `POST /logout`: expires the session and transient OAuth cookies, then redirects to `/`;
 - `GET /assets/dashboard.css` and `GET /assets/dashboard.js`: local build artifacts only;
+- `GET /assets/favicon.svg`: an inline, locally served mark with no remote reference;
 - `POST /dashboard/report`: same-origin, cookie-authenticated report operation.
 
 Dashboard routes do not inspect `Authorization`; `/v1/*` does not inspect `Cookie`. A credential valid at one host therefore has no meaning at the other. Dashboard configuration failure returns the same generic not-found response as a disabled route and does not affect API health or ingestion startup.
@@ -63,6 +64,8 @@ Secure; HttpOnly; SameSite=Lax; Path=/
 ```
 
 It never has `Domain`. Duplicate cookie names, tampering, an unknown key, a different dashboard host, and expiry fail closed. Logout expires both `__Host-` cookies. Report and logout operations also reject an explicitly cross-origin `Origin` or `Sec-Fetch-Site` value.
+
+An opaque `Origin: null` is not an explicitly cross-origin value. A same-origin form navigation from a `Referrer-Policy: no-referrer` document — which every dashboard response is — serializes its origin that way, so the sign-out form would otherwise fail in a real browser. An opaque origin is therefore decided by `Sec-Fetch-Site`, which must then be exactly `same-origin`; an absent or differing fetch site fails closed. A genuine cross-site post carries `Sec-Fetch-Site: cross-site`, a cross-origin `fetch` carries its real origin, and framing is already refused by `frame-ancestors 'none'` and `X-Frame-Options: DENY`.
 
 ## `POST /dashboard/report`
 

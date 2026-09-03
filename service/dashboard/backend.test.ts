@@ -253,6 +253,73 @@ describe('dashboard HTTP contract', () => {
 		value.store.close()
 	})
 
+	test('accepts the opaque origin a no-referrer form navigation sends, and still refuses cross-site posts', async () => {
+		const value = fixture()
+		const session = await dashboardSession(value.app)
+
+		// Chrome serializes the origin of a same-origin form POST as the literal
+		// `null` when the document was served with `Referrer-Policy: no-referrer`,
+		// which every dashboard response is. Sign out must still work.
+		const signOut = await value.app.fetch(
+			request('cukup.dev', '/logout', {
+				method: 'POST',
+				headers: { cookie: session, origin: 'null', 'sec-fetch-site': 'same-origin' },
+			}),
+		)
+		expect(signOut.status).toBe(303)
+		expect(signOut.headers.get('set-cookie')).toContain(`${SESSION_COOKIE_NAME}=; Max-Age=0`)
+
+		// An opaque origin without a same-origin fetch site stays refused, as does a
+		// cross-site post and a real foreign origin.
+		const refusedHeaders: Array<Record<string, string>> = [
+			{ origin: 'null' },
+			{ origin: 'null', 'sec-fetch-site': 'cross-site' },
+			{ origin: 'https://attacker.test', 'sec-fetch-site': 'same-origin' },
+		]
+		for (const headers of refusedHeaders) {
+			const refused = await value.app.fetch(
+				request('cukup.dev', '/logout', { method: 'POST', headers: { cookie: session, ...headers } }),
+			)
+			expect(refused.status).toBe(400)
+		}
+
+		const refusedReport = await value.app.fetch(
+			request('cukup.dev', '/dashboard/report', {
+				method: 'POST',
+				headers: {
+					cookie: session,
+					origin: 'null',
+					'sec-fetch-site': 'cross-site',
+					'content-type': 'application/json',
+				},
+				body: JSON.stringify({ projects: [], executors: [], range: { preset: 7 } }),
+			}),
+		)
+		expect(refusedReport.status).toBe(400)
+		value.store.close()
+	})
+
+	test('serves a local favicon and links it from every dashboard document', async () => {
+		const value = fixture()
+		const favicon = await value.app.fetch(request('cukup.dev', '/assets/favicon.svg'))
+		expect(favicon.status).toBe(200)
+		expect(favicon.headers.get('content-type')).toBe('image/svg+xml; charset=utf-8')
+		const markup = await favicon.text()
+		expect(markup).toStartWith('<svg')
+		// The SVG namespace URI is not a fetch; nothing here loads a remote resource.
+		expect(markup).not.toContain('url(')
+		expect(markup).not.toContain('href')
+		expect(markup).not.toContain('<image')
+
+		const session = await dashboardSession(value.app)
+		const signIn = await value.app.fetch(request('cukup.dev', '/'))
+		const dashboard = await value.app.fetch(request('cukup.dev', '/', { headers: { cookie: session } }))
+		for (const page of [await signIn.text(), await dashboard.text()]) {
+			expect(page).toContain('<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">')
+		}
+		value.store.close()
+	})
+
 	test('keeps encrypted sessions and dashboard reads compatible across a store restart', async () => {
 		const directory = mkdtempSync(join(tmpdir(), 'cukup-dashboard-restart-'))
 		temporaryDirectories.push(directory)
