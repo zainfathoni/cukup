@@ -14,10 +14,19 @@ const MAX_REPORT_REQUEST_BYTES = 32 * 1024
 const initialSelection: DashboardSelection = {
 	projects: [],
 	executors: [],
-	range: { preset: 7 },
+	range: { preset: 30 },
 }
 
 export type DashboardAssets = { css: string; javascript: string }
+
+/** Local, dependency-free mark. Inlined so no build step or remote asset is added. */
+const FAVICON =
+	'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
+	'<rect width="32" height="32" rx="8" fill="#26201a"/>' +
+	'<rect x="5" y="19" width="22" height="7" rx="3.5" fill="#fff4dd"/>' +
+	'<rect x="5" y="19" width="14" height="7" rx="3.5" fill="#ff5c2b"/>' +
+	'<circle cx="16" cy="11" r="4.5" fill="#ffd84d"/>' +
+	'</svg>'
 
 export class DashboardBackend {
 	readonly #config: DashboardConfiguration
@@ -52,6 +61,11 @@ export class DashboardBackend {
 		if (url.pathname === '/assets/dashboard.js') {
 			return request.method === 'GET'
 				? response(this.#assets.javascript, 200, 'text/javascript; charset=utf-8')
+				: methodNotAllowed('GET')
+		}
+		if (url.pathname === '/assets/favicon.svg') {
+			return request.method === 'GET'
+				? response(FAVICON, 200, 'image/svg+xml; charset=utf-8')
 				: methodNotAllowed('GET')
 		}
 		if (url.pathname === '/auth/github') {
@@ -124,8 +138,14 @@ export class DashboardBackend {
 
 function isSameOriginBrowserRequest(request: Request, hostname: string): boolean {
 	const origin = request.headers.get('origin')
-	if (origin !== null && origin !== `https://${hostname}`) return false
+	// A same-origin form navigation from a `Referrer-Policy: no-referrer` document
+	// serializes its origin opaquely as the literal `null`. That is an absent origin,
+	// not an explicitly cross-origin one, so it is decided by Sec-Fetch-Site below.
+	// A genuine cross-site post carries `Sec-Fetch-Site: cross-site`, and framing is
+	// already refused by `frame-ancestors 'none'` and `X-Frame-Options: DENY`.
+	if (origin !== null && origin !== 'null' && origin !== `https://${hostname}`) return false
 	const fetchSite = request.headers.get('sec-fetch-site')
+	if (origin === 'null' && fetchSite !== 'same-origin') return false
 	return fetchSite === null || fetchSite === 'same-origin'
 }
 
@@ -154,11 +174,11 @@ function mediaType(value: string | null): string | undefined {
 }
 
 function renderSignInPage(): string {
-	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>Sign in · Cukup</title><link rel="stylesheet" href="/assets/dashboard.css"></head><body><main><section><p class="eyebrow">Personal dashboard</p><h1>Cukup</h1><p>Sign in to continue.</p><p><a class="button" href="/auth/github">Sign in with GitHub</a></p></section></main></body></html>`
+	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>Sign in · Cukup</title><link rel="icon" href="/assets/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/dashboard.css"></head><body><main class="centered"><section><p class="eyebrow">Personal dashboard</p><div class="wordmark"><h1>Cukup</h1><span class="wordmark-tag">Asia/Jakarta</span></div><p class="guidance">Under, complete, or over the hours due — one authoritative view of Amp-backed working time.</p><p><a class="button" href="/auth/github">Sign in with GitHub</a></p><p class="verdict-target">One account is authorized. Nothing else is.</p></section></main></body></html>`
 }
 
 function renderMessagePage(title: string, message: string): string {
-	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><link rel="stylesheet" href="/assets/dashboard.css"></head><body><main><section><h1>${title}</h1><p>${message}</p><p><a href="/">Return to sign in</a></p></section></main></body></html>`
+	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>${title}</title><link rel="icon" href="/assets/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/dashboard.css"></head><body><main class="centered"><section><p class="eyebrow">Cukup</p><h1>${title}</h1><p class="guidance">${message}</p><p><a class="button" href="/">Return to sign in</a></p></section></main></body></html>`
 }
 
 function redirect(location: string, cookies: readonly string[]): Response {
