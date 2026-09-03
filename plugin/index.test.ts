@@ -405,6 +405,57 @@ describe('work-hours plugin', () => {
 		}
 	})
 
+	test('resolves and caches the exact Amp Project matched to a physical workspace', async () => {
+		delete process.env.AMP_PROJECT_ID
+		const commands = new Map<string, (context: any) => unknown>()
+		let projectLookups = 0
+		const project = { id: 'project-bta', name: 'BookThatApp React' }
+		const amp = {
+			on() { return { unsubscribe() {} } },
+			registerCommand(id: string, _options: unknown, handler: (context: any) => unknown) {
+				commands.set(id, handler)
+				return { unsubscribe() {}, setAvailability() {} }
+			},
+			onDispose() { return { unsubscribe() {} } },
+			threads: { get: () => ({ state: { get: async () => 'idle' } }) },
+			configuration: {
+				get: async () => { throw new Error('configuration must not be read') },
+				update: async () => { throw new Error('configuration must not be written') },
+				delete: async () => { throw new Error('configuration must not be written') },
+			},
+			system: { executor: { kind: 'local' }, user: { workspace: null }, workspaceRoot: {} },
+			helpers: { filePathFromURI: () => '/workspaces/bookthatapp' },
+			$: async (strings: TemplateStringsArray, workspaceRoot: string) => {
+				projectLookups += 1
+				expect([...strings]).toEqual(['cd ', ' && amp projects status --json'])
+				expect(workspaceRoot).toBe('/workspaces/bookthatapp')
+				return {
+					exitCode: 0,
+					stdout: JSON.stringify({ status: 'matched', matches: [project], project }),
+					stderr: '',
+				}
+			},
+		}
+		const messages: string[] = []
+		const context = {
+			ui: {
+				select: async (options: { message: string }) => {
+					messages.push(options.message)
+					return 'Close'
+				},
+			},
+		}
+
+		workHoursPlugin(amp as never)
+		await commands.get('project-slug-set')?.(context)
+		await commands.get('project-slug-set')?.(context)
+		expect(projectLookups).toBe(1)
+		expect(messages).toHaveLength(2)
+		expect(messages[0]).toContain('Amp Project: **BookThatApp React**')
+		expect(messages[0]).toContain('Project Slug: **bookthatapp-react**')
+		expect(messages[1]).toBe(messages[0])
+	})
+
 	test('fails visibly to Unassigned without an Amp Project and never accesses configuration', async () => {
 		delete process.env.AMP_PROJECT_ID
 		const stateHome = mkdtempSync(join(tmpdir(), 'amp-work-hours-plugin-test-'))
@@ -430,6 +481,11 @@ describe('work-hours plugin', () => {
 			$: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
 		}
 		let message = ''
+		let projectLookups = 0
+		amp.$ = async () => {
+			projectLookups += 1
+			return { exitCode: 0, stdout: '', stderr: '' }
+		}
 
 		try {
 			workHoursPlugin(amp as never)
@@ -438,6 +494,7 @@ describe('work-hours plugin', () => {
 			})
 			expect(message).toContain('No valid Amp Project could be resolved.')
 			expect(message).toContain('**Unassigned**')
+			expect(projectLookups).toBe(0)
 		} finally {
 			await Promise.all(disposers.map((dispose) => dispose()))
 			if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME
