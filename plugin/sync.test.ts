@@ -102,7 +102,7 @@ describe('SyncEngine', () => {
 			schemaVersion: EVENT_SCHEMA_VERSION_V1,
 			projectSlug: null,
 		})
-		expect(await engine.runNow()).toEqual({ authoritativeSummary: true })
+		await engine.prepareNewTurn()
 		const event = store.record(
 			{ threadId: 'T-v2', messageId: '1', kind: 'start', atMs: nowMs + 1 },
 			undefined,
@@ -143,6 +143,38 @@ describe('SyncEngine', () => {
 		})
 		expect(requests.some((request) => request.url.endsWith('/v1/executor-profile'))).toBeFalse()
 		expect(JSON.stringify(requests)).not.toContain('hostname')
+		await engine.dispose()
+		store.close()
+	})
+
+	test('keeps the last negotiated preference while a refresh fails', async () => {
+		const store = new WorkHoursStore(databasePath())
+		let capabilityFailure = false
+		const fetcher: Fetcher = async (url) => {
+			if (url.endsWith('/v1/capabilities')) {
+				return capabilityFailure ? new Response(null, { status: 503 }) : capabilities(2)
+			}
+			if (url.endsWith('/v1/time')) return Response.json({ server_time: new Date(nowMs).toISOString() })
+			return Response.json(summary())
+		}
+		const engine = new SyncEngine({
+			store,
+			client: client(fetcher),
+			tokenProvider: provider(),
+			now: () => nowMs,
+			executorProfile: { kind: 'remote', executorLabel: REMOTE_EXECUTOR_LABEL },
+		})
+		await engine.prepareNewTurn()
+		expect(engine.attributionForNewTurn('project-one')).toEqual({
+			schemaVersion: EVENT_SCHEMA_VERSION_V2,
+			projectSlug: 'project-one',
+		})
+		capabilityFailure = true
+		expect(await engine.runNow()).toMatchObject({ authoritativeSummary: false })
+		expect(engine.attributionForNewTurn('project-one')).toEqual({
+			schemaVersion: EVENT_SCHEMA_VERSION_V2,
+			projectSlug: 'project-one',
+		})
 		await engine.dispose()
 		store.close()
 	})
