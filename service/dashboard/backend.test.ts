@@ -320,6 +320,17 @@ describe('dashboard HTTP contract', () => {
 		value.store.close()
 	})
 
+	test('paints the authenticated dashboard on the 30-day trend range', async () => {
+		const value = fixture()
+		const session = await dashboardSession(value.app)
+		const dashboard = await value.app.fetch(request('cukup.dev', '/', { headers: { cookie: session } }))
+		const html = await dashboard.text()
+		expect(html).toContain('data-range="30" data-focus-key="range:30" aria-pressed="true"')
+		expect(html).toContain('"preset":30')
+		expect(html).not.toContain('data-range="7" data-focus-key="range:7" aria-pressed="true"')
+		value.store.close()
+	})
+
 	test('keeps encrypted sessions and dashboard reads compatible across a store restart', async () => {
 		const directory = mkdtempSync(join(tmpdir(), 'cukup-dashboard-restart-'))
 		temporaryDirectories.push(directory)

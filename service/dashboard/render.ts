@@ -67,12 +67,12 @@ function weekdayIndex(date: string): number | null {
  * forbids inline style attributes, so proportions become element attributes.
  */
 function verdictMeter(period: TargetPeriod, label: string): string {
-	const scale = Math.max(period.worked_minutes, period.target_minutes, 1)
+	const scale = Math.max(period.worked_minutes, period.target_minutes, 1) * 1.1
 	const inner = meterWidth - 4
 	const worked = Math.max(0, Math.min(inner, (period.worked_minutes / scale) * inner))
 	const targetX = 2 + (period.target_minutes / scale) * inner
 	const description = `${formatMinutes(period.worked_minutes)} worked against a ${formatMinutes(period.target_minutes)} target`
-	return `<svg class="verdict-meter" viewBox="0 0 ${meterWidth} ${meterHeight}" role="img" aria-label="${escapeHtml(`${label}: ${description}`)}" preserveAspectRatio="none"><rect class="meter-track" x="1" y="1" width="${meterWidth - 2}" height="${meterHeight - 2}" rx="8"></rect><rect class="meter-fill" x="2" y="2" width="${worked.toFixed(2)}" height="${meterHeight - 4}" rx="7"></rect><line class="meter-target" x1="${targetX.toFixed(2)}" y1="0" x2="${targetX.toFixed(2)}" y2="${meterHeight}"></line></svg>`
+	return `<svg class="verdict-meter" viewBox="0 0 ${meterWidth} ${meterHeight}" role="img" aria-label="${escapeHtml(`${label}: ${description}`)}" preserveAspectRatio="none"><rect class="meter-track" x="1" y="1" width="${meterWidth - 2}" height="${meterHeight - 2}" rx="8" vector-effect="non-scaling-stroke"></rect><rect class="meter-fill" x="2" y="2" width="${worked.toFixed(2)}" height="${meterHeight - 4}" rx="7" vector-effect="non-scaling-stroke"></rect><line class="meter-target" x1="${targetX.toFixed(2)}" y1="0" x2="${targetX.toFixed(2)}" y2="${meterHeight}" vector-effect="non-scaling-stroke"></line></svg>`
 }
 
 function verdictCard(label: string, period: TargetPeriod): string {
@@ -280,14 +280,21 @@ function renderTrendData(trend: Trend): string {
 				`<li><span class="legend-line series-${index % 4}" aria-hidden="true"></span><strong>${escapeHtml(series.kind)}</strong>: ${escapeHtml(series.label)}</li>`,
 		)
 		.join('')
-	const rows = trend.series
+	const dates = [...new Set(trend.series.flatMap((series) => series.points.map((point) => point.date)))].sort()
+	const headings = trend.series
+		.map((series) => `<th scope="col">${escapeHtml(series.kind)}: ${escapeHtml(series.label)}</th>`)
+		.join('')
+	const valuesBySeries = trend.series.map(
+		(series) => new Map(series.points.map((point) => [point.date, point.minutes])),
+	)
+	const rows = dates
 		.map(
-			(series) =>
-				`<tr><th scope="row">${escapeHtml(series.kind)}: ${escapeHtml(series.label)}</th>${series.points.map((point) => `<td>${escapeHtml(point.date)}: ${formatMinutes(point.minutes)}</td>`).join('')}</tr>`,
+			(date) =>
+				`<tr><th scope="row">${escapeHtml(date)}</th>${valuesBySeries.map((values) => `<td>${values.has(date) ? formatMinutes(values.get(date)!) : 'No data'}</td>`).join('')}</tr>`,
 		)
 		.join('')
 	const overall = trend.series.find((series) => series.kind === 'overall')
-	return `<ul class="chart-legend">${legend}</ul><p class="scroll-hint">Scroll the chart horizontally to see the full range.</p><div class="chart-scroll" tabindex="0" role="region" aria-label="Scrollable daily activity trend"><svg class="trend-chart" viewBox="0 0 ${chartWidth} ${chartHeight}" role="img" aria-labelledby="trend-svg-title trend-svg-desc"><title id="trend-svg-title">Daily activity trend</title><desc id="trend-svg-desc">Separate, non-stacked lines. Series overlap and are not additive. The labelled dot on each line is its most recent day.</desc>${axes}${dateLabels}${lines}${endpoints}</svg></div>${renderHeatmap(overall)}<details><summary>Trend data table</summary><div class="table-scroll"><table><caption>Daily minutes for each independent series</caption><tbody>${rows}</tbody></table></div></details>`
+	return `<ul class="chart-legend">${legend}</ul><p class="scroll-hint">Scroll the chart horizontally to see the full range.</p><div class="chart-scroll" tabindex="0" role="region" aria-label="Scrollable daily activity trend"><svg class="trend-chart" viewBox="0 0 ${chartWidth} ${chartHeight}" role="img" aria-labelledby="trend-svg-title trend-svg-desc"><title id="trend-svg-title">Daily activity trend</title><desc id="trend-svg-desc">Separate, non-stacked lines. Series overlap and are not additive. The labelled dot on each line is its most recent day.</desc>${axes}${dateLabels}${lines}${endpoints}</svg></div>${renderHeatmap(overall)}<details><summary>View daily values</summary><p class="guidance">Exact values behind the chart, provided for comparison and as a text alternative.</p><div class="table-scroll"><table><caption>Daily working time by date and series</caption><thead><tr><th scope="col">Date</th>${headings}</tr></thead><tbody>${rows}</tbody></table></div></details>`
 }
 
 function renderTrend(panel: DashboardReport['trend'], selection: DashboardSelection): string {
