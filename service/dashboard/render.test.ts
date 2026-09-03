@@ -22,10 +22,15 @@ describe('dashboard rendering', () => {
 		expect(html).toContain('Concurrent evidence')
 		expect(html).toContain('tabindex="0" role="region" aria-label="Scrollable current-day timeline"')
 		expect(html).toContain('role="img" aria-labelledby="trend-svg-title trend-svg-desc"')
-		expect(html).toContain('Trend data table')
+		expect(html).toContain('View daily values')
+		expect(html).toContain('Exact values behind the chart, provided for comparison and as a text alternative.')
+		expect(html).toContain('<thead><tr><th scope="col">Date</th>')
+		expect(html).toContain('<tr><th scope="row">2026-08-25</th><td>6h 50m</td><td>2h 0m</td></tr>')
 		expect(html).toContain('class="chart-grid"')
 		expect(html).toContain('aria-label="Scrollable daily activity trend"')
 		expect(html).toContain('Last activity is evidence, not an online/offline health signal.')
+		const targetX = Number(html.match(/class="meter-target" x1="([^"]+)"/)?.[1])
+		expect(targetX).toBeLessThan(470)
 	})
 
 	test('renders native keyboard controls and keeps filter state out of resource URLs', () => {

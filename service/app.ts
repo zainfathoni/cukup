@@ -244,7 +244,8 @@ function logPath(pathname: string): string {
 		pathname === '/logout' ||
 		pathname === '/dashboard/report' ||
 		pathname === '/assets/dashboard.css' ||
-		pathname === '/assets/dashboard.js'
+		pathname === '/assets/dashboard.js' ||
+		pathname === '/assets/favicon.svg'
 	) {
 		return pathname
 	}
