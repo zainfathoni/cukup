@@ -42,3 +42,44 @@ export function ampProjectAttributionFromJSON(
 		return undefined
 	}
 }
+
+export function ampProjectAttributionFromStatusJSON(json: string): AmpProjectAttribution | undefined {
+	try {
+		const result = JSON.parse(json) as unknown
+		if (
+			!result ||
+			typeof result !== 'object' ||
+			!('status' in result) ||
+			result.status !== 'matched' ||
+			!('matches' in result) ||
+			!Array.isArray(result.matches) ||
+			result.matches.length !== 1 ||
+			!('project' in result) ||
+			!result.project ||
+			typeof result.project !== 'object'
+		) {
+			return undefined
+		}
+		const match = result.matches[0] as unknown
+		const project = result.project
+		if (
+			!match ||
+			typeof match !== 'object' ||
+			!('id' in match) ||
+			typeof match.id !== 'string' ||
+			!match.id ||
+			!('name' in match) ||
+			typeof match.name !== 'string' ||
+			!('id' in project) ||
+			project.id !== match.id ||
+			!('name' in project) ||
+			project.name !== match.name
+		) {
+			return undefined
+		}
+		const slug = normalizeProjectSlug(project.name)
+		return slug ? { id: project.id, name: project.name, slug } : undefined
+	} catch {
+		return undefined
+	}
+}

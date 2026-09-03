@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
 	ampProjectAttributionFromJSON,
+	ampProjectAttributionFromStatusJSON,
 	MAX_PROJECT_SLUG_LENGTH,
 	normalizeProjectSlug,
 } from './project.ts'
@@ -34,5 +35,30 @@ describe('Project Slug', () => {
 			ampProjectAttributionFromJSON(JSON.stringify({ id: 'project-1', name: 'Cukup!' }), 'project-1'),
 		).toBeUndefined()
 		expect(ampProjectAttributionFromJSON('not-json', 'project-1')).toBeUndefined()
+	})
+
+	test('accepts only one exact Project matched by Amp project status', () => {
+		const project = { id: 'project-1', name: 'BookThatApp React' }
+		expect(
+			ampProjectAttributionFromStatusJSON(
+				JSON.stringify({ status: 'matched', matches: [project], project }),
+			),
+		).toEqual({ id: 'project-1', name: 'BookThatApp React', slug: 'bookthatapp-react' })
+		expect(
+			ampProjectAttributionFromStatusJSON(
+				JSON.stringify({ status: 'ambiguous', matches: [project, { id: 'project-2', name: 'Other' }] }),
+			),
+		).toBeUndefined()
+		expect(
+			ampProjectAttributionFromStatusJSON(
+				JSON.stringify({ status: 'matched', matches: [project], project: { ...project, id: 'other' } }),
+			),
+		).toBeUndefined()
+		expect(
+			ampProjectAttributionFromStatusJSON(
+				JSON.stringify({ status: 'matched', matches: [project], project: { ...project, name: 'Other' } }),
+			),
+		).toBeUndefined()
+		expect(ampProjectAttributionFromStatusJSON('not-json')).toBeUndefined()
 	})
 })

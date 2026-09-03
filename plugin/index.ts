@@ -11,6 +11,7 @@ import {
 import { CukupServiceClient, isTargetOverrideDate, ServiceRequestError } from './protocol.ts'
 import {
 	ampProjectAttributionFromJSON,
+	ampProjectAttributionFromStatusJSON,
 	type AmpProjectAttribution,
 } from './project.ts'
 import { formatStatusDisplay } from './status.ts'
@@ -278,12 +279,19 @@ function createProjectAttributionResolver(
 ): () => Promise<AmpProjectAttribution | undefined> {
 	let resolved: Promise<AmpProjectAttribution | undefined> | undefined
 	return () => {
-		if (!projectID) return Promise.resolve(undefined)
 		if (!resolved) {
-			resolved = amp.$`amp projects get ${projectID} --json`
+			const lookup = projectID
+				? amp.$`amp projects get ${projectID} --json`
+				: amp.system.workspaceRoot
+					? amp.$`cd ${amp.helpers.filePathFromURI(amp.system.workspaceRoot)} && amp projects status --json`
+					: undefined
+			if (!lookup) return Promise.resolve(undefined)
+			resolved = lookup
 				.then((result) =>
 					result.exitCode === 0
-						? ampProjectAttributionFromJSON(result.stdout, projectID)
+						? projectID
+							? ampProjectAttributionFromJSON(result.stdout, projectID)
+							: ampProjectAttributionFromStatusJSON(result.stdout)
 						: undefined,
 				)
 				.catch(() => undefined)
