@@ -10,7 +10,7 @@ The plugin remains v1-only until an authenticated `GET /v1/capabilities` returns
 }
 ```
 
-`accepted_event_schema_versions` is the service compatibility floor, while `preferred_new_event_schema_version` is the rollout switch. The plugin enables only future v2 turn starts when v2 is accepted and the preferred new-event version is 2. Returning preferred version 1 switches only future starts back to v1; queued rows and durable in-progress turn snapshots are never rewritten. A 404 means the service has no attribution capability and keeps a v1-only plugin on its existing ingestion path. A queued v2 row is uploaded whenever the capability still declares v2 acceptance, independently of the preferred version.
+`accepted_event_schema_versions` is the service compatibility floor, while `preferred_new_event_schema_version` is the rollout switch. Before snapshotting the first turn in a plugin process, the plugin completes capability negotiation and, for a physical executor, its profile binding. The last successfully negotiated preference remains active during a transient refresh failure; a successful response preferring version 1 switches only future starts back to v1. Queued rows and durable in-progress turn snapshots are never rewritten. A 404 means the service has no attribution capability and keeps a v1-only plugin on its existing ingestion path. A queued v2 row is uploaded whenever the capability still declares v2 acceptance, independently of the preferred version.
 
 Before enabling local v2 starts or replaying a local v2 row, the plugin performs the authenticated idempotent operation:
 

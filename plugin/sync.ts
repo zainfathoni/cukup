@@ -56,6 +56,7 @@ export class SyncEngine {
 	#disposed = false
 	#trackingIncomplete: boolean
 	#preferredNewEventSchemaVersion: 1 | 2 = EVENT_SCHEMA_VERSION_V1
+	#attributionConfigured = false
 	#executorProfileBound = false
 
 	constructor(options: SyncEngineOptions) {
@@ -93,6 +94,10 @@ export class SyncEngine {
 
 	trackingIncomplete(): boolean {
 		return this.#trackingIncomplete
+	}
+
+	async prepareNewTurn(): Promise<void> {
+		if (!this.#attributionConfigured) await this.runNow()
 	}
 
 	attributionForNewTurn(projectSlug: string | null): EventAttribution {
@@ -133,10 +138,10 @@ export class SyncEngine {
 
 	async #runCycle(): Promise<SyncCycleResult> {
 		let token = ''
-		this.#preferredNewEventSchemaVersion = EVENT_SCHEMA_VERSION_V1
 		try {
 			token = await this.#tokenProvider!.getToken()
 			await this.#configureAttribution(token)
+			this.#attributionConfigured = true
 			const clock = await this.#client!.sampleTime(token)
 			this.#store.recordClockSample(clock)
 
@@ -184,6 +189,7 @@ export class SyncEngine {
 		const hasPendingV2 = this.#store.hasPendingEventSchema(EVENT_SCHEMA_VERSION_V2)
 		if (!capabilities) {
 			if (hasPendingV2) throw new ServiceRequestError('protocol', false)
+			this.#preferredNewEventSchemaVersion = EVENT_SCHEMA_VERSION_V1
 			return
 		}
 
@@ -199,9 +205,8 @@ export class SyncEngine {
 			}
 		}
 
-		if (prefersV2 && acceptsV2) {
-			this.#preferredNewEventSchemaVersion = EVENT_SCHEMA_VERSION_V2
-		}
+		this.#preferredNewEventSchemaVersion =
+			prefersV2 && acceptsV2 ? EVENT_SCHEMA_VERSION_V2 : EVENT_SCHEMA_VERSION_V1
 	}
 
 	#recordFailure(kind: string, retryable: boolean): void {

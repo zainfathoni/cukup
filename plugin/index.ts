@@ -54,7 +54,10 @@ export default function (amp: PluginAPI) {
 		const eventKey = turnKey({ threadId: event.thread.id, messageId: String(event.id) })
 		const startedAt = monotonicNow()
 		try {
-			const projectAttribution = await resolveProjectAttribution()
+			const [, projectAttribution] = await Promise.all([
+				sync.prepareNewTurn(),
+				resolveProjectAttribution(),
+			])
 			if (!projectAttribution && !projectAttributionWarningShown) {
 				projectAttributionWarningShown = true
 				void ctx.ui
