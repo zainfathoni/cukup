@@ -119,6 +119,40 @@ describe('SyncEngine', () => {
 		store.close()
 	})
 
+	test('prepares first-turn attribution without waiting for the full sync cycle', async () => {
+		const store = new WorkHoursStore(databasePath())
+		let releaseTimeRequest = () => {}
+		const timeRequest = new Promise<void>((resolve) => {
+			releaseTimeRequest = resolve
+		})
+		let timeRequested = false
+		const fetcher: Fetcher = async (url) => {
+			if (url.endsWith('/v1/capabilities')) return capabilities(2)
+			if (url.endsWith('/v1/time')) {
+				timeRequested = true
+				await timeRequest
+				return Response.json({ server_time: new Date(nowMs).toISOString() })
+			}
+			return Response.json(summary())
+		}
+		const engine = new SyncEngine({
+			store,
+			client: client(fetcher),
+			tokenProvider: provider(),
+			now: () => nowMs,
+			executorProfile: { kind: 'remote', executorLabel: REMOTE_EXECUTOR_LABEL },
+		})
+		await engine.prepareNewTurn()
+		expect(timeRequested).toBeTrue()
+		expect(engine.attributionForNewTurn('project-one')).toEqual({
+			schemaVersion: EVENT_SCHEMA_VERSION_V2,
+			projectSlug: 'project-one',
+		})
+		releaseTimeRequest()
+		await engine.dispose()
+		store.close()
+	})
+
 	test('keeps the ADR-fixed amp-orb remote label without sending a hostname', async () => {
 		const store = new WorkHoursStore(databasePath())
 		const requests: Array<{ url: string; body: string }> = []
@@ -169,6 +203,7 @@ describe('SyncEngine', () => {
 			schemaVersion: EVENT_SCHEMA_VERSION_V2,
 			projectSlug: 'project-one',
 		})
+		await engine.runNow()
 		capabilityFailure = true
 		expect(await engine.runNow()).toMatchObject({ authoritativeSummary: false })
 		expect(engine.attributionForNewTurn('project-one')).toEqual({

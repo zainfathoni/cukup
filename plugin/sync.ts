@@ -57,6 +57,7 @@ export class SyncEngine {
 	#trackingIncomplete: boolean
 	#preferredNewEventSchemaVersion: 1 | 2 = EVENT_SCHEMA_VERSION_V1
 	#attributionConfigured = false
+	#attributionReady: Promise<void> | undefined
 	#executorProfileBound = false
 
 	constructor(options: SyncEngineOptions) {
@@ -97,7 +98,13 @@ export class SyncEngine {
 	}
 
 	async prepareNewTurn(): Promise<void> {
-		if (!this.#attributionConfigured) await this.runNow()
+		if (this.#attributionConfigured) return
+		let ready = this.#attributionReady
+		if (!ready) {
+			void this.runNow()
+			ready = this.#attributionReady
+		}
+		await ready
 	}
 
 	attributionForNewTurn(projectSlug: string | null): EventAttribution {
@@ -137,11 +144,17 @@ export class SyncEngine {
 	}
 
 	async #runCycle(): Promise<SyncCycleResult> {
+		let markAttributionReady = () => {}
+		const attributionReady = new Promise<void>((resolve) => {
+			markAttributionReady = resolve
+		})
+		this.#attributionReady = attributionReady
 		let token = ''
 		try {
 			token = await this.#tokenProvider!.getToken()
 			await this.#configureAttribution(token)
 			this.#attributionConfigured = true
+			markAttributionReady()
 			const clock = await this.#client!.sampleTime(token)
 			this.#store.recordClockSample(clock)
 
@@ -179,6 +192,8 @@ export class SyncEngine {
 			this.#recordFailure(kind, kind !== 'local-state')
 			return { authoritativeSummary: false, errorKind: kind }
 		} finally {
+			markAttributionReady()
+			if (this.#attributionReady === attributionReady) this.#attributionReady = undefined
 			token = ''
 		}
 	}
