@@ -35,6 +35,33 @@ describe('WorkHoursStore', () => {
 		reopened.close()
 	})
 
+	test('conditionally records an end only after its matching start', () => {
+		const store = new WorkHoursStore(databasePath())
+		expect(
+			store.recordEndIfStarted({
+				threadId: 'T-one',
+				messageId: '1',
+				kind: 'end',
+				atMs: 100,
+				status: 'done',
+			}),
+		).toBeUndefined()
+		expect(store.events()).toEqual([])
+
+		store.record({ threadId: 'T-one', messageId: '1', kind: 'start', atMs: 200 })
+		expect(
+			store.recordEndIfStarted(
+				{ threadId: 'T-one', messageId: '1', kind: 'end', atMs: 300, status: 'error' },
+				100,
+			),
+		).toMatchObject({ kind: 'agent.end', monotonic_duration_ms: 100 })
+		expect(store.events()).toEqual([
+			{ threadId: 'T-one', messageId: '1', kind: 'start', atMs: 200 },
+			{ threadId: 'T-one', messageId: '1', kind: 'end', atMs: 300, status: 'error' },
+		])
+		store.close()
+	})
+
 	test('writes legacy fallback evidence and its outbox row in one transaction', () => {
 		const path = databasePath()
 		const store = new WorkHoursStore(path)

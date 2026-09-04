@@ -195,6 +195,8 @@ The summary response remains schema 1 regardless of the event schemas contributi
 
 For each random `(source_instance_id, session_id)`, a completed turn contributes `[start, end + 15 minutes)`. An unmatched start contributes at most 15 minutes. All endpoints are clipped at `as_of`; overlapping intervals from every source are unioned globally before overlap is calculated. The union is clipped at timezone-derived local day and Monday-week boundaries, including DST transitions in any IANA timezone supported by the generic aggregation module.
 
+Amp can resume work after a provider error or wake a thread from another thread without emitting a new `agent.start`. A plugin can also load while a turn is already running. When Cukup first observes such a thread in `running` or `awaiting-approval` state without a tracked start, it creates a separate recovered session beginning at that observation time. It closes that session when the state becomes `idle` or `error`, a definitive `agent.end` arrives, or a new `agent.start` hands ownership to a normal turn. Recovery never guesses or backdates time before observation. Thread and message identities remain local correlation data and are not added to the shared event schema.
+
 ## Other errors
 
 Malformed roots use `400 invalid_request`, oversized payloads use `413 payload_too_large`, unsupported media types use `415 unsupported_media_type`, and wrong methods use `405 method_not_allowed`. Unexpected failures use only `500 {"error":"internal_error"}`. No error response contains request bodies, credentials, identity claims, database details, or stack traces.

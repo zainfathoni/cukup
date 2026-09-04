@@ -11,6 +11,15 @@ let previousTokenFile: string | undefined
 let previousServiceURL: string | undefined
 let previousProjectID: string | undefined
 
+function idleThread() {
+	return {
+		state: {
+			get: async () => 'idle',
+			subscribe: () => ({ unsubscribe() {} }),
+		},
+	}
+}
+
 beforeEach(() => {
 	previousTokenFile = process.env.CUKUP_TOKEN_FILE
 	previousServiceURL = process.env.CUKUP_SERVICE_URL
@@ -69,7 +78,7 @@ describe('work-hours plugin', () => {
 			},
 			threads: {
 				get() {
-					return { state: { get: async () => 'idle' } }
+					return idleThread()
 				},
 			},
 			configuration: {
@@ -98,7 +107,12 @@ describe('work-hours plugin', () => {
 
 		try {
 			workHoursPlugin(amp as never)
-			expect([...handlers.keys()]).toEqual(['agent.start', 'agent.end'])
+			expect([...handlers.keys()]).toEqual([
+				'session.start',
+				'agent.start',
+				'agent.end',
+				'tool.result',
+			])
 			expect([...commands.keys()]).toEqual([
 				'work-hours-status',
 				'project-slug-set',
@@ -127,6 +141,340 @@ describe('work-hours plugin', () => {
 
 			await commands.get('work-hours-set-target')?.(context)
 			expect(notifications.at(-1)).toBe('Weekday target set to 1m.')
+		} finally {
+			await Promise.all(disposers.map((dispose) => dispose()))
+			if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME
+			else process.env.XDG_STATE_HOME = previousStateHome
+		}
+	})
+
+	test('recovers running work at startup and after a retry without agent.start', async () => {
+		const stateHome = mkdtempSync(join(tmpdir(), 'amp-work-hours-plugin-test-'))
+		temporaryDirectories.push(stateHome)
+		const previousStateHome = process.env.XDG_STATE_HOME
+		process.env.XDG_STATE_HOME = stateHome
+		const handlers = new Map<string, (event: any, context?: any) => unknown>()
+		const disposers: Array<() => unknown> = []
+		const stateObservers = new Set<(state: 'running' | 'idle') => void>()
+		let state: 'running' | 'idle' = 'running'
+		let resolveProject!: (result: { exitCode: number; stdout: string; stderr: string }) => void
+		const project = new Promise<{ exitCode: number; stdout: string; stderr: string }>((resolve) => {
+			resolveProject = resolve
+		})
+		const amp = {
+			on(name: string, handler: (event: any, context?: any) => unknown) {
+				handlers.set(name, handler)
+				return { unsubscribe() {} }
+			},
+			registerCommand() {
+				return { unsubscribe() {}, setAvailability() {} }
+			},
+			onDispose(callback: () => unknown) {
+				disposers.push(callback)
+				return { unsubscribe() {} }
+			},
+			threads: {
+				get: () => ({
+					state: {
+						get: async () => state,
+						subscribe(observer: (value: 'running' | 'idle') => void) {
+							stateObservers.add(observer)
+							return { unsubscribe: () => stateObservers.delete(observer) }
+						},
+					},
+				}),
+			},
+			configuration: {
+				get: async () => ({}),
+				update: async () => {},
+				delete: async () => {},
+			},
+			system: { executor: { kind: 'local' }, user: { workspace: null } },
+			$: () => project,
+		}
+
+		try {
+			workHoursPlugin(amp as never)
+			handlers.get('session.start')?.({ thread: { id: 'T-recovered' } })
+			await Bun.sleep(0)
+			state = 'idle'
+			for (const observer of stateObservers) observer(state)
+			state = 'running'
+			for (const observer of stateObservers) observer(state)
+			const context = { ui: { notify: async () => {} } }
+			const event = {
+				thread: { id: 'T-recovered' },
+				id: 'message-with-retry',
+				message: 'retry this turn',
+			}
+			const normalStart = handlers.get('agent.start')?.(event, context)
+			await Bun.sleep(10)
+			resolveProject({
+				exitCode: 0,
+				stdout: JSON.stringify({ id: 'project-test', name: 'Cukup Plugin' }),
+				stderr: '',
+			})
+			await normalStart
+			for (const observer of stateObservers) observer('idle')
+			await Bun.sleep(20)
+			await handlers.get('agent.end')?.({ ...event, status: 'error', messages: [] }, context)
+			state = 'running'
+			for (const observer of stateObservers) observer(state)
+			await Bun.sleep(20)
+			await handlers.get('agent.end')?.(
+				{
+					thread: { id: 'T-recovered' },
+					id: 'unknown-original-message',
+					message: 'turn began before plugin load',
+					status: 'cancelled',
+					messages: [],
+				},
+				context,
+			)
+
+			const database = new Database(join(stateHome, 'amp-work-hours', 'state.sqlite'))
+			const events = database
+				.query<{ messageId: string; kind: string; atMs: number; status: string | null }, []>(
+					`SELECT message_id AS messageId, kind, at_ms AS atMs, status FROM events
+					 WHERE thread_id = 'T-recovered' ORDER BY rowid`,
+				)
+				.all()
+			database.close()
+			expect(events).toHaveLength(8)
+			expect(events[0]?.messageId).toStartWith('cukup-recovered-')
+			expect(events[1]?.messageId).toBe(events[0]?.messageId)
+			expect(events[2]?.messageId).toStartWith('cukup-recovered-')
+			expect(events[3]?.messageId).toBe(events[2]?.messageId)
+			expect(events[4]?.messageId).toBe('message-with-retry')
+			expect(events[5]?.messageId).toBe('message-with-retry')
+			expect(events[6]?.messageId).toStartWith('cukup-recovered-')
+			expect(events[7]?.messageId).toBe(events[6]?.messageId)
+			expect(events[3]?.atMs).toBe(events[4]?.atMs)
+			expect(events.map(({ kind, status }) => ({ kind, status }))).toEqual([
+				{ kind: 'start', status: null },
+				{ kind: 'end', status: 'done' },
+				{ kind: 'start', status: null },
+				{ kind: 'end', status: 'done' },
+				{ kind: 'start', status: null },
+				{ kind: 'end', status: 'error' },
+				{ kind: 'start', status: null },
+				{ kind: 'end', status: 'cancelled' },
+			])
+		} finally {
+			await Promise.all(disposers.map((dispose) => dispose()))
+			if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME
+			else process.env.XDG_STATE_HOME = previousStateHome
+		}
+	})
+
+	test('ignores a stale running bootstrap after a newer idle state emission', async () => {
+		const stateHome = mkdtempSync(join(tmpdir(), 'amp-work-hours-plugin-test-'))
+		temporaryDirectories.push(stateHome)
+		const previousStateHome = process.env.XDG_STATE_HOME
+		process.env.XDG_STATE_HOME = stateHome
+		const handlers = new Map<string, (event: any) => unknown>()
+		const disposers: Array<() => unknown> = []
+		let resolveBootstrap!: (state: 'running') => void
+		const bootstrap = new Promise<'running'>((resolve) => {
+			resolveBootstrap = resolve
+		})
+		let stateObserver: ((state: 'idle') => void) | undefined
+		const amp = {
+			on(name: string, handler: (event: any) => unknown) {
+				handlers.set(name, handler)
+				return { unsubscribe() {} }
+			},
+			registerCommand() {
+				return { unsubscribe() {}, setAvailability() {} }
+			},
+			onDispose(callback: () => unknown) {
+				disposers.push(callback)
+				return { unsubscribe() {} }
+			},
+			threads: {
+				get: () => ({
+					state: {
+						get: () => bootstrap,
+						subscribe(observer: (state: 'idle') => void) {
+							stateObserver = observer
+							return { unsubscribe() { stateObserver = undefined } }
+						},
+					},
+				}),
+			},
+			configuration: {
+				get: async () => ({}),
+				update: async () => {},
+				delete: async () => {},
+			},
+			system: { executor: { kind: 'local' }, user: { workspace: null } },
+			$: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
+		}
+
+		try {
+			workHoursPlugin(amp as never)
+			handlers.get('session.start')?.({ thread: { id: 'T-stale-bootstrap' } })
+			stateObserver?.('idle')
+			resolveBootstrap('running')
+			await Bun.sleep(20)
+
+			const database = new Database(join(stateHome, 'amp-work-hours', 'state.sqlite'))
+			const count = database
+				.query<{ count: number }, []>(
+					`SELECT count(*) AS count FROM events WHERE thread_id = 'T-stale-bootstrap'`,
+				)
+				.get()?.count
+			database.close()
+			expect(count).toBe(0)
+		} finally {
+			await Promise.all(disposers.map((dispose) => dispose()))
+			if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME
+			else process.env.XDG_STATE_HOME = previousStateHome
+		}
+	})
+
+	test('keeps normal tracking independent from thread-state observation failures', async () => {
+		const stateHome = mkdtempSync(join(tmpdir(), 'amp-work-hours-plugin-test-'))
+		temporaryDirectories.push(stateHome)
+		const previousStateHome = process.env.XDG_STATE_HOME
+		process.env.XDG_STATE_HOME = stateHome
+		const handlers = new Map<string, (event: any, context?: any) => unknown>()
+		const disposers: Array<() => unknown> = []
+		const amp = {
+			on(name: string, handler: (event: any, context?: any) => unknown) {
+				handlers.set(name, handler)
+				return { unsubscribe() {} }
+			},
+			registerCommand() {
+				return { unsubscribe() {}, setAvailability() {} }
+			},
+			onDispose(callback: () => unknown) {
+				disposers.push(callback)
+				return { unsubscribe() {} }
+			},
+			threads: {
+				get() {
+					throw new Error('thread disappeared')
+				},
+			},
+			configuration: {
+				get: async () => ({}),
+				update: async () => {},
+				delete: async () => {},
+			},
+			system: { executor: { kind: 'local' }, user: { workspace: null } },
+			$: async () => ({
+				exitCode: 0,
+				stdout: JSON.stringify({ id: 'project-test', name: 'Cukup Plugin' }),
+				stderr: '',
+			}),
+		}
+		const context = { ui: { notify: async () => {} } }
+		const event = {
+			thread: { id: 'T-observation-failure' },
+			id: 'message-1',
+			message: 'still record this turn',
+		}
+
+		try {
+			workHoursPlugin(amp as never)
+			await handlers.get('agent.start')?.(event, context)
+			await handlers.get('agent.end')?.({ ...event, status: 'done', messages: [] }, context)
+
+			const database = new Database(join(stateHome, 'amp-work-hours', 'state.sqlite'))
+			const events = database
+				.query<{ kind: string; status: string | null }, []>(
+					`SELECT kind, status FROM events
+					 WHERE thread_id = 'T-observation-failure' ORDER BY rowid`,
+				)
+				.all()
+			database.close()
+			expect(events).toEqual([
+				{ kind: 'start', status: null },
+				{ kind: 'end', status: 'done' },
+			])
+		} finally {
+			await Promise.all(disposers.map((dispose) => dispose()))
+			if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME
+			else process.env.XDG_STATE_HOME = previousStateHome
+		}
+	})
+
+	test('starts fresh recovery after a recovered end write fails', async () => {
+		const stateHome = mkdtempSync(join(tmpdir(), 'amp-work-hours-plugin-test-'))
+		temporaryDirectories.push(stateHome)
+		const previousStateHome = process.env.XDG_STATE_HOME
+		process.env.XDG_STATE_HOME = stateHome
+		const handlers = new Map<string, (event: any) => unknown>()
+		const disposers: Array<() => unknown> = []
+		const stateObservers = new Set<(state: 'running' | 'idle') => void>()
+		let state: 'running' | 'idle' = 'running'
+		const amp = {
+			on(name: string, handler: (event: any) => unknown) {
+				handlers.set(name, handler)
+				return { unsubscribe() {} }
+			},
+			registerCommand() {
+				return { unsubscribe() {}, setAvailability() {} }
+			},
+			onDispose(callback: () => unknown) {
+				disposers.push(callback)
+				return { unsubscribe() {} }
+			},
+			threads: {
+				get: () => ({
+					state: {
+						get: async () => state,
+						subscribe(observer: (value: 'running' | 'idle') => void) {
+							stateObservers.add(observer)
+							return { unsubscribe: () => stateObservers.delete(observer) }
+						},
+					},
+				}),
+			},
+			configuration: {
+				get: async () => ({}),
+				update: async () => {},
+				delete: async () => {},
+			},
+			system: { executor: { kind: 'local' }, user: { workspace: null } },
+			$: async () => ({
+				exitCode: 0,
+				stdout: JSON.stringify({ id: 'project-test', name: 'Cukup Plugin' }),
+				stderr: '',
+			}),
+		}
+
+		try {
+			workHoursPlugin(amp as never)
+			handlers.get('session.start')?.({ thread: { id: 'T-end-failure' } })
+			await Bun.sleep(20)
+
+			const database = new Database(join(stateHome, 'amp-work-hours', 'state.sqlite'))
+			database.exec(`
+				CREATE TRIGGER reject_recovered_end BEFORE INSERT ON events
+				WHEN NEW.kind = 'end'
+				BEGIN SELECT RAISE(ABORT, 'injected recovered-end failure'); END;
+			`)
+			state = 'idle'
+			for (const observer of stateObservers) observer(state)
+			await Bun.sleep(20)
+			database.exec('DROP TRIGGER reject_recovered_end')
+
+			state = 'running'
+			for (const observer of stateObservers) observer(state)
+			await Bun.sleep(20)
+			const starts = database
+				.query<{ messageId: string }, []>(
+					`SELECT message_id AS messageId FROM events
+					 WHERE thread_id = 'T-end-failure' AND kind = 'start' ORDER BY rowid`,
+				)
+				.all()
+			database.close()
+			expect(starts).toHaveLength(2)
+			expect(starts[0]?.messageId).toStartWith('cukup-recovered-')
+			expect(starts[1]?.messageId).toStartWith('cukup-recovered-')
+			expect(starts[1]?.messageId).not.toBe(starts[0]?.messageId)
 		} finally {
 			await Promise.all(disposers.map((dispose) => dispose()))
 			if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME
@@ -192,7 +540,7 @@ describe('work-hours plugin', () => {
 				return { unsubscribe() {}, setAvailability() {} }
 			},
 			onDispose(callback: () => unknown) { disposers.push(callback); return { unsubscribe() {} } },
-			threads: { get: () => ({ state: { get: async () => 'idle' } }) },
+			threads: { get: () => idleThread() },
 			configuration: {
 				get: async () => ({}),
 				update: async () => {},
@@ -303,7 +651,7 @@ describe('work-hours plugin', () => {
 				disposers.push(callback)
 				return { unsubscribe() {} }
 			},
-			threads: { get: () => ({ state: { get: async () => 'idle' } }) },
+			threads: { get: () => idleThread() },
 			configuration: {
 				get: async () => ({}),
 				update: async () => {},
@@ -351,7 +699,7 @@ describe('work-hours plugin', () => {
 				return { unsubscribe() {}, setAvailability() {} }
 			},
 			onDispose(callback: () => unknown) { disposers.push(callback); return { unsubscribe() {} } },
-			threads: { get: () => ({ state: { get: async () => 'idle' } }) },
+			threads: { get: () => idleThread() },
 			configuration: {
 				get: async () => { throw new Error('configuration must not be read') },
 				update: async () => { throw new Error('configuration must not be written') },
@@ -417,7 +765,7 @@ describe('work-hours plugin', () => {
 				return { unsubscribe() {}, setAvailability() {} }
 			},
 			onDispose() { return { unsubscribe() {} } },
-			threads: { get: () => ({ state: { get: async () => 'idle' } }) },
+			threads: { get: () => idleThread() },
 			configuration: {
 				get: async () => { throw new Error('configuration must not be read') },
 				update: async () => { throw new Error('configuration must not be written') },
@@ -476,7 +824,7 @@ describe('work-hours plugin', () => {
 				update: async () => { throw new Error('configuration must not be written') },
 				delete: async () => { throw new Error('configuration must not be written') },
 			},
-			threads: { get: () => ({ state: { get: async () => 'idle' } }) },
+			threads: { get: () => idleThread() },
 			system: { executor: { kind: 'unknown' }, user: { workspace: null }, workspaceRoot: null },
 			$: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
 		}
