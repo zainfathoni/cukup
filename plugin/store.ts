@@ -85,6 +85,20 @@ export class WorkHoursStore {
 		monotonicDurationMs?: number,
 		startAttribution: EventAttribution = UNASSIGNED_V1_ATTRIBUTION,
 	): OutboxEvent | undefined {
+		return this.#record(event, monotonicDurationMs, startAttribution, false)
+	}
+
+	recordEndIfStarted(event: WorkEvent, monotonicDurationMs?: number): OutboxEvent | undefined {
+		if (event.kind !== 'end') throw new Error('Conditional recording requires an end event.')
+		return this.#record(event, monotonicDurationMs, UNASSIGNED_V1_ATTRIBUTION, true)
+	}
+
+	#record(
+		event: WorkEvent,
+		monotonicDurationMs: number | undefined,
+		startAttribution: EventAttribution,
+		requireStart: boolean,
+	): OutboxEvent | undefined {
 		const eventKey = legacyEventKey(event)
 		const turn = turnKey(event)
 		const eventID = uuidv7(event.atMs)
@@ -96,6 +110,13 @@ export class WorkHoursStore {
 				.query<{ found: number }, [string]>('SELECT 1 AS found FROM events WHERE event_key = ?')
 				.get(eventKey)
 			if (existing) return undefined
+			if (requireStart) {
+				const startKey = legacyEventKey({ ...event, kind: 'start', status: undefined })
+				const start = this.#database
+					.query<{ found: number }, [string]>('SELECT 1 AS found FROM events WHERE event_key = ?')
+					.get(startKey)
+				if (!start) return undefined
+			}
 
 			const sequence = this.#nextSequence()
 			const session = this.#turnSession(

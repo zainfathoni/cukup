@@ -1,4 +1,11 @@
-import type { PluginAPI, PluginExecutorKind, ThreadID } from '@ampcode/plugin'
+import type {
+	PluginAPI,
+	PluginExecutorKind,
+	Subscription,
+	ThreadID,
+	ThreadState,
+} from '@ampcode/plugin'
+import { randomUUID } from 'node:crypto'
 import { homedir, hostname } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -32,6 +39,8 @@ import {
 export const description =
 	'Tracks work inferred from Amp turns and reports authoritative daily and weekly Cukup status.'
 
+type StateObservation = { state: ThreadState; atMs: number; monotonicAt: number }
+
 export default function (amp: PluginAPI) {
 	const store = new WorkHoursStore()
 	const now = Date.now
@@ -48,35 +57,176 @@ export default function (amp: PluginAPI) {
 		executorProfile: executorProfileFor(amp.system.executor.kind),
 	})
 	const monotonicStarts = new Map<string, number>()
+	const activeTurns = new Map<string, { messageId: string; recovered: boolean }>()
+	const stateSubscriptions = new Map<string, Subscription>()
+	const stateTasks = new Set<Promise<void>>()
+	const latestStateTask = new Map<string, Promise<void>>()
 	let projectAttributionWarningShown = false
+	let disposed = false
+
+	const recordStart = async (
+		threadId: string,
+		messageId: string,
+		startedAt: number,
+		monotonicStartedAt: number,
+	): Promise<boolean> => {
+		const [, projectAttribution] = await Promise.all([
+			sync.prepareNewTurn(),
+			resolveProjectAttribution(),
+		])
+		const recorded = store.record(
+			{
+				threadId,
+				messageId,
+				kind: 'start',
+				atMs: startedAt,
+			},
+			undefined,
+			sync.attributionForNewTurn(projectAttribution?.slug ?? null),
+		)
+		if (recorded) monotonicStarts.set(turnKey({ threadId, messageId }), monotonicStartedAt)
+		sync.kick()
+		return projectAttribution !== undefined
+	}
+
+	const recordEnd = (
+		threadId: string,
+		messageId: string,
+		status: 'done' | 'error' | 'cancelled',
+		atMs = now(),
+		monotonicAt = monotonicNow(),
+	): void => {
+		const eventKey = turnKey({ threadId, messageId })
+		const startedAt = monotonicStarts.get(eventKey)
+		try {
+			const recorded = store.recordEndIfStarted(
+				{
+					threadId,
+					messageId,
+					kind: 'end',
+					atMs,
+					status,
+				},
+				startedAt === undefined ? undefined : Math.max(0, monotonicAt - startedAt),
+			)
+			if (recorded) sync.kick()
+		} finally {
+			monotonicStarts.delete(eventKey)
+		}
+	}
+
+	const handleThreadState = async (
+		threadId: string,
+		observation: StateObservation,
+	): Promise<void> => {
+		if (disposed) return
+		const active = activeTurns.get(threadId)
+		if (observation.state === 'running' || observation.state === 'awaiting-approval') {
+			if (active) return
+			const messageId = `cukup-recovered-${randomUUID()}`
+			activeTurns.set(threadId, { messageId, recovered: true })
+			try {
+				await recordStart(threadId, messageId, observation.atMs, observation.monotonicAt)
+			} catch {
+				if (activeTurns.get(threadId)?.messageId === messageId) activeTurns.delete(threadId)
+				sync.markTrackingIncomplete()
+			}
+			return
+		}
+		if (!active?.recovered) return
+		try {
+			recordEnd(
+				threadId,
+				active.messageId,
+				observation.state === 'error' ? 'error' : 'done',
+				observation.atMs,
+				observation.monotonicAt,
+			)
+		} catch {
+			sync.markTrackingIncomplete()
+		} finally {
+			if (activeTurns.get(threadId) === active) activeTurns.delete(threadId)
+		}
+	}
+
+	const runStateTask = (threadId: string, observation: StateObservation): void => {
+		const task = (latestStateTask.get(threadId) ?? Promise.resolve())
+			.catch(() => {})
+			.then(() => handleThreadState(threadId, observation))
+		latestStateTask.set(threadId, task)
+		stateTasks.add(task)
+		void task.finally(() => {
+			stateTasks.delete(task)
+			if (latestStateTask.get(threadId) === task) latestStateTask.delete(threadId)
+		})
+	}
+
+	const observeThread = (threadId: string): void => {
+		if (disposed || stateSubscriptions.has(threadId)) return
+		try {
+			const state = amp.threads.get(threadId as ThreadID).state
+			let emitted = false
+			stateSubscriptions.set(
+				threadId,
+				state.subscribe((value) => {
+					emitted = true
+					runStateTask(threadId, { state: value, atMs: now(), monotonicAt: monotonicNow() })
+				}),
+			)
+			void Promise.resolve()
+				.then(() => state.get())
+				.then((value) => {
+					if (!emitted && (value === 'running' || value === 'awaiting-approval')) {
+						runStateTask(threadId, { state: value, atMs: now(), monotonicAt: monotonicNow() })
+					}
+				})
+				.catch(() => sync.markTrackingIncomplete())
+		} catch {
+			sync.markTrackingIncomplete()
+		}
+	}
+
+	const activeThreadSubscription = amp.activeThread?.subscribe((thread) => {
+		if (thread) observeThread(thread.id)
+	})
+	if (amp.activeThread?.current) observeThread(amp.activeThread.current.id)
+
+	amp.on('session.start', (event) => {
+		observeThread(event.thread.id)
+	})
 
 	amp.on('agent.start', async (event, ctx) => {
-		const eventKey = turnKey({ threadId: event.thread.id, messageId: String(event.id) })
-		const startedAt = monotonicNow()
+		const threadId = event.thread.id
+		const messageId = String(event.id)
+		const startedAt = now()
+		const monotonicStartedAt = monotonicNow()
+		await latestStateTask.get(threadId)?.catch(() => {})
+		const active = activeTurns.get(threadId)
+		if (active?.recovered) {
+			try {
+				recordEnd(
+					threadId,
+					active.messageId,
+					'done',
+					startedAt,
+					monotonicStartedAt,
+				)
+			} catch {
+				sync.markTrackingIncomplete()
+			}
+		}
+		activeTurns.set(threadId, { messageId, recovered: false })
+		observeThread(threadId)
 		try {
-			const [, projectAttribution] = await Promise.all([
-				sync.prepareNewTurn(),
-				resolveProjectAttribution(),
-			])
-			if (!projectAttribution && !projectAttributionWarningShown) {
+			const attributed = await recordStart(threadId, messageId, startedAt, monotonicStartedAt)
+			if (!attributed && !projectAttributionWarningShown) {
 				projectAttributionWarningShown = true
 				void ctx.ui
 					.notify('Cukup could not resolve this Amp Project. New attributed turns will be Unassigned.')
 					.catch(() => {})
 			}
-			const recorded = store.record(
-				{
-					threadId: event.thread.id,
-					messageId: String(event.id),
-					kind: 'start',
-					atMs: now(),
-				},
-				undefined,
-				sync.attributionForNewTurn(projectAttribution?.slug ?? null),
-			)
-			if (recorded) monotonicStarts.set(eventKey, startedAt)
-			sync.kick()
 		} catch {
+			if (activeTurns.get(threadId)?.messageId === messageId) activeTurns.delete(threadId)
 			sync.markTrackingIncomplete()
 			void ctx.ui
 				.notify('UNKNOWN · TRACKING INCOMPLETE · Cukup could not record agent.start locally.')
@@ -85,29 +235,38 @@ export default function (amp: PluginAPI) {
 		return {}
 	})
 
-	amp.on('agent.end', (event, ctx) => {
-		const eventKey = turnKey({ threadId: event.thread.id, messageId: String(event.id) })
-		const startedAt = monotonicStarts.get(eventKey)
-		const endedAt = monotonicNow()
+	amp.on('agent.end', async (event, ctx) => {
+		const threadId = event.thread.id
+		const messageId = String(event.id)
+		const endedAt = now()
+		const monotonicEndedAt = monotonicNow()
+		await latestStateTask.get(threadId)?.catch(() => {})
+		const active = activeTurns.get(threadId)
 		try {
-			store.record(
-				{
-					threadId: event.thread.id,
-					messageId: String(event.id),
-					kind: 'end',
-					atMs: now(),
-					status: event.status,
-				},
-				startedAt === undefined ? undefined : Math.max(0, endedAt - startedAt),
+			recordEnd(
+				threadId,
+				active?.recovered ? active.messageId : messageId,
+				event.status,
+				endedAt,
+				monotonicEndedAt,
 			)
-			monotonicStarts.delete(eventKey)
-			sync.kick()
 		} catch {
 			sync.markTrackingIncomplete()
 			void ctx.ui
 				.notify('UNKNOWN · TRACKING INCOMPLETE · Cukup could not record agent.end locally.')
 				.catch(() => {})
+		} finally {
+			if (
+				activeTurns.get(threadId) === active &&
+				(active?.recovered || active?.messageId === messageId)
+			) {
+				activeTurns.delete(threadId)
+			}
 		}
+	})
+
+	amp.on('tool.result', (event) => {
+		observeThread(event.thread.id)
 	})
 
 	amp.registerCommand(
@@ -262,6 +421,10 @@ export default function (amp: PluginAPI) {
 
 	sync.start()
 	amp.onDispose(async () => {
+		disposed = true
+		activeThreadSubscription?.unsubscribe()
+		for (const subscription of stateSubscriptions.values()) subscription.unsubscribe()
+		await Promise.all(stateTasks)
 		await sync.dispose()
 		store.close()
 	})
