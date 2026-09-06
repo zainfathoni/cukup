@@ -25,6 +25,10 @@ This repository is the canonical development source for the plugin, service, arc
 
 See [ADR 0001](docs/adr/0001-repository-ownership.md) for the ownership boundaries.
 
+## Product direction
+
+[The Cukup roadmap](ROADMAP.md) records the current product outcomes, including external-contributor readiness and the planned Tycho integration. GitHub issues own executable work; ADRs record durable decisions; Fleet remains limited to cross-machine rollout and operations.
+
 ## Development
 
 [Bun](https://bun.sh/) 1.3.10 is pinned as standalone development tooling. Amp supplies its own Bun runtime when it executes published plugins; installing Bun from this repository is not a production plugin prerequisite.
