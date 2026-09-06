@@ -10,7 +10,7 @@ The Amp plugin stores minimal evidence in executor-local SQLite at `${XDG_STATE_
 
 The shared privacy boundary excludes prompts/content, host/user/fleet identity from events, model names, repository identifiers, paths, Amp Project IDs, and local Amp thread/message IDs. Shared events use random source/session UUIDs and may carry only an optional v2 Project Slug normalized from the exact Amp Project name; physical Executor Labels bind separately to authenticated Bearer Lineages. Amp workload JWT claims are a transient authentication-layer exception and never enter shared event records or logs.
 
-The current release pipeline publishes every successful `main` SHA and the protected Vikas operator follows that image. This incorrectly treats documentation-only changes as service releases. Until the path-aware release outcome in the roadmap ships, keep documentation work off `main` unless it is intentionally bundled with a releasable runtime change.
+The service release workflow runs only when a `main` change touches an image input (`service/`, `Dockerfile.service`, `package.json`, `bun.lock`, or `tsconfig.json`), or when an operator dispatches it manually. Documentation, plugin-only, and other non-image changes therefore create no service image or release version. The protected Vikas operator follows the newest successfully published service revision that remains an ancestor of signed `main`, rather than assuming every `main` SHA has an image.
 
 ## Marking a day off
 
