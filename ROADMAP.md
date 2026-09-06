@@ -10,7 +10,7 @@ This roadmap records outcomes, not an implementation backlog. GitHub issues own 
 
 - Reconcile and close or rescope completed Fleet rollout issues #30–#33.
 - Make deployment failures externally visible and rehearse backup restoration and rollback on a routine schedule.
-- Make release automation path-aware: documentation-only and other non-runtime changes must not publish an image, create a release version, or trigger production deployment. The deployment operator must follow the latest verified releasable service revision rather than assume every `main` SHA has an image.
+- Keep path-aware release automation and its deployment-operator selection contract covered by regression checks: documentation-only, plugin-only, and other non-image changes must not publish an image, create a service release version, or trigger production deployment.
 - Complete external-implementation-contributor readiness: safe pull-request CI, credential-free integration fixtures, and a scoped Tycho issue.
 - Agree and land Tycho's supported privacy-clean open-run read contract.
 - Add privacy-safe prompt-composition observations independently to Harnesses that can support them. Until then, disclose submission-only Working Time as a lower bound.
