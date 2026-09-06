@@ -1,61 +1,64 @@
 # Cukup roadmap
 
-> **Status: draft proposal.** Except where an item restates an already accepted ADR or shipped behavior, this document records candidate direction rather than an agreed commitment. Product and harness-adapter decisions remain subject to the current design review.
+> **Status: accepted product direction as of 2026-09-06.** Outcomes below are commitments of direction, not claims that their implementations exist. The deployed product remains Amp-only with event schemas v1/v2 until each prospective outcome passes its own review and rollout.
 
-Cukup is a privacy-first WakaTime for AI-assisted work. It measures time spent collaborating with AI agents across projects and executors without collecting prompts, source code, workspace paths, or conversation identifiers.
+Cukup is a privacy-first WakaTime for AI-assisted work. Its primary metric is Working Time: evidenced human collaboration with AI. Agent Runtime measures full scheduled and unattended execution separately. Token usage, model cost, prompt count, and output volume are distinct optional dimensions, not substitutes for either time metric.
 
-The primary metric is **AI-assisted working time** inferred from agent activity. Token usage, model cost, prompt count, and output volume are separate dimensions and are not substitutes for working time.
-
-This roadmap records product outcomes, not an implementation backlog. GitHub issues should own scoped work and acceptance criteria; ADRs should record durable product and architecture decisions. Review this document at least monthly and move outcomes as evidence changes.
+This roadmap records outcomes, not an implementation backlog. GitHub issues own scoped work and acceptance criteria; ADRs record durable decisions. Review the roadmap monthly and move outcomes only when evidence changes.
 
 ## Now — establish the product foundation
 
-- Record the completed final-runtime fleet canary and reconcile the completed Fleet rollout issues.
-- Update repository and operations documentation to reflect the deployed service, dashboard, attribution, backup, and automated deployment paths.
-- Define the canonical AI-assisted-working-time metric, terminology, limitations, and user-facing explanation.
+- Reconcile and close or rescope completed Fleet rollout issues #30–#33.
 - Make deployment failures externally visible and rehearse backup restoration and rollback on a routine schedule.
-- Reach the external-contributor readiness checkpoint below.
-- Define and record a ports-and-adapters architecture for agent harnesses. The harness-neutral port must accept normalized activity while the Cukup core retains ownership of session durability, timing, attribution, outbox delivery, and privacy enforcement.
-- Co-design the Tycho adapter contract with Tycho's creator: map Tycho's natural lifecycle to the harness-neutral port, settle which repository owns the adapter, and preserve Cukup's semantics without requiring production credentials.
+- Make release automation path-aware: documentation-only and other non-runtime changes must not publish an image, create a release version, or trigger production deployment. The deployment operator must follow the latest verified releasable service revision rather than assume every `main` SHA has an image.
+- Complete external-implementation-contributor readiness: safe pull-request CI, credential-free integration fixtures, and a scoped Tycho issue.
+- Agree and land Tycho's supported privacy-clean open-run read contract.
+- Add privacy-safe prompt-composition observations independently to Harnesses that can support them. Until then, disclose submission-only Working Time as a lower bound.
 
 ## Next — support Tycho and broaden personal use
 
 - Move the existing Amp lifecycle integration behind the harness port without changing its behavior, making Amp the first adapter rather than the core domain model.
-- Ship and document Tycho as the second adapter, with deterministic local tests and end-to-end acceptance against a local Cukup service.
-- Prove that concurrent Amp and Tycho activity is unioned rather than double-counted and remains attributable to the correct project and executor.
+- Design and roll out prospective protocol semantics that preserve historical v1/v2 Working Time while separately representing Engagement Window-based Working Time and Agent Runtime from an explicit transition.
+- Ship Tycho as the second adapter: a per-machine 60-second reconciler over supported durable Tycho state, with hooks only as optional wake-ups.
+- Prove that concurrent Amp and Tycho Working Time and Agent Runtime are globally unioned rather than double-counted and remain attributable to the correct project and Executor.
 - Make installation and onboarding repeatable for a user who does not have access to the creator's Fleet repository or production environment.
-- Validate that a third harness can implement the port without changing Cukup's core or weakening the closed event schema.
 - Add useful personal exports, goals, and project/agent activity views while keeping working time distinct from tokens, cost, and outcomes.
 
 ## Later — expand the product surface
 
-- Evaluate integrations with other coding-agent environments based on user demand and lifecycle fidelity.
+- Validate the internal adapter port with a third Harness before publishing an adapter SDK or compatibility promise.
+- Evaluate further Harnesses based on user demand, lifecycle fidelity, and privacy-safe evidence coverage.
 - Offer token and cost telemetry as optional, separately named dimensions if it can preserve the privacy contract.
 - Explore multi-user tenancy, team privacy controls, aggregate reporting, and organization-level workflow trends.
 - Decide whether the long-term distribution model is hosted, self-hosted, or both.
 
 ## External-contributor readiness checkpoint
 
-Cukup is ready to invite an external implementation contribution when all of these are true:
+Cukup is ready for design contribution now. It is ready for external implementation contribution only when every unchecked gate is complete:
 
-- Repository access and licensing or other contribution terms are explicit.
-- `CONTRIBUTING.md` documents setup, architecture boundaries, coding conventions, review expectations, and `bun run check` as the required local gate.
-- A contributor can run the relevant service and integration tests locally with fixtures, without Fleet access, production credentials, personal tokens, DNS, or deployment access.
-- The harness port and the event, timing, attribution, authentication, and privacy contracts needed by an adapter are documented independently of the Amp implementation.
-- Fork or contributor-branch CI runs all non-secret checks and cannot publish images or deploy production code.
-- The Tycho adapter has a GitHub issue defining repository ownership, lifecycle mapping, non-goals, privacy constraints, and executable acceptance criteria.
-- At least one maintainer is named to answer design questions and review the contribution through completion.
+- [x] MIT contribution terms are explicit.
+- [x] `CONTRIBUTING.md` documents setup, boundaries, review expectations, and `bun run check`.
+- [x] Product language, Harness ports, and the Tycho contract are independent of the Amp implementation.
+- [x] Zain Fathoni is the initial Cukup maintainer; Tycho's creator reviews Tycho-owned contract changes.
+- [ ] Contributor-branch CI runs all non-secret checks and cannot publish or deploy.
+- [ ] Credential-free fixtures exercise the relevant local service and adapter path without Fleet or production access.
+- [ ] A scoped Tycho issue records lifecycle mapping, non-goals, privacy constraints, and executable acceptance criteria.
+- [ ] Tycho's supported open-run read contract is agreed for implementation.
 
-Meeting this checkpoint means the contribution path is safe and understandable. It does not require exposing production operations or granting deployment authority.
+Implementation readiness never requires exposing production operations or granting deployment authority.
 
 ## Tycho adapter acceptance outcomes
 
 The Tycho adapter is complete when:
 
-- ordinary Tycho activity reaches the harness-neutral port and creates durable starts and ends without synthetic production events;
+- one Tycho managed run produces one Agent Runtime interval, while only explicit human interactions open or renew 15-minute Working Time windows;
+- scheduled starts, automatic orchestration, liveness, generated output, finalization, and waiting do not independently create Working Time;
 - interrupted, offline, duplicate, and delayed delivery converge through the same append-only semantics as other Cukup sources;
-- project and executor attribution use canonical, non-sensitive identifiers and fail closed when attribution is ambiguous;
+- reconciliation remains correct without hooks, runs every 60 seconds per machine, and reads only supported privacy-clean Tycho state;
+- terminal runtime ends require durable terminal timestamps; crashes without one remain unmatched and crash-capped;
+- project and Executor attribution use canonical non-sensitive identifiers, require explicit aliases when identities differ, and fail closed when ambiguous;
 - transmitted and logged data stay within Cukup's documented privacy boundary;
-- overlapping Amp and Tycho sessions do not inflate global working time;
+- overlapping Amp and Tycho intervals do not inflate either metric;
+- missing composition capability is visibly disclosed as lower-bound Working Time;
 - local end-to-end tests cover lifecycle mapping, retries, replay, attribution, aggregation, and prohibited fields;
 - installation, authentication, troubleshooting, and removal are documented without relying on the creator's machine configuration.

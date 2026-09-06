@@ -1,6 +1,6 @@
 # Dashboard service contract
 
-The dashboard backend is part of the existing Bun service, but it is a separate host and authentication boundary. It is implemented and tested in this repository; it is not deployed, and this document does not authorize OAuth application creation, DNS/TLS changes, secret injection, or production rollout.
+The dashboard backend is part of the deployed Bun service, but it is a separate host and authentication boundary. The single-owner dashboard is live at `cukup.dev`; ingestion remains isolated at `api.cukup.dev`. This document records the active contract and does not by itself authorize configuration, credential, DNS/TLS, or production mutations.
 
 ## Host-first route matrix
 
@@ -112,15 +112,15 @@ Aggregation first derives each mixed-v1/v2 session interval with the existing gr
 
 All dashboard responses use `Cache-Control: no-store`, a restrictive Content Security Policy, frame denial, MIME sniffing protection, same-origin resource/opener policy, no-referrer, and a restrictive permissions policy. Executable JavaScript and CSS are bundled locally; there are no analytics, remote fonts, or external browser assets.
 
-## Remaining operational gates
+## Production acceptance and ongoing checks
 
-Before enabling the dashboard outside an isolated test environment:
+The initial production gates passed before dashboard enablement: dedicated GitHub OAuth and immutable owner allowlisting, protected secret injection, dual-host proxy/DNS/TLS, real-browser sign-in/report/logout checks, guarded Chrome `Origin: null` logout, responsive 30-day first paint, mixed-v1/v2 preservation, backup verification, and migration-aware rollback retention.
 
-1. Create the dedicated GitHub OAuth application with the exact callback above and record the immutable numeric owner ID.
-2. Put the client secret and session key ring in the protected runtime secret store; never commit or print them.
-3. Update and validate the Kamal proxy asset for both exact hosts while keeping the API-host health check.
-4. Provision and verify `cukup.dev` DNS and TLS without changing the ingestion host.
-5. Run real-browser OAuth, logout, cookie, CSP, responsive, keyboard, polling/visibility, and partial-failure smoke tests through the trusted proxy.
-6. Rehearse the existing pre/post-migration backup, clean restore, mixed-v1/v2 replay, and rollback-floor checks against the release image.
+For every dashboard-affecting release, continue to verify:
 
-Until those gates receive separate approval, keep the current deployment asset API-only and leave the dashboard secrets absent so routes stay disabled.
+1. exact host routing and credential separation;
+2. public TLS, `/up`, and API-host `/healthz`;
+3. OAuth start/callback, authenticated report, cookie protections, and logout variants in a real browser;
+4. no sensitive URL, response-log, application-log, or browser-asset leakage;
+5. dashboard failures do not affect ingestion or API health;
+6. database integrity, backup verification, mixed-version ingestion, and the migration-aware rollback floor.

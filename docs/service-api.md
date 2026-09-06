@@ -1,6 +1,6 @@
 # Shared service API
 
-The release-candidate service is the cross-source authority for Cukup work time. It is not deployed by this repository change. Production configuration is fixed to:
+The deployed service at `api.cukup.dev` is the cross-source authority for current Cukup Working Time. Production configuration is fixed to:
 
 - timezone: `Asia/Jakarta`;
 - week start: Monday;
@@ -11,6 +11,8 @@ The release-candidate service is the cross-source authority for Cukup work time.
 - maximum client clock skew: 10 minutes.
 
 Summary amounts are whole minutes. All timestamps are UTC RFC 3339 strings with exactly three fractional digits, such as `2026-08-31T05:00:00.000Z`. Responses use `application/json` and `Cache-Control: no-store`.
+
+This document specifies the currently implemented v1/v2 API. Under these historical semantics, Amp turn intervals plus grace are called Working Time. The accepted future direction in [ADR 0006](adr/0006-harness-adapter-ports.md) separates Engagement Window-based Working Time from Agent Runtime prospectively. No future metric field, event kind, or schema described by that decision exists in this API yet, and existing v1/v2 evidence will never be reinterpreted.
 
 ## Transport and authentication
 
@@ -51,11 +53,11 @@ Returns the migration-aware ingestion floor and the independently switchable sch
 {
   "schema_version": 1,
   "accepted_event_schema_versions": [1, 2],
-  "preferred_new_event_schema_version": 1
+  "preferred_new_event_schema_version": 2
 }
 ```
 
-The response schema remains 1. Event schemas 1 and 2 are accepted permanently so delayed outbox rows can converge. `preferred_new_event_schema_version` defaults to 1 and is controlled by `CUKUP_NEW_TURN_EVENT_SCHEMA_VERSION`; a future plugin may snapshot 2 only when this value is 2. Changing it back to 1 affects only future starts and never disables replay of queued or in-progress v2 rows.
+The response schema remains 1. Event schemas 1 and 2 are accepted permanently so delayed outbox rows can converge. `preferred_new_event_schema_version` defaults to 1 in code, is controlled by `CUKUP_NEW_TURN_EVENT_SCHEMA_VERSION`, and is `2` in production after the attribution rollout. A client may snapshot 2 only when the response prefers 2. Changing production back to 1 affects only future starts and never disables replay of queued or in-progress v2 rows.
 
 ## `PUT /v1/executor-profile`
 
