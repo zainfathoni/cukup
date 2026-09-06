@@ -27,7 +27,7 @@ See [ADR 0001](docs/adr/0001-repository-ownership.md) for the ownership boundari
 
 ## Product direction
 
-[The Cukup roadmap](ROADMAP.md) records the current product outcomes, including external-contributor readiness and the planned Tycho integration. GitHub issues own executable work; ADRs record durable decisions; Fleet remains limited to cross-machine rollout and operations.
+[The draft Cukup roadmap](ROADMAP.md) records candidate product outcomes, including external-contributor readiness and a Tycho adapter. It is not an agreed backlog. GitHub issues own executable work; ADRs record accepted durable decisions; Fleet remains limited to cross-machine rollout and operations.
 
 ## Development
 

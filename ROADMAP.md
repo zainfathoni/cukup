@@ -1,5 +1,7 @@
 # Cukup roadmap
 
+> **Status: draft proposal.** Except where an item restates an already accepted ADR or shipped behavior, this document records candidate direction rather than an agreed commitment. Product and harness-adapter decisions remain subject to the current design review.
+
 Cukup is a privacy-first WakaTime for AI-assisted work. It measures time spent collaborating with AI agents across projects and executors without collecting prompts, source code, workspace paths, or conversation identifiers.
 
 The primary metric is **AI-assisted working time** inferred from agent activity. Token usage, model cost, prompt count, and output volume are separate dimensions and are not substitutes for working time.
