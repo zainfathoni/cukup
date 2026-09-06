@@ -1,12 +1,16 @@
 # Cukup
 
-Cukup tells Zain whether Amp-backed work time is under, complete, or over the hours due. It contains a personal Amp plugin and a release-candidate shared authority that accepts privacy-preserving events, unions work globally, and reports authoritative daily and weekly status.
+**Cukup is a privacy-first WakaTime for AI-assisted work.** It automatically measures work with AI agents across projects, machines, and cloud sessions without collecting prompts or source code.
+
+Today Cukup reports whether Amp-backed Working Time is under, complete, or over the hours due. Its accepted product direction separates evidenced human Working Time from full Agent Runtime and adds Harness Adapters, with Amp first and Tycho second. That future metric model and Tycho adapter are designed but not implemented.
 
 ## Current status
 
-The local plugin vertical slice stores minimal evidence in executor-local SQLite at `${XDG_STATE_HOME:-~/.local/state}/amp-work-hours/state.sqlite`. The `service/` release candidate adds the Fleet #31 HTTPS API, persistent shared SQLite authority, physical-machine bearer lifecycle, Amp workload OIDC, timezone aggregation, verified backup/restore tooling, and the host-isolated single-owner dashboard backend/UI. Nothing is deployed and no shared credential, OAuth application, DNS, TLS, backup provider, or infrastructure is live from this repository change.
+The Amp plugin stores minimal evidence in executor-local SQLite at `${XDG_STATE_HOME:-~/.local/state}/amp-work-hours/state.sqlite` and synchronizes through a transactional outbox. The production Bun service at `api.cukup.dev` is the shared SQLite authority; the single-owner dashboard at `cukup.dev` provides GitHub-authenticated reporting. Event schemas v1/v2, exact Amp Project attribution, physical-machine profiles, workload OIDC, target overrides, verified backup/off-site retrieval, and protected automatic deployment are live.
 
-The shared privacy boundary excludes prompts/content, host/user/fleet identity from events, model names, repository identifiers, paths, Amp Project IDs, and local Amp thread/message IDs. Shared events use random source/session UUIDs and may carry only an optional v2 Project Slug normalized from the exact Amp Project name; physical Executor Labels bind separately to authenticated bearer lineages. Amp workload JWT claims are a transient authentication-layer exception and never enter shared event records or logs. See [the service API contract](docs/service-api.md), [dashboard service contract](docs/dashboard-service.md), [operations runbook](docs/service-operations.md), [ADR 0002](docs/adr/0002-shared-service-release-candidate.md), [ADR 0004](docs/adr/0004-personal-dashboard-and-explicit-attribution.md), and [ADR 0005](docs/adr/0005-derive-attribution-from-amp-project.md).
+The shared privacy boundary excludes prompts/content, host/user/fleet identity from events, model names, repository identifiers, paths, Amp Project IDs, and local Amp thread/message IDs. Shared events use random source/session UUIDs and may carry only an optional v2 Project Slug normalized from the exact Amp Project name; physical Executor Labels bind separately to authenticated Bearer Lineages. Amp workload JWT claims are a transient authentication-layer exception and never enter shared event records or logs.
+
+The current release pipeline publishes every successful `main` SHA and the protected off-site operator operator follows that image. This incorrectly treats documentation-only changes as service releases. Until the path-aware release outcome in the roadmap ships, keep documentation work off `main` unless it is intentionally bundled with a releasable runtime change.
 
 ## Marking a day off
 
@@ -27,7 +31,7 @@ See [ADR 0001](docs/adr/0001-repository-ownership.md) for the ownership boundari
 
 ## Product direction
 
-[The draft Cukup roadmap](ROADMAP.md) records candidate product outcomes, including external-contributor readiness and a Tycho adapter. It is not an agreed backlog. GitHub issues own executable work; ADRs record accepted durable decisions; Fleet remains limited to cross-machine rollout and operations.
+Start with the [product vision](docs/product/vision.md), [domain language](CONTEXT.md), and [roadmap](ROADMAP.md). [ADR 0006](docs/adr/0006-harness-adapter-ports.md) records the accepted ports-and-adapters decision, and the [Tycho contract](docs/tycho-adapter.md) distinguishes settled design from missing implementation. GitHub issues own executable work; Fleet remains limited to cross-machine rollout and operations.
 
 ## Development
 
@@ -38,7 +42,9 @@ bun install --frozen-lockfile
 bun run check
 ```
 
-The build output under `dist/` is disposable and is not the publication source. Publish the reviewed `plugin/` implementation through the Amp Global User Plugins repository; do not edit the deployed copy as a second canonical source. The shared service can be built independently with `bun run build:service` or `Dockerfile.service`; deployment requires a separate explicit approval and the gates in the operations runbook.
+The build output under `dist/` is disposable and is not the publication source. Publish the reviewed `plugin/` implementation through the Amp Global User Plugins repository; do not edit the deployed copy as a second canonical source. The shared service can be built independently with `bun run build:service` or `Dockerfile.service`; release and recovery boundaries are documented in the [operations runbook](docs/service-operations.md).
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution readiness, architecture, privacy, and review requirements. Cukup is available under the [MIT License](LICENSE).
 
 ## Provenance
 
