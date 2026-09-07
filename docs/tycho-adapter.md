@@ -79,6 +79,24 @@ Both must exclude workspace, command, prompt, summary, structured result, native
 
 Adding `run_id` and `occurred_at` to hook wake-ups remains useful but is not required for correctness, and it was deliberately left out of the proposal to keep the change small.
 
+## Verified constraints
+
+Facts confirmed in source that an implementation depends on. Each is a precondition or a bounded limitation, not a defect.
+
+**Project Slug attribution requires event schema 2.** Schema v1 permits no `project_slug`, so on a service advertising `preferred_new_event_schema_version: 1` every Tycho event lands as Unassigned Work — silently, because a v1 event without a slug is valid. Production pins `CUKUP_NEW_TURN_EVENT_SCHEMA_VERSION: 2` in `config/deploy.service.yml`, but the service default is 1. A reconciler must log the negotiated schema version at startup so this is visible rather than inferred.
+
+**One bearer credential may own several source instances.** `source_owners` keys on `source_instance` with a non-unique owner index, and ingestion rejects only a *different* owner submitting to a claimed source. A machine's Amp plugin and its Tycho reconciler therefore coexist under one Bearer Lineage, inherit the same Machine Label from one executor-profile binding, and need no new machinery: overlapping Amp and Tycho intervals are merged by the service's global union rather than deduplicated by either adapter.
+
+**An open run under-reports until it finalizes.** Aggregation has no live branch: a start with no matching end contributes at most the unmatched-start crash cap. A long Tycho run therefore reads as that cap in the authoritative summary and corrects to its true interval once finalization supplies the terminal timestamp. Daily and weekly totals are exact because the union is recomputed from scratch on every summary; only the live view lags. This is why Agent Runtime is finalized-first and why synthetic heartbeat sessions are rejected rather than merely unnecessary.
+
+**Tycho's agent manifest is not a run history.** It retains only the last ten runs per agent, which is why reconciliation must converge from the supported reads rather than from manifest state, and why the acceptance criterion below names more than ten historical runs. Open runs are always within that window; finalized runs come from the usage-metrics surface, which is never trimmed and survives archival.
+
+**A run lost before Tycho persists it is unrecoverable.** If Tycho dies between spawning a run and saving its agent state, that run appears in neither the manifest nor the usage-metrics surface and is invisible to Cukup permanently. This is a bounded gap in the source of truth, not an adapter defect; do not add recovery machinery hunting for it.
+
+**A `project_key` outside the supported character set becomes Unassigned.** Slug normalization accepts letters, digits, spaces, underscores, and hyphens; a key containing anything else — a dot or a slash, both legal in Tycho configuration — yields no valid slug. That evidence is visibly Unassigned and the reconciler surfaces a warning, rather than guessing from any other identity.
+
+**`memory.jsonl` is excluded on correctness grounds, not only privacy.** A user-triggered rebuild overwrites it with synthetic run summaries and does not restore inquiry events, so any checkpoint keyed on its sequence could replay or skip. Reconciliation checkpoints key on `run_id` instead.
+
 ## Acceptance
 
 - Repeated reconciliation is idempotent and emits starts before ends.

@@ -19,6 +19,8 @@ The deployed v1/v2 protocol still measures Amp turn intervals under its historic
 
 ## Local setup and verification
 
+Clone and check out `origin/main`. A stale local `main` in an existing clone may be a replayed history that does not contain the current contracts, so verify `git rev-parse HEAD` against `origin/main` before reading or branching.
+
 Use Bun 1.3.10 and install the lockfile exactly:
 
 ```bash
@@ -26,7 +28,17 @@ bun install --frozen-lockfile
 bun run check
 ```
 
-`bun run check` runs tests, TypeScript checking, and plugin/service/browser builds. It is the required local gate. A future pull-request workflow will run the same non-secret checks for contributor branches; until that exists, implementation-contributor readiness remains incomplete.
+`bun run check` runs tests, TypeScript checking, and plugin/service/browser builds. It is the required local gate.
+
+`.github/workflows/checks.yml` runs the same gate on every pull request and branch push. It holds read-only permissions, reads no secrets, and has no registry or deployment step, so it cannot publish or deploy. Publication remains confined to `publish-service.yml` on `main`.
+
+Two things to expect. This repository may require maintainer approval before workflows run on a first-time contributor's pull request; if your first run appears not to start, it is waiting for approval rather than broken. And `bun install --frozen-lockfile` executes dependency lifecycle scripts, matching the documented local gate; the runtime dependency surface is deliberately one package.
+
+### Credential-free verification
+
+`service/fixture.ts` exports `createLocalStack()`, the supported way to exercise the adapter path and the service contract together without Fleet access, a production credential, DNS, or network egress. It gives you a plugin store, a service store, the service application in-process, and a sync engine wired between them, with SQLite in a temporary directory, a bearer issued by the local store, workload OIDC always denying, and an injected clock. `close()` removes everything.
+
+Use it for new adapter or service behavior instead of assembling stores by hand, and never reach for a real token, hostname, or remote URL in a test. `service/integration.test.ts` is the worked example. The fixture is test-only and is not re-exported from a shipped entry point. It currently covers the local service and the Amp adapter path; a Tycho fixture arrives with the Tycho adapter.
 
 ## Architecture boundaries
 
