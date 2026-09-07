@@ -12,7 +12,7 @@ This roadmap records outcomes, not an implementation backlog. GitHub issues own 
 - Make deployment failures externally visible and rehearse backup restoration and rollback on a routine schedule.
 - Keep path-aware release automation and its deployment-operator selection contract covered by regression checks: documentation-only, plugin-only, and other non-image changes must not publish an image, create a service release version, or trigger production deployment.
 - Complete external-implementation-contributor readiness: safe pull-request CI, credential-free integration fixtures, and a scoped Tycho issue.
-- Agree and land Tycho's supported privacy-clean open-run read contract.
+- Agree and land Tycho's supported privacy-clean open-run read and human-interaction read. Both have a candidate implementation on branch `feat/open-run-read-contract` in `firewalker06/tycho` (`e02a64b`, `6190ac5`, `25da3dd` on `cd4684e`), pending upstream review and merge.
 - Add privacy-safe prompt-composition observations independently to Harnesses that can support them. Until then, disclose submission-only Working Time as a lower bound.
 
 ## Next — support Tycho and broaden personal use
@@ -43,7 +43,7 @@ Cukup is ready for design contribution now. It is ready for external implementat
 - [ ] Contributor-branch CI runs all non-secret checks and cannot publish or deploy.
 - [ ] Credential-free fixtures exercise the relevant local service and adapter path without Fleet or production access.
 - [ ] A scoped Tycho issue records lifecycle mapping, non-goals, privacy constraints, and executable acceptance criteria.
-- [ ] Tycho's supported open-run read contract is agreed for implementation.
+- [ ] Tycho's supported open-run read and human-interaction read contracts are agreed for implementation. Implementations are proposed upstream but unreviewed and unmerged, so this remains open.
 
 Implementation readiness never requires exposing production operations or granting deployment authority.
 

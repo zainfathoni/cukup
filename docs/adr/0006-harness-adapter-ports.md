@@ -35,11 +35,27 @@ Treating every Harness like Amp would leak Amp concepts into the domain. Forward
 ## Consequences
 
 - A Harness with composition observations measures more Working Time than one limited to submission events; the product exposes this as coverage rather than changing the metric.
-- Neither current Amp nor Tycho APIs expose a supported timestamp-only prompt-composition signal. Initial Working Time is therefore a lower bound until each Harness adds one.
-- Tycho needs a supported open-run read containing only run ID, project key, start time, status, and liveness. Finalized runtime comes from its supported usage-metrics surface.
+- Neither current Amp nor Tycho APIs expose a supported timestamp-only prompt-composition signal. Initial Working Time is therefore a lower bound until each Harness adds one. Tycho now has a proposed submission, approval, and takeover observation; composition remains absent on both Harnesses. See [Upstream status](#upstream-status-2026-09-07).
+- Tycho needs a supported open-run read containing only run ID, project key, start time, status, and liveness. Finalized runtime comes from its supported usage-metrics surface. A candidate implementation now exists; see [Upstream status](#upstream-status-2026-09-07).
 - Hooks can reduce latency but their loss cannot lose evidence.
 - Concurrent Amp and Tycho intervals are unioned by the service rather than deduplicated by adapters.
 - New metric semantics require a separately reviewed protocol, persistence, aggregation, dashboard, and migration design.
+
+## Upstream status (2026-09-07)
+
+This section records progress against the consequences above. It does not amend any decision.
+
+Both Tycho-owned reads this ADR requires have a candidate implementation, and **neither is reviewed or merged**. The work is on branch `feat/open-run-read-contract` in `firewalker06/tycho` — commits `e02a64b`, `6190ac5`, and `25da3dd` on top of `cd4684e`. Because Tycho's creator reviews Tycho-owned contract changes, the contract remains proposed rather than agreed, and decision item 7's precondition for a shipped adapter is still open.
+
+- **Open runs** — `GET /metrics/open-runs` and `tycho metrics open-runs`: `run_id`, `project_key`, `started_at`, `status`, `liveness`.
+- **Human interactions** — `GET /metrics/interactions` and `tycho metrics interactions`: `observation_id`, `project_key`, `kind` (`prompt_submitted`, `inquiry_answered`, `run_taken_over`), `observed_at`. Kind vocabulary is Tycho's, consistent with decision item 8; the adapter maps each kind to an Engagement Observation.
+- **Finalized runs** — unchanged, from the existing usage-metrics surface.
+
+Decision item 11 holds unchanged: the open-run read's `liveness` field is a best-effort process observation with no timestamp, so no value of it, `dead` included, can produce a runtime end.
+
+The optional hook improvement noted in decision item 7 — adding `run_id` and `occurred_at` to wake-up payloads — was deliberately not implemented, since reconciliation does not need it.
+
+Composition observation is deferred. The Cukup adapter is intended to ship on submission coverage, with Working Time disclosed as a lower bound.
 
 ## Rejected alternatives
 
