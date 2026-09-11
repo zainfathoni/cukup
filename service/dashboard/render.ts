@@ -1,23 +1,38 @@
 import type {
 	DashboardReport,
 	DashboardSelection,
+	DayBreakdown,
+	DayDetail,
 	ExecutorSummary,
 	Panel,
 	TargetPeriod,
 	Timeline,
+	TimelineLane,
 	Trend,
-	TrendSeries,
 } from './report.ts'
 
 const chartWidth = 960
 const chartHeight = 260
-const timelineHeight = 210
 const meterWidth = 480
 const meterHeight = 34
-const heatGap = 4
-const heatLabelWidth = 30
-const heatLabelHeight = 18
-const heatTargetWidth = 460
+
+/* Gantt geometry, in viewBox units. The label gutter holds a truncated lane
+   name and its right-aligned total, so the plot always starts at one x. */
+const laneGutter = 200
+const laneLabelChars = 17
+const ganttRight = chartWidth - 16
+const ganttTopAxis = 26
+const ganttBottomAxis = 26
+const unionRowHeight = 34
+const laneRowHeight = 24
+const groupRowHeight = 24
+
+/**
+ * Half the hover card width, used to pick which edge it anchors to. It tracks
+ * `.heat-tip`'s `17rem` at the default root size; a much larger root font would
+ * widen the card past this and let a near-edge day spill sideways.
+ */
+const tipReach = 136
 
 export function escapeHtml(value: string): string {
 	return value
@@ -28,6 +43,23 @@ export function escapeHtml(value: string): string {
 		.replaceAll("'", '&#39;')
 }
 
+/**
+ * This module is bundled into the browser client and re-runs on every refresh,
+ * and a long range renders thousands of timestamps, so formatters are built
+ * once per timezone and reused.
+ */
+const formatters = new Map<string, Intl.DateTimeFormat>()
+
+function formatterFor(timezone: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+	const key = `${timezone}\u0000${Object.values(options).join('|')}`
+	let formatter = formatters.get(key)
+	if (!formatter) {
+		formatter = new Intl.DateTimeFormat('en', { timeZone: timezone, ...options })
+		formatters.set(key, formatter)
+	}
+	return formatter
+}
+
 function formatMinutes(minutes: number): string {
 	const hours = Math.floor(minutes / 60)
 	const remainder = minutes % 60
@@ -36,21 +68,42 @@ function formatMinutes(minutes: number): string {
 
 function formatTimestamp(value: string | null, timezone: string): string {
 	if (value === null) return 'No activity recorded'
-	return new Intl.DateTimeFormat('en', {
-		timeZone: timezone,
-		dateStyle: 'medium',
-		timeStyle: 'short',
-	}).format(new Date(value))
+	return formatterFor(timezone, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
+}
+
+/** Zoned wall-clock `HH:mm`, the only time detail a same-day chart needs. */
+function formatClock(value: string, timezone: string): string {
+	return formatterFor(timezone, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(
+		new Date(value),
+	)
 }
 
 function formatCivilDate(date: string): string {
 	const parsed = Date.parse(`${date}T00:00:00Z`)
 	if (!Number.isFinite(parsed)) return date
-	return new Intl.DateTimeFormat('en', {
-		timeZone: 'UTC',
+	return formatterFor('UTC', { day: 'numeric', month: 'short' }).format(new Date(parsed))
+}
+
+function formatCivilMonth(date: string): string {
+	const parsed = Date.parse(`${date}T00:00:00Z`)
+	if (!Number.isFinite(parsed)) return date
+	return formatterFor('UTC', { month: 'short' }).format(new Date(parsed))
+}
+
+function formatCivilDay(date: string): string {
+	const parsed = Date.parse(`${date}T00:00:00Z`)
+	if (!Number.isFinite(parsed)) return date
+	return formatterFor('UTC', {
+		weekday: 'short',
 		day: 'numeric',
 		month: 'short',
+		year: 'numeric',
 	}).format(new Date(parsed))
+}
+
+/** Trims a lane name to the gutter budget without an SVG text overflow. */
+function truncate(value: string, limit: number): string {
+	return value.length <= limit ? value : `${value.slice(0, limit - 1)}\u2026`
 }
 
 /** Monday-based weekday index for a civil `YYYY-MM-DD` date, or null when unparseable. */
@@ -133,8 +186,7 @@ function renderFilters(report: DashboardReport, selection: DashboardSelection, r
 /* ---------- Timeline ---------- */
 
 function zonedMinute(value: string, timezone: string): number {
-	const parts = new Intl.DateTimeFormat('en', {
-		timeZone: timezone,
+	const parts = formatterFor(timezone, {
 		hour: '2-digit',
 		minute: '2-digit',
 		hourCycle: 'h23',
@@ -143,39 +195,167 @@ function zonedMinute(value: string, timezone: string): number {
 	return part('hour') * 60 + part('minute')
 }
 
-function renderTimelineData(timeline: Timeline, timezone: string): string {
-	const trackTop = 56
-	const trackHeight = 96
-	const blocks = timeline.intervals
-		.map((interval) => {
-			const start = zonedMinute(interval.start, timezone)
-			const end = Math.max(start + 1, zonedMinute(interval.end, timezone))
-			const x = (start / 1440) * chartWidth
-			const width = Math.max(4, ((end - start) / 1440) * chartWidth)
-			return `<rect x="${x.toFixed(2)}" y="${trackTop + 8}" width="${width.toFixed(2)}" height="${trackHeight - 16}" rx="7" class="timeline-block concurrency-${Math.min(interval.concurrency, 2)}"><title>${formatTimestamp(interval.start, timezone)} to ${formatTimestamp(interval.end, timezone)}; concurrency ${interval.concurrency}</title></rect>`
-		})
-		.join('')
-	const gridlines = [3, 6, 9, 12, 15, 18, 21]
-		.map((hour) => {
-			const x = ((hour * 60) / 1440) * chartWidth
-			return `<line class="chart-grid" x1="${x.toFixed(2)}" y1="${trackTop}" x2="${x.toFixed(2)}" y2="${trackTop + trackHeight}"></line>`
-		})
-		.join('')
-	const ticks = [0, 6, 12, 18, 24]
+function zonedCivilDate(value: string, timezone: string): string {
+	const parts = formatterFor(timezone, {
+		year: 'numeric',
+		month: '2-digit',
+		day: '2-digit',
+	}).formatToParts(new Date(value))
+	const part = (type: 'year' | 'month' | 'day') => parts.find((item) => item.type === type)?.value ?? ''
+	return `${part('year')}-${part('month')}-${part('day')}`
+}
+
+type GanttRow =
+	| { kind: 'union' }
+	| { kind: 'group'; label: string }
+	| { kind: 'lane'; lane: TimelineLane }
+
+function ganttRows(lanes: readonly TimelineLane[]): GanttRow[] {
+	const rows: GanttRow[] = [{ kind: 'union' }]
+	for (const [kind, heading] of [
+		['project', 'By project'],
+		['executor', 'By executor'],
+	] as const) {
+		const group = lanes.filter((lane) => lane.kind === kind)
+		if (group.length === 0) continue
+		rows.push({ kind: 'group', label: heading })
+		for (const lane of group) rows.push({ kind: 'lane', lane })
+	}
+	return rows
+}
+
+function rowHeight(row: GanttRow): number {
+	if (row.kind === 'union') return unionRowHeight
+	return row.kind === 'group' ? groupRowHeight : laneRowHeight
+}
+
+/** Rounded bar spanning one interval of the zoned day. */
+function ganttBar(
+	start: string,
+	end: string,
+	top: number,
+	height: number,
+	className: string,
+	title: string,
+	timezone: string,
+): string {
+	const plotWidth = ganttRight - laneGutter
+	const startMinute = zonedMinute(start, timezone)
+	const endMinute = Math.max(startMinute + 1, zonedMinute(end, timezone))
+	const x = laneGutter + (startMinute / 1440) * plotWidth
+	const width = Math.max(3, ((endMinute - startMinute) / 1440) * plotWidth)
+	return `<rect class="${className}" x="${x.toFixed(2)}" y="${top}" width="${width.toFixed(2)}" height="${height}" rx="4"><title>${escapeHtml(title)}</title></rect>`
+}
+
+function renderGantt(timeline: Timeline, timezone: string, asOf: string): string {
+	const rows = ganttRows(timeline.lanes)
+	const plotTop = ganttTopAxis
+	const plotWidth = ganttRight - laneGutter
+	const tops: number[] = []
+	let cursor = plotTop
+	for (const row of rows) {
+		tops.push(cursor)
+		cursor += rowHeight(row)
+	}
+	const plotHeight = Math.max(cursor - plotTop, unionRowHeight)
+	const height = plotTop + plotHeight + ganttBottomAxis
+	const minuteX = (minute: number) => laneGutter + (minute / 1440) * plotWidth
+
+	const hours = [0, 3, 6, 9, 12, 15, 18, 21, 24]
+	const gridlines = hours
 		.map(
 			(hour) =>
-				`<text x="${(hour / 24) * chartWidth}" y="${trackTop + trackHeight + 26}" text-anchor="${hour === 0 ? 'start' : hour === 24 ? 'end' : 'middle'}">${String(hour).padStart(2, '0')}:00</text>`,
+				`<line class="chart-grid" x1="${minuteX(hour * 60).toFixed(2)}" y1="${plotTop}" x2="${minuteX(hour * 60).toFixed(2)}" y2="${plotTop + plotHeight}"></line>`,
 		)
 		.join('')
-	const worked = `<text x="0" y="30" class="timeline-empty">${escapeHtml(timeline.date)} · ${timeline.intervals.length} interval${timeline.intervals.length === 1 ? '' : 's'}</text>`
+	const ticks = hours
+		.map(
+			(hour) =>
+				`<text x="${minuteX(hour * 60).toFixed(2)}" y="${plotTop - 8}" text-anchor="${hour === 0 ? 'start' : hour === 24 ? 'end' : 'middle'}">${String(hour).padStart(2, '0')}:00</text>`,
+		)
+		.join('')
+	const baseline = `<line class="gantt-axis" x1="${laneGutter}" y1="${plotTop + plotHeight}" x2="${ganttRight}" y2="${plotTop + plotHeight}"></line>`
+
+	// Everything right of the current minute is unobserved rather than idle.
+	const sameDay = zonedCivilDate(asOf, timezone) === timeline.date
+	const nowMinute = sameDay ? zonedMinute(asOf, timezone) : 1440
+	const future =
+		nowMinute >= 1440
+			? ''
+			: `<rect class="gantt-future" x="${minuteX(nowMinute).toFixed(2)}" y="${plotTop}" width="${(ganttRight - minuteX(nowMinute)).toFixed(2)}" height="${plotHeight}"></rect><line class="gantt-now" x1="${minuteX(nowMinute).toFixed(2)}" y1="${plotTop - 4}" x2="${minuteX(nowMinute).toFixed(2)}" y2="${plotTop + plotHeight}"><title>Now, ${escapeHtml(formatClock(asOf, timezone))}</title></line><text class="gantt-now-label" x="${minuteX(nowMinute).toFixed(2)}" y="${plotTop + plotHeight + 17}" text-anchor="middle">now</text>`
+
+	const body = rows
+		.map((row, index) => {
+			const top = tops[index]!
+			if (row.kind === 'group') {
+				return `<text class="gantt-group" x="0" y="${top + 16}">${escapeHtml(row.label)}</text>`
+			}
+			const stripe = `<rect class="gantt-track" x="${laneGutter}" y="${top + 2}" width="${plotWidth}" height="${rowHeight(row) - 4}" rx="4"></rect>`
+			if (row.kind === 'union') {
+				const bars = timeline.intervals
+					.map((interval) =>
+						ganttBar(
+							interval.start,
+							interval.end,
+							top + 8,
+							unionRowHeight - 16,
+							`gantt-bar gantt-union concurrency-${Math.min(interval.concurrency, 2)}`,
+							`${formatClock(interval.start, timezone)}–${formatClock(interval.end, timezone)}; concurrency ${interval.concurrency}`,
+							timezone,
+						),
+					)
+					.join('')
+				return `${stripe}<text class="gantt-label gantt-union-label" x="0" y="${top + 22}">All selected</text><text class="gantt-total" x="${laneGutter - 12}" y="${top + 22}" text-anchor="end">${formatMinutes(timeline.minutes)}</text>${bars}`
+			}
+			const bars = row.lane.intervals
+				.map((interval) =>
+					ganttBar(
+						interval.start,
+						interval.end,
+						top + 6,
+						laneRowHeight - 12,
+						`gantt-bar gantt-${row.lane.kind}`,
+						`${row.lane.label}: ${formatClock(interval.start, timezone)}–${formatClock(interval.end, timezone)}`,
+						timezone,
+					),
+				)
+				.join('')
+			return `${stripe}<text class="gantt-label" x="0" y="${top + 16}">${escapeHtml(truncate(row.lane.label, laneLabelChars))}<title>${escapeHtml(row.lane.label)}</title></text><text class="gantt-total" x="${laneGutter - 12}" y="${top + 16}" text-anchor="end">${formatMinutes(row.lane.minutes)}</text>${bars}`
+		})
+		.join('')
+
+	const empty =
+		timeline.intervals.length === 0
+			? `<text class="gantt-empty" x="${(laneGutter + plotWidth / 2).toFixed(2)}" y="${(plotTop + plotHeight / 2 + 5).toFixed(2)}" text-anchor="middle">No activity recorded yet today</text>`
+			: ''
+
+	return `<svg class="gantt-chart" viewBox="0 0 ${chartWidth} ${height}" role="img" aria-labelledby="timeline-svg-title timeline-svg-desc"><title id="timeline-svg-title">Current-day activity timeline</title><desc id="timeline-svg-desc">Gantt lanes across a 24-hour ${escapeHtml(timezone)} day. The top lane is every selected interval unioned, shaded where raw evidence was concurrent. Below it, one lane per project and one lane per executor: bars are unioned within a lane, so overlap is only visible where bars in different lanes line up vertically. Project and executor lanes describe the same time and must not be added. The daily table below lists every value.</desc><rect class="gantt-plot" x="${laneGutter}" y="${plotTop}" width="${plotWidth}" height="${plotHeight}" rx="6"></rect>${gridlines}${future}${body}${empty}${baseline}${ticks}</svg>`
+}
+
+function laneEquivalent(lanes: readonly TimelineLane[], kind: TimelineLane['kind'], timezone: string): string {
+	const group = lanes.filter((lane) => lane.kind === kind)
+	if (group.length === 0) return ''
+	const heading = kind === 'project' ? 'By project' : 'By executor'
+	const items = group
+		.map(
+			(lane) =>
+				`<li><strong>${escapeHtml(lane.label)}</strong> · ${formatMinutes(lane.minutes)} · ${lane.intervals
+					.map((interval) => `${formatClock(interval.start, timezone)}–${formatClock(interval.end, timezone)}`)
+					.join(', ')}</li>`,
+		)
+		.join('')
+	return `<h4>${heading}</h4><ul class="text-equivalent">${items}</ul>`
+}
+
+function renderTimelineData(timeline: Timeline, timezone: string, asOf: string): string {
 	const equivalents = timeline.intervals.length
 		? `<ol class="text-equivalent">${timeline.intervals.map((interval) => `<li>${formatTimestamp(interval.start, timezone)}–${formatTimestamp(interval.end, timezone)}; concurrency ${interval.concurrency}</li>`).join('')}</ol>`
 		: '<p>No activity intervals recorded today.</p>'
-	return `<ul class="chart-legend"><li><span class="block-swatch" aria-hidden="true"></span>Single-source evidence</li><li><span class="block-swatch concurrent" aria-hidden="true"></span>Concurrent evidence</li></ul><p class="scroll-hint">Scroll the chart horizontally to see the full day.</p><div class="chart-scroll" tabindex="0" role="region" aria-label="Scrollable current-day timeline"><svg class="timeline-chart" viewBox="0 0 ${chartWidth} ${timelineHeight}" role="img" aria-labelledby="timeline-svg-title timeline-svg-desc"><title id="timeline-svg-title">Current-day activity timeline</title><desc id="timeline-svg-desc">Activity intervals across a 24-hour Jakarta day. Dashed yellow blocks indicate concurrent evidence.</desc>${worked}<rect class="chart-frame" x="1" y="${trackTop}" width="${chartWidth - 2}" height="${trackHeight}" rx="10"></rect>${gridlines}${blocks}${ticks}</svg></div><details><summary>Timeline text equivalent</summary>${equivalents}</details>`
+	return `<p class="chart-summary"><strong>${formatMinutes(timeline.minutes)}</strong> of selected activity across ${timeline.intervals.length} interval${timeline.intervals.length === 1 ? '' : 's'} on ${escapeHtml(timeline.date)}</p><ul class="chart-legend"><li><span class="block-swatch" aria-hidden="true"></span>Single-source evidence</li><li><span class="block-swatch concurrent" aria-hidden="true"></span>Concurrent evidence</li><li><span class="block-swatch project" aria-hidden="true"></span>Project lane</li><li><span class="block-swatch executor" aria-hidden="true"></span>Executor lane</li></ul><p class="guidance">Lanes share one clock. Bars are unioned inside a lane, so a project lane and an executor lane that line up vertically describe the same minutes and must not be added.</p><p class="scroll-hint">Scroll the chart horizontally to see the full day.</p><div class="chart-scroll" tabindex="0" role="region" aria-label="Scrollable current-day timeline">${renderGantt(timeline, timezone, asOf)}</div><details><summary>Timeline text equivalent</summary><h4>All selected activity</h4>${equivalents}${laneEquivalent(timeline.lanes, 'project', timezone)}${laneEquivalent(timeline.lanes, 'executor', timezone)}</details>`
 }
 
-function renderTimeline(panel: DashboardReport['timeline'], timezone: string): string {
-	return `<section aria-labelledby="timeline-title"><div class="section-heading"><div><p class="eyebrow">Current day · ${escapeHtml(timezone)}</p><h2 id="timeline-title">Activity timeline</h2></div></div>${panelNotice(panel)}${panel.state === 'unavailable' ? '' : renderTimelineData(panel.data, timezone)}</section>`
+function renderTimeline(panel: DashboardReport['timeline'], timezone: string, asOf: string): string {
+	return `<section aria-labelledby="timeline-title"><div class="section-heading"><div><p class="eyebrow">Current day · ${escapeHtml(timezone)}</p><h2 id="timeline-title">Activity timeline</h2></div></div>${panelNotice(panel)}${panel.state === 'unavailable' ? '' : renderTimelineData(panel.data, timezone, asOf)}</section>`
 }
 
 /* ---------- Trend ---------- */
@@ -192,49 +372,93 @@ function renderRange(selection: DashboardSelection): string {
 	return `<div class="range-controls" role="group" aria-label="Trend range">${buttons}<button type="button" data-range="custom" data-focus-key="range:custom" aria-pressed="${preset === 'custom'}">Custom</button></div>${preset === 'custom' ? `<div class="custom-range"><label>From <input type="date" name="start_date" value="${escapeHtml(custom.start_date)}" data-focus-key="start-date"></label><label>To <input type="date" name="end_date" value="${escapeHtml(custom.end_date)}" data-focus-key="end-date"></label><button type="button" class="button" data-action="apply-range" data-focus-key="apply-range">Apply range</button></div>` : ''}`
 }
 
-/**
- * Calendar heatmap of the globally unioned Overall series. Columns are
- * Monday-started weeks; intensity is quartered against the busiest day.
- */
-function renderHeatmap(series: TrendSeries | undefined): string {
-	if (!series || series.points.length === 0) return ''
-	const first = weekdayIndex(series.points[0]!.date)
-	if (first === null) return ''
-	const busiest = Math.max(1, ...series.points.map((point) => point.minutes))
-	const columns = Math.ceil((first + series.points.length) / 7)
-	const heatCell = Math.max(14, Math.min(30, Math.floor(heatTargetWidth / columns) - heatGap))
-	const heatStep = heatCell + heatGap
-	const cells = series.points
-		.map((point, index) => {
-			const offset = first + index
-			const column = Math.floor(offset / 7)
-			const row = offset % 7
-			const level = point.minutes === 0 ? 0 : Math.min(4, Math.ceil((point.minutes / busiest) * 4))
-			const x = heatLabelWidth + column * heatStep
-			const y = heatLabelHeight + row * heatStep
-			return `<rect class="heat-cell heat-${level}" x="${x}" y="${y}" width="${heatCell}" height="${heatCell}" rx="4"><title>${escapeHtml(point.date)}: ${formatMinutes(point.minutes)}</title></rect>`
-		})
-		.join('')
-	const weekdayLabels = ['M', '', 'W', '', 'F', '', 'S']
-		.map((label, row) =>
-			label ? `<text x="0" y="${heatLabelHeight + row * heatStep + heatCell - 3}">${label}</text>` : '',
-		)
-		.join('')
-	const monthLabels = series.points
-		.map((point, index) => {
-			const offset = first + index
-			if (offset % 7 !== 0 && index !== 0) return ''
-			const day = Number(point.date.slice(8, 10))
-			if (day > 7 && index !== 0) return ''
-			return `<text x="${heatLabelWidth + Math.floor(offset / 7) * heatStep}" y="${heatLabelHeight - 6}">${escapeHtml(formatCivilDate(point.date))}</text>`
-		})
-		.join('')
-	const width = heatLabelWidth + columns * heatStep
-	const height = heatLabelHeight + 7 * heatStep
-	return `<div class="heatmap"><h3 id="heatmap-title">Overall day-by-day</h3><svg class="heatmap-chart" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="heatmap-title heatmap-desc"><desc id="heatmap-desc">Calendar heatmap of globally unioned overall working minutes. Columns are Monday-started weeks; the trend data table below lists every value.</desc>${weekdayLabels}${monthLabels}${cells}</svg><ul class="heat-scale"><li>Less</li><li><span class="heat-swatch heat-0" aria-hidden="true"></span></li><li><span class="heat-swatch heat-1" aria-hidden="true"></span></li><li><span class="heat-swatch heat-2" aria-hidden="true"></span></li><li><span class="heat-swatch heat-3" aria-hidden="true"></span></li><li><span class="heat-swatch heat-4" aria-hidden="true"></span></li><li>More · busiest ${formatMinutes(busiest)}</li></ul></div>`
+function breakdownLine(entries: readonly DayBreakdown[]): string {
+	if (entries.length === 0) return 'None recorded'
+	const shown = entries.slice(0, 3).map((entry) => `${escapeHtml(entry.label)} ${formatMinutes(entry.minutes)}`)
+	const remaining = entries.length - shown.length
+	return [...shown, ...(remaining > 0 ? [`+${remaining} more`] : [])].join(' · ')
 }
 
-function renderTrendData(trend: Trend): string {
+function breakdownText(entries: readonly DayBreakdown[]): string {
+	if (entries.length === 0) return 'None recorded'
+	return entries.map((entry) => `${escapeHtml(entry.label)} ${formatMinutes(entry.minutes)}`).join('; ')
+}
+
+function activitySpan(day: DayDetail, timezone: string): string | null {
+	if (day.first_activity_at === null || day.last_activity_at === null) return null
+	return `${formatClock(day.first_activity_at, timezone)}–${formatClock(day.last_activity_at, timezone)}`
+}
+
+/** Hover detail for one heatmap cell: the day's verdict, then what it was made of. */
+function dayCard(day: DayDetail, timezone: string): string {
+	const period = day.period
+	const caption =
+		period.status === 'UNDER'
+			? `${formatMinutes(period.difference_minutes)} remaining`
+			: period.status === 'OVER'
+				? `${formatMinutes(period.difference_minutes)} over`
+				: 'target met'
+	const span = activitySpan(day, timezone)
+	const body =
+		period.worked_minutes === 0
+			? '<p class="tip-empty">No working time recorded.</p>'
+			: `<dl class="tip-breakdown"><div><dt>Projects</dt><dd>${breakdownLine(day.projects)}</dd></div><div><dt>Executors</dt><dd>${breakdownLine(day.executors)}</dd></div></dl><p class="tip-meta">${day.interval_count} interval${day.interval_count === 1 ? '' : 's'}${span === null ? '' : ` · ${escapeHtml(span)}`}</p><p class="tip-note">Activity overlaps; never add it up.</p>`
+	return `<p class="tip-date">${escapeHtml(formatCivilDay(day.date))}</p><p class="tip-total"><span class="tip-figure">${formatMinutes(period.worked_minutes)}</span><span class="tip-stamp">${period.status}</span></p><p class="tip-target">Target ${formatMinutes(period.target_minutes)} · ${caption}</p>${body}`
+}
+
+/**
+ * Calendar heatmap of the globally unioned Overall series, as a CSS grid so a
+ * hovered day can open a detail card. Columns are Monday-started weeks and
+ * intensity is quartered against the busiest day. The grid is one image to
+ * assistive technology; the daily values table carries the same numbers.
+ */
+function renderHeatmap(days: readonly DayDetail[], timezone: string): string {
+	if (days.length === 0) return ''
+	const first = weekdayIndex(days[0]!.date)
+	if (first === null) return ''
+	const busiest = Math.max(1, ...days.map((day) => day.period.worked_minutes))
+	const columns = Math.ceil((first + days.length) / 7)
+	const [density, columnStep] =
+		columns <= 14
+			? (['heat-roomy', 24] as const)
+			: columns <= 27
+				? (['heat-medium', 18] as const)
+				: columns <= 40
+					? (['heat-compact', 15] as const)
+					: (['heat-dense', 12] as const)
+	const pads = '<li class="heat-pad"></li>'.repeat(first)
+	const cells = days
+		.map((day, index) => {
+			const column = Math.floor((first + index) / 7)
+			// A centred card needs half its width on each side, so columns nearer
+			// than that to an edge anchor to it instead.
+			const anchor =
+				column * columnStep < tipReach
+					? ' tip-start'
+					: (columns - 1 - column) * columnStep < tipReach
+						? ' tip-end'
+						: ''
+			const minutes = day.period.worked_minutes
+			const level = minutes === 0 ? 0 : Math.min(4, Math.ceil((minutes / busiest) * 4))
+			return `<li class="heat-cell heat-${level}"><div class="heat-tip status-${day.period.status.toLowerCase()}${anchor}">${dayCard(day, timezone)}</div></li>`
+		})
+		.join('')
+	const monthLabels: string[] = []
+	let labelled = ''
+	for (let column = 0; column < columns; column += 1) {
+		const day = days[Math.max(0, column * 7 - first)]
+		const month = day === undefined ? '' : formatCivilMonth(day.date)
+		monthLabels.push(month === labelled ? '<li></li>' : `<li>${escapeHtml(month)}</li>`)
+		if (month !== labelled) labelled = month
+	}
+	const weekdays = ['Mon', '', 'Wed', '', 'Fri', '', '']
+		.map((label) => `<li>${label}</li>`)
+		.join('')
+	const summary = `Calendar heatmap of globally unioned overall working minutes from ${days[0]!.date} to ${days.at(-1)!.date}. Busiest day ${formatMinutes(busiest)}. Every value is listed in the daily values table below.`
+	return `<div class="heatmap"><div class="heatmap-heading"><h3 id="heatmap-title">Overall day-by-day</h3><p class="heatmap-hint">Hover a day for its detail.</p></div><div class="heat-scroll"><div class="heat-board ${density}"><div class="heat-corner"></div><ol class="heat-months" aria-hidden="true">${monthLabels.join('')}</ol><ul class="heat-weekdays" aria-hidden="true">${weekdays}</ul><ol class="heat-grid" role="img" aria-label="${escapeHtml(summary)}">${pads}${cells}</ol></div></div><ul class="heat-scale"><li>Less</li><li><span class="heat-swatch heat-0" aria-hidden="true"></span></li><li><span class="heat-swatch heat-1" aria-hidden="true"></span></li><li><span class="heat-swatch heat-2" aria-hidden="true"></span></li><li><span class="heat-swatch heat-3" aria-hidden="true"></span></li><li><span class="heat-swatch heat-4" aria-hidden="true"></span></li><li>More · busiest ${formatMinutes(busiest)}</li></ul></div>`
+}
+
+function renderTrendData(trend: Trend, timezone: string): string {
 	const plotTop = 20
 	const plotBottom = chartHeight - 60
 	const plotLeft = 62
@@ -281,6 +505,7 @@ function renderTrendData(trend: Trend): string {
 		)
 		.join('')
 	const dates = [...new Set(trend.series.flatMap((series) => series.points.map((point) => point.date)))].sort()
+	const details = new Map(trend.days.map((day) => [day.date, day]))
 	const headings = trend.series
 		.map((series) => `<th scope="col">${escapeHtml(series.kind)}: ${escapeHtml(series.label)}</th>`)
 		.join('')
@@ -288,17 +513,24 @@ function renderTrendData(trend: Trend): string {
 		(series) => new Map(series.points.map((point) => [point.date, point.minutes])),
 	)
 	const rows = dates
-		.map(
-			(date) =>
-				`<tr><th scope="row">${escapeHtml(date)}</th>${valuesBySeries.map((values) => `<td>${values.has(date) ? formatMinutes(values.get(date)!) : 'No data'}</td>`).join('')}</tr>`,
-		)
+		.map((date) => {
+			const day = details.get(date)
+			const detailCells =
+				day === undefined
+					? '<td>No data</td><td>No data</td><td>No data</td><td>No data</td><td>No data</td><td>No data</td>'
+					: `<td>${formatMinutes(day.period.target_minutes)}</td><td>${day.period.status}</td><td>${day.interval_count}</td><td>${escapeHtml(activitySpan(day, timezone) ?? 'No activity')}</td><td>${breakdownText(day.projects)}</td><td>${breakdownText(day.executors)}</td>`
+			return `<tr><th scope="row">${escapeHtml(date)}</th>${valuesBySeries.map((values) => `<td>${values.has(date) ? formatMinutes(values.get(date)!) : 'No data'}</td>`).join('')}${detailCells}</tr>`
+		})
 		.join('')
-	const overall = trend.series.find((series) => series.kind === 'overall')
-	return `<ul class="chart-legend">${legend}</ul><p class="scroll-hint">Scroll the chart horizontally to see the full range.</p><div class="chart-scroll" tabindex="0" role="region" aria-label="Scrollable daily activity trend"><svg class="trend-chart" viewBox="0 0 ${chartWidth} ${chartHeight}" role="img" aria-labelledby="trend-svg-title trend-svg-desc"><title id="trend-svg-title">Daily activity trend</title><desc id="trend-svg-desc">Separate, non-stacked lines. Series overlap and are not additive. The labelled dot on each line is its most recent day.</desc>${axes}${dateLabels}${lines}${endpoints}</svg></div>${renderHeatmap(overall)}<details><summary>View daily values</summary><p class="guidance">Exact values behind the chart, provided for comparison and as a text alternative.</p><div class="table-scroll"><table><caption>Daily working time by date and series</caption><thead><tr><th scope="col">Date</th>${headings}</tr></thead><tbody>${rows}</tbody></table></div></details>`
+	return `<ul class="chart-legend">${legend}</ul><p class="scroll-hint">Scroll the chart horizontally to see the full range.</p><div class="chart-scroll" tabindex="0" role="region" aria-label="Scrollable daily activity trend"><svg class="trend-chart" viewBox="0 0 ${chartWidth} ${chartHeight}" role="img" aria-labelledby="trend-svg-title trend-svg-desc"><title id="trend-svg-title">Daily activity trend</title><desc id="trend-svg-desc">Separate, non-stacked lines. Series overlap and are not additive. The labelled dot on each line is its most recent day.</desc>${axes}${dateLabels}${lines}${endpoints}</svg></div>${renderHeatmap(trend.days, timezone)}<details><summary>View daily values</summary><p class="guidance">Exact values behind the chart, provided for comparison and as a text alternative. Target, status, intervals, and the activity breakdown describe the globally unioned Overall series; project and executor activity overlap and must not be added.</p><div class="table-scroll"><table><caption>Daily working time by date and series</caption><thead><tr><th scope="col">Date</th>${headings}<th scope="col">Target</th><th scope="col">Status</th><th scope="col">Intervals</th><th scope="col">First–last</th><th scope="col">Project activity</th><th scope="col">Executor activity</th></tr></thead><tbody>${rows}</tbody></table></div></details>`
 }
 
-function renderTrend(panel: DashboardReport['trend'], selection: DashboardSelection): string {
-	return `<section aria-labelledby="trend-title"><div class="section-heading"><div><p class="eyebrow">Independent, non-stacked series</p><h2 id="trend-title">Activity trend</h2></div>${renderRange(selection)}</div>${panelNotice(panel)}${panel.state === 'unavailable' ? '' : renderTrendData(panel.data)}</section>`
+function renderTrend(
+	panel: DashboardReport['trend'],
+	selection: DashboardSelection,
+	timezone: string,
+): string {
+	return `<section aria-labelledby="trend-title"><div class="section-heading"><div><p class="eyebrow">Independent, non-stacked series</p><h2 id="trend-title">Activity trend</h2></div>${renderRange(selection)}</div>${panelNotice(panel)}${panel.state === 'unavailable' ? '' : renderTrendData(panel.data, timezone)}</section>`
 }
 
 /* ---------- Executors ---------- */
@@ -325,7 +557,7 @@ export function renderDashboardContent(
 	const partial = [report.overall, report.timeline, report.trend, report.executors].some(
 		(panel) => panel.state !== 'ready',
 	)
-	return `<header class="masthead"><div><p class="eyebrow">Personal dashboard</p><div class="wordmark"><h1>Cukup</h1><span class="wordmark-tag">${escapeHtml(report.timezone)}</span></div></div><div class="freshness ${partial ? 'freshness-partial' : ''}"><span class="freshness-mark" aria-hidden="true"></span><span>${partial ? '<strong>Partial report.</strong> ' : ''}Authoritative as of <time datetime="${escapeHtml(report.as_of)}">${formatTimestamp(report.as_of, report.timezone)}</time></span><span class="sr-only" role="status" aria-live="polite">${refreshing ? 'Refreshing dashboard' : partial ? 'Dashboard has stale or unavailable panels' : 'Dashboard up to date'}</span></div></header><main>${renderOverall(report.overall)}${renderFilters(report, selection, refreshing)}${renderTimeline(report.timeline, report.timezone)}${renderTrend(report.trend, selection)}${renderExecutors(report.executors, report.timezone)}</main><footer class="page-footer"><p>Cukup reports Working Time, never prompts or content. Filtered activity is targetless and non-additive.</p></footer>`
+	return `<header class="masthead"><div><p class="eyebrow">Personal dashboard</p><div class="wordmark"><h1>Cukup</h1><span class="wordmark-tag">${escapeHtml(report.timezone)}</span></div></div><div class="freshness ${partial ? 'freshness-partial' : ''}"><span class="freshness-mark" aria-hidden="true"></span><span>${partial ? '<strong>Partial report.</strong> ' : ''}Authoritative as of <time datetime="${escapeHtml(report.as_of)}">${formatTimestamp(report.as_of, report.timezone)}</time></span><span class="sr-only" role="status" aria-live="polite">${refreshing ? 'Refreshing dashboard' : partial ? 'Dashboard has stale or unavailable panels' : 'Dashboard up to date'}</span></div></header><main>${renderOverall(report.overall)}${renderFilters(report, selection, refreshing)}${renderTimeline(report.timeline, report.timezone, report.as_of)}${renderTrend(report.trend, selection, report.timezone)}${renderExecutors(report.executors, report.timezone)}</main><footer class="page-footer"><p>Cukup reports Working Time, never prompts or content. Filtered activity is targetless and non-additive.</p></footer>`
 }
 
 export function renderDashboardDocument(

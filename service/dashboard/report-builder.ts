@@ -2,8 +2,10 @@ import {
 	addDays,
 	buildSessionIntervals,
 	localDateAt,
+	periodStatus,
 	startOfZonedDay,
 	summarizeWork,
+	targetMinutesFor,
 	unionIntervals,
 	type CivilDate,
 	type Interval,
@@ -15,11 +17,13 @@ import type {
 	ActivityInterval,
 	DashboardReport,
 	DashboardSelection,
+	DayBreakdown,
+	DayDetail,
 	ExecutorSummary,
 	Panel,
 	Timeline,
+	TimelineLane,
 	Trend,
-	TrendPoint,
 	TrendSeries,
 } from './report.ts'
 
@@ -121,7 +125,12 @@ export function buildDashboardReport(
 			buildTimeline(attributedIntervals(store.attributedEvents(), nowMs), selection, nowMs),
 		),
 		trend: buildPanel('Activity trend is unavailable.', () =>
-			buildTrend(attributedIntervals(store.attributedEvents(), nowMs), selection, nowMs),
+			buildTrend(
+				attributedIntervals(store.attributedEvents(), nowMs),
+				selection,
+				nowMs,
+				store.targetOverrides(),
+			),
 		),
 		executors: buildPanel('Executor details are unavailable.', () =>
 			buildExecutors(store.attributedEvents(), store.listBearerMetadata()),
@@ -140,6 +149,8 @@ function attributedIntervals(
 	}))
 }
 
+type ClippedInterval = Interval & { project: string; executor: string }
+
 function buildTimeline(
 	intervals: readonly AttributedInterval[],
 	selection: DashboardSelection,
@@ -148,14 +159,65 @@ function buildTimeline(
 	const today = localDateAt(nowMs, SERVICE_TIMEZONE)
 	const startMs = startOfZonedDay(today, SERVICE_TIMEZONE)
 	const endMs = Math.min(startOfZonedDay(addDays(today, 1), SERVICE_TIMEZONE), nowMs)
-	const selected = intervals
+	const selected: ClippedInterval[] = intervals
 		.filter((interval) => matchesSelection(interval, selection))
 		.map((interval) => ({
 			startMs: Math.max(interval.startMs, startMs),
 			endMs: Math.min(interval.endMs, endMs),
+			project: interval.project,
+			executor: interval.executor,
 		}))
 		.filter((interval) => interval.endMs > interval.startMs)
-	return { date: civilDateString(today), intervals: concurrencyIntervals(selected) }
+	return {
+		date: civilDateString(today),
+		minutes: totalMinutes(unionIntervals(selected)),
+		intervals: concurrencyIntervals(selected),
+		lanes: [
+			...timelineLanes('project', selected, (interval) => interval.project),
+			...timelineLanes('executor', selected, (interval) => interval.executor),
+		],
+	}
+}
+
+/**
+ * One Gantt lane per label with selected activity today. Bars are unioned
+ * within a lane, so a lane never overlaps itself and every visible overlap is
+ * genuine cross-lane concurrency. Lanes are ordered by first activity.
+ */
+function timelineLanes(
+	kind: TimelineLane['kind'],
+	intervals: readonly ClippedInterval[],
+	labelOf: (interval: ClippedInterval) => string,
+): TimelineLane[] {
+	const grouped = new Map<string, ClippedInterval[]>()
+	for (const interval of intervals) {
+		const label = labelOf(interval)
+		const lane = grouped.get(label) ?? []
+		lane.push(interval)
+		grouped.set(label, lane)
+	}
+	return [...grouped]
+		.map(([label, lane]) => {
+			const union = unionIntervals(lane)
+			return {
+				kind,
+				label,
+				minutes: totalMinutes(union),
+				startMs: union[0]!.startMs,
+				intervals: union.map((interval) => ({
+					start: new Date(interval.startMs).toISOString(),
+					end: new Date(interval.endMs).toISOString(),
+				})),
+			}
+		})
+		.sort((left, right) => left.startMs - right.startMs || labelOrder(left.label, right.label))
+		.map(({ startMs: _startMs, ...lane }) => lane)
+}
+
+function totalMinutes(union: readonly Interval[]): number {
+	let total = 0
+	for (const interval of union) total += interval.endMs - interval.startMs
+	return Math.floor(total / 60_000)
 }
 
 function concurrencyIntervals(intervals: readonly Interval[]): ActivityInterval[] {
@@ -190,10 +252,16 @@ function buildTrend(
 	intervals: readonly AttributedInterval[],
 	selection: DashboardSelection,
 	nowMs: number,
+	targetOverrides: ReadonlyMap<string, number>,
 ): Trend {
 	const range = trendRange(selection, nowMs)
+	const dates: CivilDate[] = []
+	for (let date = range.start; civilDayNumber(date) <= civilDayNumber(range.end); date = addDays(date, 1)) {
+		dates.push(date)
+	}
+	const days = dayBounds(dates)
 	const series: TrendSeries[] = [
-		trendSeries('overall', 'Overall working time', intervals, range.start, range.end),
+		trendSeries('overall', 'Overall working time', intervals, dates, days),
 	]
 	for (const project of selection.projects) {
 		series.push(
@@ -205,8 +273,8 @@ function buildTrend(
 						interval.project === project &&
 						(selection.executors.length === 0 || selection.executors.includes(interval.executor)),
 				),
-				range.start,
-				range.end,
+				dates,
+				days,
 			),
 		)
 	}
@@ -220,8 +288,8 @@ function buildTrend(
 						interval.executor === executor &&
 						(selection.projects.length === 0 || selection.projects.includes(interval.project)),
 				),
-				range.start,
-				range.end,
+				dates,
+				days,
 			),
 		)
 	}
@@ -231,8 +299,8 @@ function buildTrend(
 				'combined',
 				'Selected project and executor activity',
 				intervals.filter((interval) => matchesSelection(interval, selection)),
-				range.start,
-				range.end,
+				dates,
+				days,
 			),
 		)
 	}
@@ -240,27 +308,125 @@ function buildTrend(
 		start_date: civilDateString(range.start),
 		end_date: civilDateString(range.end),
 		series,
+		days: buildDayDetails(intervals, dates, days, targetOverrides),
 	}
+}
+
+/** Zoned midnight-to-midnight bounds, resolved once per date and shared by every series. */
+function dayBounds(dates: readonly CivilDate[]): Interval[] {
+	const last = dates.at(-1)
+	if (last === undefined) return []
+	const starts = dates.map((date) => startOfZonedDay(date, SERVICE_TIMEZONE))
+	starts.push(startOfZonedDay(addDays(last, 1), SERVICE_TIMEZONE))
+	return dates.map((_date, index) => ({ startMs: starts[index]!, endMs: starts[index + 1]! }))
 }
 
 function trendSeries(
 	kind: TrendSeries['kind'],
 	label: string,
 	intervals: readonly Interval[],
-	start: CivilDate,
-	end: CivilDate,
+	dates: readonly CivilDate[],
+	days: readonly Interval[],
 ): TrendSeries {
-	const union = unionIntervals(intervals)
-	const points: TrendPoint[] = []
-	for (let date = start; civilDayNumber(date) <= civilDayNumber(end); date = addDays(date, 1)) {
-		const dayStart = startOfZonedDay(date, SERVICE_TIMEZONE)
-		const dayEnd = startOfZonedDay(addDays(date, 1), SERVICE_TIMEZONE)
-		points.push({
+	const stats = dayStatistics(unionIntervals(intervals), days)
+	return {
+		kind,
+		label,
+		points: dates.map((date, index) => ({
 			date: civilDateString(date),
-			minutes: Math.floor(overlapMilliseconds(union, dayStart, dayEnd) / 60_000),
-		})
+			minutes: stats[index]!.minutes,
+		})),
 	}
-	return { kind, label, points }
+}
+
+/**
+ * Globally unioned detail behind every heatmap cell. These values ignore the
+ * filter selection for the same reason the Overall panel does: they describe
+ * Overall Working Time, which filters never alter.
+ */
+function buildDayDetails(
+	intervals: readonly AttributedInterval[],
+	dates: readonly CivilDate[],
+	days: readonly Interval[],
+	targetOverrides: ReadonlyMap<string, number>,
+): DayDetail[] {
+	const overall = dayStatistics(unionIntervals(intervals), days)
+	const projects = breakdownByDay(intervals, days, (interval) => interval.project)
+	const executors = breakdownByDay(intervals, days, (interval) => interval.executor)
+	return dates.map((date, index) => {
+		const statistics = overall[index]!
+		return {
+			date: civilDateString(date),
+			period: periodStatus(
+				statistics.minutes * 60_000,
+				targetMinutesFor(date, targetOverrides) * 60_000,
+			),
+			interval_count: statistics.count,
+			first_activity_at: statistics.firstMs === null ? null : new Date(statistics.firstMs).toISOString(),
+			last_activity_at: statistics.lastMs === null ? null : new Date(statistics.lastMs).toISOString(),
+			projects: breakdownAt(projects, index),
+			executors: breakdownAt(executors, index),
+		}
+	})
+}
+
+function breakdownByDay(
+	intervals: readonly AttributedInterval[],
+	days: readonly Interval[],
+	labelOf: (interval: AttributedInterval) => string,
+): Map<string, DayStatistics[]> {
+	const grouped = new Map<string, AttributedInterval[]>()
+	for (const interval of intervals) {
+		const label = labelOf(interval)
+		const group = grouped.get(label) ?? []
+		group.push(interval)
+		grouped.set(label, group)
+	}
+	return new Map(
+		[...grouped].map(([label, group]) => [label, dayStatistics(unionIntervals(group), days)]),
+	)
+}
+
+function breakdownAt(statistics: Map<string, DayStatistics[]>, index: number): DayBreakdown[] {
+	return [...statistics]
+		.map(([label, days]) => ({ label, minutes: days[index]!.minutes }))
+		.filter((entry) => entry.minutes > 0)
+		.sort((left, right) => right.minutes - left.minutes || labelOrder(left.label, right.label))
+}
+
+type DayStatistics = {
+	minutes: number
+	count: number
+	firstMs: number | null
+	lastMs: number | null
+}
+
+/**
+ * Single forward walk over sorted unioned intervals and ascending day bounds,
+ * so a 366-day range costs one pass per series rather than one pass per day.
+ */
+function dayStatistics(union: readonly Interval[], days: readonly Interval[]): DayStatistics[] {
+	const statistics: DayStatistics[] = []
+	let cursor = 0
+	for (const day of days) {
+		while (cursor < union.length && union[cursor]!.endMs <= day.startMs) cursor += 1
+		let scan = cursor
+		let overlapMs = 0
+		let count = 0
+		let firstMs: number | null = null
+		let lastMs: number | null = null
+		while (scan < union.length && union[scan]!.startMs < day.endMs) {
+			const start = Math.max(union[scan]!.startMs, day.startMs)
+			const end = Math.min(union[scan]!.endMs, day.endMs)
+			overlapMs += end - start
+			count += 1
+			if (firstMs === null) firstMs = start
+			lastMs = end
+			scan += 1
+		}
+		statistics.push({ minutes: Math.floor(overlapMs / 60_000), count, firstMs, lastMs })
+	}
+	return statistics
 }
 
 function trendRange(
@@ -340,14 +506,6 @@ function civilDateString(date: CivilDate): string {
 
 function civilDayNumber(date: CivilDate): number {
 	return Date.UTC(date.year, date.month - 1, date.day) / 86_400_000
-}
-
-function overlapMilliseconds(intervals: readonly Interval[], startMs: number, endMs: number): number {
-	let total = 0
-	for (const interval of intervals) {
-		total += Math.max(0, Math.min(interval.endMs, endMs) - Math.max(interval.startMs, startMs))
-	}
-	return total
 }
 
 function latestTimestamp(values: readonly number[]): string | null {
