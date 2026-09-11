@@ -6,7 +6,7 @@ import {
 	parseDashboardSelection,
 	type DashboardReportStore,
 } from './report-builder.ts'
-import type { DashboardSelection, TrendSeries } from './report.ts'
+import type { DashboardSelection, TimelineLane, TrendSeries } from './report.ts'
 
 const minute = 60_000
 const now = Date.parse('2026-08-31T05:00:00.000Z') // Monday noon in Jakarta
@@ -111,6 +111,22 @@ function fixture(targetOverrides = new Map<string, number>()): {
 function readySeries(report: ReturnType<typeof buildDashboardReport>): TrendSeries[] {
 	if (report.trend.state === 'unavailable') throw new Error('Expected trend')
 	return report.trend.data.series
+}
+
+/** Minutes covered by a whole lane dimension, unioned across its lanes. */
+function laneUnionMinutes(lanes: readonly TimelineLane[]): number {
+	const merged: Array<{ start: number; end: number }> = []
+	for (const { start, end } of lanes.flatMap((lane) => lane.intervals)) {
+		merged.push({ start: Date.parse(start), end: Date.parse(end) })
+	}
+	merged.sort((left, right) => left.start - right.start)
+	let total = 0
+	let cursor = -Infinity
+	for (const interval of merged) {
+		total += Math.max(0, interval.end - Math.max(interval.start, cursor))
+		cursor = Math.max(cursor, interval.end)
+	}
+	return Math.floor(total / 60_000)
 }
 
 describe('dashboard selection validation', () => {
@@ -269,6 +285,126 @@ describe('dashboard report aggregation', () => {
 			last_activity_at: null,
 			last_synchronized_at: null,
 			credential_state: 'active',
+		})
+	})
+
+	test('builds project and executor lanes that cover the same time without overlapping themselves', () => {
+		const report = buildDashboardReport(
+			fixture().store,
+			{ projects: [], executors: [], range: { preset: 7 } },
+			now,
+		)
+		if (report.timeline.state === 'unavailable') throw new Error('Expected timeline')
+		const timeline = report.timeline.data
+		expect(timeline.minutes).toBe(105)
+		expect(timeline.lanes.map((lane) => `${lane.kind}:${lane.label}`)).toEqual([
+			'project:alpha',
+			'project:beta',
+			'executor:machine-a',
+			'executor:amp-orb',
+		])
+		expect(timeline.lanes.map((lane) => lane.minutes)).toEqual([105, 45, 90, 75])
+
+		for (const lane of timeline.lanes) {
+			for (let index = 1; index < lane.intervals.length; index += 1) {
+				expect(Date.parse(lane.intervals[index]!.start)).toBeGreaterThan(
+					Date.parse(lane.intervals[index - 1]!.end),
+				)
+			}
+		}
+
+		const projects = timeline.lanes.filter((lane) => lane.kind === 'project')
+		const executors = timeline.lanes.filter((lane) => lane.kind === 'executor')
+		expect(laneUnionMinutes(projects)).toBe(timeline.minutes)
+		expect(laneUnionMinutes(executors)).toBe(timeline.minutes)
+		// Each dimension covers the whole day, so adding its lanes overstates it.
+		expect(projects.reduce((total, lane) => total + lane.minutes, 0)).toBeGreaterThan(timeline.minutes)
+		expect(executors.reduce((total, lane) => total + lane.minutes, 0)).toBeGreaterThan(timeline.minutes)
+	})
+
+	test('restricts lanes to the selection without changing the globally unioned day details', () => {
+		const selected = buildDashboardReport(
+			fixture().store,
+			{ projects: ['beta'], executors: [], range: { preset: 7 } },
+			now,
+		)
+		if (selected.timeline.state === 'unavailable') throw new Error('Expected timeline')
+		expect(selected.timeline.data.lanes.map((lane) => `${lane.kind}:${lane.label}`)).toEqual([
+			'project:beta',
+			'executor:machine-a',
+		])
+		expect(selected.timeline.data.minutes).toBe(45)
+
+		if (selected.trend.state === 'unavailable') throw new Error('Expected trend')
+		const today = selected.trend.data.days.at(-1)!
+		expect(today.period.worked_minutes).toBe(105)
+		expect(today.projects).toEqual([
+			{ label: 'alpha', minutes: 105 },
+			{ label: 'beta', minutes: 45 },
+		])
+	})
+
+	test('gives every heatmap day a target-bearing verdict and a non-additive breakdown', () => {
+		const report = buildDashboardReport(
+			fixture().store,
+			{ projects: [], executors: [], range: { preset: 7 } },
+			now,
+		)
+		if (report.trend.state === 'unavailable') throw new Error('Expected trend')
+		const days = report.trend.data.days
+		const overall = readySeries(report).find((series) => series.kind === 'overall')!
+		expect(days.map((day) => day.date)).toEqual(overall.points.map((point) => point.date))
+		expect(days.map((day) => day.period.worked_minutes)).toEqual(
+			overall.points.map((point) => point.minutes),
+		)
+
+		const today = days.at(-1)!
+		expect(today).toMatchObject({
+			date: '2026-08-31',
+			interval_count: 1,
+			first_activity_at: '2026-08-31T01:00:00.000Z',
+			last_activity_at: '2026-08-31T02:45:00.000Z',
+		})
+		expect(today.period).toEqual({
+			status: 'UNDER',
+			worked_minutes: 105,
+			target_minutes: 480,
+			difference_minutes: 375,
+		})
+		expect(today.executors).toEqual([
+			{ label: 'machine-a', minutes: 90 },
+			{ label: 'amp-orb', minutes: 75 },
+		])
+
+		// Sunday carries a zero target, so a short session reads as OVER.
+		const sunday = days.find((day) => day.date === '2026-08-30')!
+		expect(sunday.period).toEqual({
+			status: 'OVER',
+			worked_minutes: 20,
+			target_minutes: 0,
+			difference_minutes: 20,
+		})
+		expect(sunday.projects).toEqual([{ label: 'Unassigned', minutes: 20 }])
+
+		const idle = days.find((day) => day.date === '2026-08-27')!
+		expect(idle).toMatchObject({ interval_count: 0, first_activity_at: null, last_activity_at: null })
+		expect(idle.period.status).toBe('UNDER')
+		expect(idle.projects).toEqual([])
+	})
+
+	test('applies exact-date target overrides to heatmap day details', () => {
+		const overrides = new Map([['2026-08-31', 0]])
+		const report = buildDashboardReport(
+			fixture(overrides).store,
+			{ projects: [], executors: [], range: { preset: 7 } },
+			now,
+		)
+		if (report.trend.state === 'unavailable') throw new Error('Expected trend')
+		expect(report.trend.data.days.at(-1)!.period).toEqual({
+			status: 'OVER',
+			worked_minutes: 105,
+			target_minutes: 0,
+			difference_minutes: 105,
 		})
 	})
 

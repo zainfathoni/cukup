@@ -183,6 +183,15 @@ export function addDays(date: CivilDate, amount: number): CivilDate {
 	return { year: value.getUTCFullYear(), month: value.getUTCMonth() + 1, day: value.getUTCDate() }
 }
 
+/** Authoritative target for one civil date, honouring exact-date overrides. */
+export function targetMinutesFor(
+	date: CivilDate,
+	overrides: ReadonlyMap<string, number> = new Map(),
+	targets: readonly number[] = defaultConfig.dailyTargetMinutes,
+): number {
+	return targetMinutes(date, targets, overrides)
+}
+
 function targetMinutes(
 	date: CivilDate,
 	targets: readonly number[],
@@ -211,7 +220,7 @@ function overlapMilliseconds(intervals: readonly Interval[], startMs: number, en
 	return total
 }
 
-function periodStatus(workedMs: number, targetMs: number): SummaryPeriod {
+export function periodStatus(workedMs: number, targetMs: number): SummaryPeriod {
 	const workedMinutes = Math.floor(workedMs / 60_000)
 	const targetMinutes = Math.floor(targetMs / 60_000)
 	const differenceMinutes = Math.abs(workedMinutes - targetMinutes)

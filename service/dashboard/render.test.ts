@@ -25,12 +25,52 @@ describe('dashboard rendering', () => {
 		expect(html).toContain('View daily values')
 		expect(html).toContain('Exact values behind the chart, provided for comparison and as a text alternative.')
 		expect(html).toContain('<thead><tr><th scope="col">Date</th>')
-		expect(html).toContain('<tr><th scope="row">2026-08-25</th><td>6h 50m</td><td>2h 0m</td></tr>')
+		expect(html).toContain(
+			'<tr><th scope="row">2026-08-25</th><td>6h 50m</td><td>2h 0m</td><td>8h 0m</td><td>UNDER</td><td>4</td><td>08:30–18:10</td>',
+		)
+		expect(html).toContain('<th scope="col">Target</th><th scope="col">Status</th>')
 		expect(html).toContain('class="chart-grid"')
 		expect(html).toContain('aria-label="Scrollable daily activity trend"')
 		expect(html).toContain('Last activity is evidence, not an online/offline health signal.')
 		const targetX = Number(html.match(/class="meter-target" x1="([^"]+)"/)?.[1])
 		expect(targetX).toBeLessThan(470)
+	})
+
+	test('draws the timeline as lanes that name their dimension and keep overlap non-additive', () => {
+		const html = renderDashboardContent(mockDashboardReport, selection)
+		expect(html).toContain('class="gantt-chart"')
+		expect(html).toContain('All selected')
+		expect(html).toContain('class="gantt-group" x="0"')
+		expect(html).toContain('>By project</text>')
+		expect(html).toContain('>By executor</text>')
+		expect(html).toContain('class="gantt-bar gantt-union concurrency-2"')
+		expect(html).toContain('class="gantt-bar gantt-project"')
+		expect(html).toContain('class="gantt-bar gantt-executor"')
+		expect(html).toContain('line up vertically describe the same minutes and must not be added')
+		expect(html).toContain('bars are unioned within a lane')
+		// The label gutter is fixed, so a long slug is trimmed but stays readable in full.
+		expect(html).toContain('>deep-work-instru…<title>deep-work-instrumentation-and-attribution</title>')
+		expect(html).toContain('class="gantt-now"')
+		expect(html).toContain('>now</text>')
+		expect(html).toContain('<h4>By project</h4>')
+	})
+
+	test('opens a hover detail card per heatmap day and repeats it in the keyboard-reachable table', () => {
+		const html = renderDashboardContent(mockDashboardReport, selection)
+		expect(html).toContain('class="heat-board heat-roomy"')
+		expect(html).toContain('<ol class="heat-grid" role="img" aria-label="Calendar heatmap')
+		expect(html).toContain('class="heat-tip status-under tip-start"')
+		expect(html).toContain('<p class="tip-date">Mon, Aug 31, 2026</p>')
+		expect(html).toContain('<span class="tip-figure">6h 20m</span><span class="tip-stamp">UNDER</span>')
+		expect(html).toContain('Target 8h 0m · 1h 40m remaining')
+		expect(html).toContain('<dt>Projects</dt><dd>cukup 4h 20m · personal-site 1h 36m · deep-work')
+		expect(html).toContain('7 intervals · 08:15–16:30')
+		expect(html).toContain('Activity overlaps; never add it up.')
+		// The all-day-off day states its emptiness rather than showing a breakdown.
+		expect(html).toContain('class="heat-tip status-complete')
+		expect(html).toContain('No working time recorded.')
+		// The card is pointer-only, so the table carries the same detail.
+		expect(html).toContain('<td>7</td><td>08:15–16:30</td>')
 	})
 
 	test('renders native keyboard controls and keeps filter state out of resource URLs', () => {

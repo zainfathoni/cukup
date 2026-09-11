@@ -129,7 +129,7 @@ describe('dashboard interactions', () => {
 		expect(latest?.report.overall.state).toBe('stale')
 		expect(latest?.report.timeline.state).toBe('stale')
 		expect(latest?.report.executors.state).toBe('stale')
-		expect(latest?.report.overall.state === 'stale' && latest.report.overall.data.today.worked_minutes).toBe(326)
+		expect(latest?.report.overall.state === 'stale' && latest.report.overall.data.today.worked_minutes).toBe(380)
 		expect(view.announcements).toEqual(['Dashboard refresh failed; last successful values remain visible'])
 	})
 

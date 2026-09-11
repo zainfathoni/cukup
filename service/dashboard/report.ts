@@ -23,9 +23,24 @@ export type ActivityInterval = {
 	concurrency: number
 }
 
+/** One unioned bar in a Gantt lane. Same-lane concurrency is already merged. */
+export type LaneInterval = {
+	start: string
+	end: string
+}
+
+export type TimelineLane = {
+	kind: 'project' | 'executor'
+	label: string
+	minutes: number
+	intervals: LaneInterval[]
+}
+
 export type Timeline = {
 	date: string
+	minutes: number
 	intervals: ActivityInterval[]
+	lanes: TimelineLane[]
 }
 
 export type TrendPoint = {
@@ -39,10 +54,31 @@ export type TrendSeries = {
 	points: TrendPoint[]
 }
 
+export type DayBreakdown = {
+	label: string
+	minutes: number
+}
+
+/**
+ * Globally unioned detail behind one heatmap cell. `period` is target-bearing
+ * because it describes Overall Working Time; the breakdowns are Project and
+ * Executor Activity and are intentionally non-additive.
+ */
+export type DayDetail = {
+	date: string
+	period: TargetPeriod
+	interval_count: number
+	first_activity_at: string | null
+	last_activity_at: string | null
+	projects: DayBreakdown[]
+	executors: DayBreakdown[]
+}
+
 export type Trend = {
 	start_date: string
 	end_date: string
 	series: TrendSeries[]
+	days: DayDetail[]
 }
 
 export type ExecutorSummary = {
