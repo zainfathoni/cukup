@@ -1,0 +1,189 @@
+{
+  "received_at": "2026-09-10T03:00:00.000Z",
+  "collector_instance_id": "10a00000-0000-4000-8000-000000000001",
+  "cases": [
+    {
+      "name": "rich collector: all human interactions and two execution segments around a wait",
+      "capabilities": [
+        "engagement.composition",
+        "engagement.submission",
+        "engagement.follow_up",
+        "engagement.approval",
+        "engagement.takeover",
+        "execution.segments"
+      ],
+      "deliveries": [
+        {
+          "evidence": [
+            {"family":"engagement","evidence_id":"30000000-0000-4000-8000-000000000001","interaction":"composition","origin":"human","recovered":false,"timing":{"wall_time":"2026-09-10T02:00:00.000Z","provenance":"collector_observation","precision_ms":1},"project_attribution":{"kind":"cukup_project","project_id":"20000000-0000-4000-8000-000000000001","basis":"approved_mapping"}},
+            {"family":"engagement","evidence_id":"30000000-0000-4000-8000-000000000002","interaction":"submission","origin":"human","recovered":false,"timing":{"wall_time":"2026-09-10T02:01:00.000Z","provenance":"native_occurrence","precision_ms":1000},"project_attribution":{"kind":"cukup_project","project_id":"20000000-0000-4000-8000-000000000001","basis":"approved_mapping"}},
+            {"family":"execution_start","evidence_id":"30000000-0000-4000-8000-000000000003","segment_id":"40000000-0000-4000-8000-000000000001","recovered":false,"timing":{"wall_time":"2026-09-10T02:01:01.000Z","provenance":"native_occurrence","precision_ms":1},"project_attribution":{"kind":"cukup_project","project_id":"20000000-0000-4000-8000-000000000001","basis":"explicit_binding"}},
+            {"family":"engagement","evidence_id":"30000000-0000-4000-8000-000000000004","interaction":"follow_up","origin":"human","recovered":false,"timing":{"wall_time":"2026-09-10T02:02:00.000Z","provenance":"collector_observation","precision_ms":1},"project_attribution":{"kind":"unassigned","reason":"ambiguous"}},
+            {"family":"execution_end","evidence_id":"30000000-0000-4000-8000-000000000005","segment_id":"40000000-0000-4000-8000-000000000001","recovered":false,"timing":{"wall_time":"2026-09-10T02:06:00.000Z","provenance":"native_occurrence","precision_ms":1}},
+            {"family":"engagement","evidence_id":"30000000-0000-4000-8000-000000000006","interaction":"approval","origin":"human","recovered":false,"timing":{"wall_time":"2026-09-10T02:20:00.000Z","provenance":"collector_observation","precision_ms":1},"project_attribution":{"kind":"unassigned","reason":"absent"}},
+            {"family":"execution_start","evidence_id":"30000000-0000-4000-8000-000000000007","segment_id":"40000000-0000-4000-8000-000000000002","recovered":false,"timing":{"wall_time":"2026-09-10T02:20:01.000Z","provenance":"collector_observation","precision_ms":1},"project_attribution":{"kind":"unassigned","reason":"absent"}},
+            {"family":"engagement","evidence_id":"30000000-0000-4000-8000-000000000008","interaction":"takeover","origin":"human","recovered":false,"timing":{"wall_time":"2026-09-10T02:21:00.000Z","provenance":"collector_observation","precision_ms":1},"project_attribution":{"kind":"unassigned","reason":"absent"}},
+            {"family":"execution_end","evidence_id":"30000000-0000-4000-8000-000000000009","segment_id":"40000000-0000-4000-8000-000000000002","recovered":false,"timing":{"wall_time":"2026-09-10T02:25:00.000Z","provenance":"collector_observation","precision_ms":1}}
+          ]
+        }
+      ],
+      "expected": [
+        {"evidence_id":"30000000-0000-4000-8000-000000000001","status":"accepted"},
+        {"evidence_id":"30000000-0000-4000-8000-000000000002","status":"accepted"},
+        {"evidence_id":"30000000-0000-4000-8000-000000000003","status":"accepted"},
+        {"evidence_id":"30000000-0000-4000-8000-000000000004","status":"accepted"},
+        {"evidence_id":"30000000-0000-4000-8000-000000000005","status":"accepted"},
+        {"evidence_id":"30000000-0000-4000-8000-000000000006","status":"accepted"},
+        {"evidence_id":"30000000-0000-4000-8000-000000000007","status":"accepted"},
+        {"evidence_id":"30000000-0000-4000-8000-000000000008","status":"accepted"},
+        {"evidence_id":"30000000-0000-4000-8000-000000000009","status":"accepted"}
+      ]
+    },
+    {
+      "name": "partial live collector: independent submission accepted while process coverage remains declarative",
+      "capabilities": ["engagement.submission", "process.lifecycle"],
+      "deliveries": [{"evidence":[{"family":"engagement","evidence_id":"31000000-0000-4000-8000-000000000001","interaction":"submission","origin":"human","recovered":false,"timing":{"wall_time":"2026-09-10T02:30:00.000Z","provenance":"collector_observation","precision_ms":1},"project_attribution":{"kind":"unassigned","reason":"absent"}}]}],
+      "expected": [{"evidence_id":"31000000-0000-4000-8000-000000000001","status":"accepted"}]
+    },
+    {
+      "name": "process-lifecycle-only collector: valid declaration produces no evidence",
+      "capabilities": ["process.lifecycle"],
+      "deliveries": [{"evidence":[]}],
+      "expected": []
+    },
+    {
+      "name": "pending execution: start has no provisional duration",
+      "capabilities": ["execution.segments"],
+      "deliveries": [{"evidence":[{"family":"execution_start","evidence_id":"32000000-0000-4000-8000-000000000001","segment_id":"42000000-0000-4000-8000-000000000001","recovered":false,"timing":{"wall_time":"2026-09-10T02:35:00.000Z","provenance":"collector_observation","precision_ms":1},"project_attribution":{"kind":"unassigned","reason":"absent"}}]}],
+      "expected": [{"evidence_id":"32000000-0000-4000-8000-000000000001","status":"accepted"}]
+    },
+    {
+      "name": "closed schemas reject unknown fields and prohibited metadata",
+      "capabilities": ["engagement.submission"],
+      "deliveries": [{"evidence":[
+        {"family":"engagement","evidence_id":"33000000-0000-4000-8000-000000000001","interaction":"submission","origin":"human","recovered":false,"timing":{"wall_time":"2026-09-10T02:00:00.000Z","provenance":"collector_observation","precision_ms":1},"project_attribution":{"kind":"unassigned","reason":"absent"},"surprise":true},
+        {"family":"engagement","evidence_id":"33000000-0000-4000-8000-000000000002","interaction":"submission","origin":"human","recovered":false,"timing":{"wall_time":"2026-09-10T02:00:00.000Z","provenance":"collector_observation","precision_ms":1},"project_attribution":{"kind":"unassigned","reason":"absent"},"metadata":{"path":"synthetic"}}
+      ]}],
+      "expected": [
+        {"evidence_id":"33000000-0000-4000-8000-000000000001","status":"rejected","reason":"unknown_field"},
+        {"evidence_id":"33000000-0000-4000-8000-000000000002","status":"rejected","reason":"prohibited_field"}
+      ]
+    },
+    {
+      "name": "unknown human origin creates no engagement evidence",
+      "capabilities": ["engagement.submission"],
+      "deliveries": [{"evidence":[
+        {"family":"engagement","evidence_id":"34000000-0000-4000-8000-000000000001","interaction":"submission","origin":"unknown","recovered":false,"timing":{"wall_time":"2026-09-10T02:00:00.000Z","provenance":"collector_observation","precision_ms":1},"project_attribution":{"kind":"unassigned","reason":"absent"}},
+        {"family":"engagement","evidence_id":"34000000-0000-4000-8000-000000000002","interaction":"submission","origin":"automatic","recovered":false,"timing":{"wall_time":"2026-09-10T02:01:00.000Z","provenance":"collector_observation","precision_ms":1},"project_attribution":{"kind":"unassigned","reason":"absent"}}
+      ]}],
+      "expected": [
+        {"evidence_id":"34000000-0000-4000-8000-000000000001","status":"rejected","reason":"invalid_evidence"},
+        {"evidence_id":"34000000-0000-4000-8000-000000000002","status":"rejected","reason":"invalid_evidence"}
+      ]
+    },
+    {
+      "name": "process lifetime cannot claim Agent Runtime",
+      "capabilities": ["process.lifecycle"],
+      "deliveries": [{"evidence":[{"family":"process_lifetime","evidence_id":"35000000-0000-4000-8000-000000000001","started_at":"2026-09-10T02:00:00.000Z","ended_at":"2026-09-10T02:30:00.000Z"}]}],
+      "expected": [{"evidence_id":"35000000-0000-4000-8000-000000000001","status":"rejected","reason":"invalid_evidence"}]
+    },
+    {
+      "name": "invalid timestamp and invalid endpoint order are rejected without repair",
+      "capabilities": ["execution.segments"],
+      "deliveries": [{"evidence":[
+        {"family":"execution_start","evidence_id":"36000000-0000-4000-8000-000000000001","segment_id":"46000000-0000-4000-8000-000000000001","recovered":false,"timing":{"wall_time":"2026-09-10T02:40:00Z","provenance":"native_occurrence","precision_ms":1},"project_attribution":{"kind":"unassigned","reason":"absent"}},
+        {"family":"execution_start","evidence_id":"36000000-0000-4000-8000-000000000002","segment_id":"46000000-0000-4000-8000-000000000002","recovered":false,"timing":{"wall_time":"2026-09-10T02:45:00.000Z","provenance":"native_occurrence","precision_ms":1},"project_attribution":{"kind":"unassigned","reason":"absent"}},
+        {"family":"execution_end","evidence_id":"36000000-0000-4000-8000-000000000003","segment_id":"46000000-0000-4000-8000-000000000002","recovered":false,"timing":{"wall_time":"2026-09-10T02:44:59.000Z","provenance":"native_occurrence","precision_ms":1}},
+        {"family":"execution_start","evidence_id":"36000000-0000-4000-8000-000000000004","segment_id":"46000000-0000-4000-8000-000000000004","recovered":false,"timing":{"wall_time":"2026-09-10T03:10:00.001Z","provenance":"native_occurrence","precision_ms":1},"project_attribution":{"kind":"unassigned","reason":"absent"}}
+      ]}],
+      "expected": [
+        {"evidence_id":"36000000-0000-4000-8000-000000000001","status":"rejected","reason":"invalid_timing"},
+        {"evidence_id":"36000000-0000-4000-8000-000000000002","status":"accepted"},
+        {"evidence_id":"36000000-0000-4000-8000-000000000003","status":"rejected","reason":"invalid_order"},
+        {"evidence_id":"36000000-0000-4000-8000-000000000004","status":"rejected","reason":"invalid_timing"}
+      ]
+    },
+    {
+      "name": "duplicate replay and immutable evidence identity conflict",
+      "capabilities": ["engagement.submission"],
+      "deliveries": [
+        {"evidence":[{"family":"engagement","evidence_id":"37000000-0000-4000-8000-000000000001","interaction":"submission","origin":"human","recovered":false,"timing":{"wall_time":"2026-09-10T02:00:00.000Z","provenance":"native_occurrence","precision_ms":1},"project_attribution":{"kind":"unassigned","reason":"absent"}}]},
+        {"evidence":[{"family":"engagement","evidence_id":"37000000-0000-4000-8000-000000000001","interaction":"submission","origin":"human","recovered":false,"timing":{"wall_time":"2026-09-10T02:00:00.000Z","provenance":"native_occurrence","precision_ms":1},"project_attribution":{"kind":"unassigned","reason":"absent"}}]},
+        {"evidence":[{"family":"engagement","evidence_id":"37000000-0000-4000-8000-000000000001","interaction":"submission","origin":"human","recovered":false,"timing":{"wall_time":"2026-09-10T02:00:01.000Z","provenance":"native_occurrence","precision_ms":1},"project_attribution":{"kind":"cukup_project","project_id":"27000000-0000-4000-8000-000000000001","basis":"explicit_binding"}}]}
+      ],
+      "expected": [
+        {"evidence_id":"37000000-0000-4000-8000-000000000001","status":"accepted"},
+        {"evidence_id":"37000000-0000-4000-8000-000000000001","status":"duplicate"},
+        {"evidence_id":"37000000-0000-4000-8000-000000000001","status":"conflict","reason":"identity_conflict"}
+      ]
+    },
+    {
+      "name": "unsupported envelope version is not inspected",
+      "capabilities": ["engagement.submission"],
+      "deliveries": [{"protocol_version":2,"evidence":[{"family":"engagement","evidence_id":"38000000-0000-4000-8000-000000000001","interaction":"submission","origin":"human","recovered":false,"timing":{"wall_time":"2026-09-10T02:00:00.000Z","provenance":"collector_observation","precision_ms":1},"project_attribution":{"kind":"unassigned","reason":"absent"},"surprise":true}]}],
+      "expected": [{"scope":"envelope","status":"unsupported_version","reason":"unsupported_version"}]
+    },
+    {
+      "name": "recovery accepts native times and observation-time pending starts but not synthetic recovered ends",
+      "capabilities": ["engagement.approval", "execution.segments", "recovery.engagement.approval", "recovery.execution_start.native", "recovery.execution_start.current_observation", "recovery.execution_end.native"],
+      "deliveries": [{"evidence":[
+        {"family":"engagement","evidence_id":"39000000-0000-4000-8000-000000000001","interaction":"approval","origin":"human","recovered":true,"timing":{"wall_time":"2026-09-10T01:00:00.000Z","provenance":"native_occurrence","precision_ms":1000},"project_attribution":{"kind":"unassigned","reason":"absent"}},
+        {"family":"execution_start","evidence_id":"39000000-0000-4000-8000-000000000002","segment_id":"49000000-0000-4000-8000-000000000001","recovered":true,"timing":{"wall_time":"2026-09-10T01:01:00.000Z","provenance":"native_occurrence","precision_ms":1000},"project_attribution":{"kind":"unassigned","reason":"absent"}},
+        {"family":"execution_end","evidence_id":"39000000-0000-4000-8000-000000000003","segment_id":"49000000-0000-4000-8000-000000000001","recovered":true,"timing":{"wall_time":"2026-09-10T01:05:00.000Z","provenance":"native_occurrence","precision_ms":1000}},
+        {"family":"execution_start","evidence_id":"39000000-0000-4000-8000-000000000004","segment_id":"49000000-0000-4000-8000-000000000002","recovered":true,"timing":{"wall_time":"2026-09-10T02:50:00.000Z","provenance":"collector_observation","precision_ms":1},"project_attribution":{"kind":"unassigned","reason":"absent"}},
+        {"family":"execution_end","evidence_id":"39000000-0000-4000-8000-000000000005","segment_id":"49000000-0000-4000-8000-000000000002","recovered":true,"timing":{"wall_time":"2026-09-10T02:55:00.000Z","provenance":"collector_observation","precision_ms":1}}
+      ]}],
+      "expected": [
+        {"evidence_id":"39000000-0000-4000-8000-000000000001","status":"accepted"},
+        {"evidence_id":"39000000-0000-4000-8000-000000000002","status":"accepted"},
+        {"evidence_id":"39000000-0000-4000-8000-000000000003","status":"accepted"},
+        {"evidence_id":"39000000-0000-4000-8000-000000000004","status":"accepted"},
+        {"evidence_id":"39000000-0000-4000-8000-000000000005","status":"rejected","reason":"invalid_timing"}
+      ]
+    },
+    {
+      "name": "mixed recovery coverage is isolated by interaction and execution endpoint",
+      "capabilities": ["engagement.composition", "engagement.submission", "execution.segments", "recovery.engagement.submission", "recovery.execution_start.native"],
+      "deliveries": [{"evidence":[
+        {"family":"engagement","evidence_id":"3c000000-0000-4000-8000-000000000001","interaction":"submission","origin":"human","recovered":true,"timing":{"wall_time":"2026-09-10T01:00:00.000Z","provenance":"native_occurrence","precision_ms":1000},"project_attribution":{"kind":"unassigned","reason":"absent"}},
+        {"family":"engagement","evidence_id":"3c000000-0000-4000-8000-000000000002","interaction":"composition","origin":"human","recovered":true,"timing":{"wall_time":"2026-09-10T01:01:00.000Z","provenance":"native_occurrence","precision_ms":1000},"project_attribution":{"kind":"unassigned","reason":"absent"}},
+        {"family":"execution_start","evidence_id":"3c000000-0000-4000-8000-000000000003","segment_id":"4c000000-0000-4000-8000-000000000001","recovered":true,"timing":{"wall_time":"2026-09-10T01:02:00.000Z","provenance":"native_occurrence","precision_ms":1000},"project_attribution":{"kind":"unassigned","reason":"absent"}},
+        {"family":"execution_end","evidence_id":"3c000000-0000-4000-8000-000000000004","segment_id":"4c000000-0000-4000-8000-000000000001","recovered":true,"timing":{"wall_time":"2026-09-10T01:03:00.000Z","provenance":"native_occurrence","precision_ms":1000}},
+        {"family":"execution_start","evidence_id":"3c000000-0000-4000-8000-000000000005","segment_id":"4c000000-0000-4000-8000-000000000002","recovered":true,"timing":{"wall_time":"2026-09-10T02:50:00.000Z","provenance":"collector_observation","precision_ms":1},"project_attribution":{"kind":"unassigned","reason":"absent"}}
+      ]}],
+      "expected": [
+        {"evidence_id":"3c000000-0000-4000-8000-000000000001","status":"accepted"},
+        {"evidence_id":"3c000000-0000-4000-8000-000000000002","status":"rejected","reason":"capability_mismatch"},
+        {"evidence_id":"3c000000-0000-4000-8000-000000000003","status":"accepted"},
+        {"evidence_id":"3c000000-0000-4000-8000-000000000004","status":"rejected","reason":"capability_mismatch"},
+        {"evidence_id":"3c000000-0000-4000-8000-000000000005","status":"rejected","reason":"capability_mismatch"}
+      ]
+    },
+    {
+      "name": "one conformance state: exact replay is duplicate and later closure is accepted",
+      "capabilities": ["execution.segments"],
+      "deliveries": [
+        {"evidence":[{"family":"execution_start","evidence_id":"3a000000-0000-4000-8000-000000000001","segment_id":"4a000000-0000-4000-8000-000000000001","recovered":false,"timing":{"wall_time":"2026-09-10T02:00:00.000Z","provenance":"native_occurrence","precision_ms":1},"project_attribution":{"kind":"cukup_project","project_id":"2a000000-0000-4000-8000-000000000001","basis":"approved_mapping"}}]},
+        {"evidence":[{"family":"execution_start","evidence_id":"3a000000-0000-4000-8000-000000000001","segment_id":"4a000000-0000-4000-8000-000000000001","recovered":false,"timing":{"wall_time":"2026-09-10T02:00:00.000Z","provenance":"native_occurrence","precision_ms":1},"project_attribution":{"kind":"cukup_project","project_id":"2a000000-0000-4000-8000-000000000001","basis":"approved_mapping"}}]},
+        {"evidence":[{"family":"execution_end","evidence_id":"3a000000-0000-4000-8000-000000000002","segment_id":"4a000000-0000-4000-8000-000000000001","recovered":false,"timing":{"wall_time":"2026-09-10T02:10:00.000Z","provenance":"native_occurrence","precision_ms":1}}]}
+      ],
+      "expected": [
+        {"evidence_id":"3a000000-0000-4000-8000-000000000001","status":"accepted"},
+        {"evidence_id":"3a000000-0000-4000-8000-000000000001","status":"duplicate"},
+        {"evidence_id":"3a000000-0000-4000-8000-000000000002","status":"accepted"}
+      ]
+    },
+    {
+      "name": "immutable segment identity conflict does not replace the accepted start",
+      "capabilities": ["execution.segments"],
+      "deliveries": [{"evidence":[
+        {"family":"execution_start","evidence_id":"3b000000-0000-4000-8000-000000000001","segment_id":"4b000000-0000-4000-8000-000000000001","recovered":false,"timing":{"wall_time":"2026-09-10T02:00:00.000Z","provenance":"native_occurrence","precision_ms":1},"project_attribution":{"kind":"unassigned","reason":"absent"}},
+        {"family":"execution_start","evidence_id":"3b000000-0000-4000-8000-000000000002","segment_id":"4b000000-0000-4000-8000-000000000001","recovered":false,"timing":{"wall_time":"2026-09-10T02:00:01.000Z","provenance":"native_occurrence","precision_ms":1},"project_attribution":{"kind":"unassigned","reason":"ambiguous"}}
+      ]}],
+      "expected": [
+        {"evidence_id":"3b000000-0000-4000-8000-000000000001","status":"accepted"},
+        {"evidence_id":"3b000000-0000-4000-8000-000000000002","status":"conflict","reason":"identity_conflict"}
+      ]
+    }
+  ]
+}
