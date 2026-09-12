@@ -35,17 +35,17 @@ Treating every Harness like Amp would leak Amp concepts into the domain. Forward
 ## Consequences
 
 - A Harness with composition observations measures more Working Time than one limited to submission events; the product exposes this as coverage rather than changing the metric.
-- Neither current Amp nor Tycho APIs expose a supported timestamp-only prompt-composition signal. Initial Working Time is therefore a lower bound until each Harness adds one. Tycho now has a proposed submission, approval, and takeover observation; composition remains absent on both Harnesses. See [Upstream status](#upstream-status-2026-09-07).
-- Tycho needs a supported open-run read containing only run ID, project key, start time, status, and liveness. Finalized runtime comes from its supported usage-metrics surface. A candidate implementation now exists; see [Upstream status](#upstream-status-2026-09-07).
+- Neither current Amp nor Tycho APIs expose a supported timestamp-only prompt-composition signal. Initial Working Time is therefore a lower bound until each Harness adds one. Tycho now has a proposed submission, approval, and takeover observation; composition remains absent on both Harnesses. See [Upstream status](#upstream-status-2026-09-12).
+- Tycho needs a supported open-run read containing only run ID, project key, start time, status, and liveness. Finalized runtime comes from its supported usage-metrics surface. A candidate implementation now exists; see [Upstream status](#upstream-status-2026-09-12).
 - Hooks can reduce latency but their loss cannot lose evidence.
 - Concurrent Amp and Tycho intervals are unioned by the service rather than deduplicated by adapters.
 - New metric semantics require a separately reviewed protocol, persistence, aggregation, dashboard, and migration design.
 
-## Upstream status (2026-09-07)
+## Upstream status (2026-09-12)
 
 This section records progress against the consequences above. It does not amend any decision.
 
-Both Tycho-owned reads this ADR requires have a candidate implementation, and **neither is reviewed or merged**. The work is on branch `feat/open-run-read-contract` in `firewalker06/tycho` — commits `e02a64b`, `6190ac5`, and `25da3dd` on top of `cd4684e`. Because Tycho's creator reviews Tycho-owned contract changes, the contract remains proposed rather than agreed, and decision item 7's precondition for a shipped adapter is still open.
+Both Tycho-owned reads this ADR requires have a candidate implementation, and **neither is reviewed or merged**. The work is on branch `feat/open-run-read-contract` in the fork `zainfathoni/tycho` — commits `7c7dea6`, `7ff601e`, and `35183e2` on top of upstream `ec3100c`. It lives in a fork because this maintainer has read-only access to `firewalker06/tycho`. Because Tycho's creator reviews Tycho-owned contract changes, the contract remains proposed rather than agreed, and decision item 7's precondition for a shipped adapter is still open.
 
 - **Open runs** — `GET /metrics/open-runs` and `tycho metrics open-runs`: `run_id`, `project_key`, `started_at`, `status`, `liveness`.
 - **Human interactions** — `GET /metrics/interactions` and `tycho metrics interactions`: `observation_id`, `project_key`, `kind` (`prompt_submitted`, `inquiry_answered`, `run_taken_over`), `observed_at`. Kind vocabulary is Tycho's, consistent with decision item 8; the adapter maps each kind to an Engagement Observation.

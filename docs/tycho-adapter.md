@@ -2,7 +2,7 @@
 
 **Status:** accepted design. The Cukup adapter is not implemented. The upstream Tycho reads it depends on have a candidate implementation that is unreviewed and unmerged — see [Upstream Tycho reads](#upstream-tycho-reads).
 
-This contract was derived from Cukup `545aa68cb1079d27d07a674db30a6717b9f65ed5` and Tycho `f6031d83038e83e87da95a3e96746a9f0c7cdd0e`, and reverified on 2026-09-07 against Cukup `65f9c50b991886efb3dfdc5f9027b51ab26201dc` and Tycho `cd4684e87ae2493379a116a10a54fb4dd1df464d`. No assumption in this contract changed. Later implementation must reverify both current revisions again and record any changed assumptions.
+This contract was derived from Cukup `545aa68cb1079d27d07a674db30a6717b9f65ed5` and Tycho `f6031d83038e83e87da95a3e96746a9f0c7cdd0e`, and reverified on 2026-09-12 against Cukup `6e61228b024040c2ad351d7143b2c504cc5c29ed` and Tycho `ec3100c4710751d85f1927c6bf43cda800b8bc7e`. No assumption in this contract changed. Later implementation must reverify both current revisions again and record any changed assumptions.
 
 ## Supported integration boundary
 
@@ -58,7 +58,9 @@ The open-run read applies that rule at its source: `started_at` has a durable pr
 
 ## Upstream Tycho reads
 
-Two reads are required before shipped implementation. Both now have a candidate implementation in Tycho, and **neither is reviewed or merged**. The work sits on branch `feat/open-run-read-contract` in `firewalker06/tycho` as commits `e02a64b`, `6190ac5`, and `25da3dd` on top of `cd4684e`. Tycho's creator reviews Tycho-owned contract changes, so the contract is proposed, not agreed.
+Two reads are required before shipped implementation. Both now have a candidate implementation, and **neither is reviewed or merged**.
+
+The work sits on branch `feat/open-run-read-contract` in the fork `zainfathoni/tycho` — commits `7c7dea6`, `7ff601e`, and `35183e2` on top of upstream `ec3100c`. It is a fork because this maintainer has read-only access to `firewalker06/tycho`, whose creator reviews Tycho-owned contract changes. The contract is therefore proposed, not agreed.
 
 **1. Run-scoped open-run read** — required, proposed:
 
@@ -94,6 +96,8 @@ Facts confirmed in source that an implementation depends on. Each is a precondit
 **A run lost before Tycho persists it is unrecoverable.** If Tycho dies between spawning a run and saving its agent state, that run appears in neither the manifest nor the usage-metrics surface and is invisible to Cukup permanently. This is a bounded gap in the source of truth, not an adapter defect; do not add recovery machinery hunting for it.
 
 **A `project_key` outside the supported character set becomes Unassigned.** Slug normalization accepts letters, digits, spaces, underscores, and hyphens; a key containing anything else — a dot or a slash, both legal in Tycho configuration — yields no valid slug. That evidence is visibly Unassigned and the reconciler surfaces a warning, rather than guessing from any other identity.
+
+**Tycho's own prompt-queue design carries the human/automatic distinction.** Upstream separates `enqueue_prompt!` from `enqueue_prompt_from!`, and the latter requires an actor and stamps each queued entry `source: "user"` or `"parent"`. The interaction observation attaches to that actor-aware entry point rather than to the lower-level queue write, so a delegated parent enqueueing work for its child is structurally incapable of producing an Engagement Observation.
 
 **`memory.jsonl` is excluded on correctness grounds, not only privacy.** A user-triggered rebuild overwrites it with synthetic run summaries and does not restore inquiry events, so any checkpoint keyed on its sequence could replay or skip. Reconciliation checkpoints key on `run_id` instead.
 

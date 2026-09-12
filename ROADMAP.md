@@ -12,7 +12,7 @@ This roadmap records outcomes, not an implementation backlog. GitHub issues own 
 - Make deployment failures externally visible and rehearse backup restoration and rollback on a routine schedule.
 - Keep path-aware release automation and its deployment-operator selection contract covered by regression checks: documentation-only, plugin-only, and other non-image changes must not publish an image, create a service release version, or trigger production deployment.
 - Complete external-implementation-contributor readiness: pull-request CI and credential-free integration fixtures are in place; the scoped Tycho issue is drafted and not yet filed.
-- Agree and land Tycho's supported privacy-clean open-run read and human-interaction read. Both have a candidate implementation on branch `feat/open-run-read-contract` in `firewalker06/tycho` (`e02a64b`, `6190ac5`, `25da3dd` on `cd4684e`), pending upstream review and merge.
+- Agree and land Tycho's supported privacy-clean open-run read and human-interaction read. Both have a candidate implementation on branch `feat/open-run-read-contract` in the fork `zainfathoni/tycho` (`7c7dea6`, `7ff601e`, `35183e2` on upstream `ec3100c`), pending upstream review and merge.
 - Add privacy-safe prompt-composition observations independently to Harnesses that can support them. Until then, disclose submission-only Working Time as a lower bound.
 
 ## Next — support Tycho and broaden personal use
