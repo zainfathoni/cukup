@@ -148,6 +148,102 @@ describe('work-hours plugin', () => {
 		}
 	})
 
+	test('keeps completed and unmatched turns stable across duplicate hooks and plugin restart', async () => {
+		const stateHome = mkdtempSync(join(tmpdir(), 'amp-work-hours-plugin-test-'))
+		temporaryDirectories.push(stateHome)
+		const previousStateHome = process.env.XDG_STATE_HOME
+		process.env.XDG_STATE_HOME = stateHome
+		const context = { ui: { notify: async () => {} } }
+
+		const startPlugin = () => {
+			const handlers = new Map<string, (event: any, context?: any) => unknown>()
+			let dispose = async () => {}
+			const amp = {
+				on(name: string, handler: (event: any, context?: any) => unknown) {
+					handlers.set(name, handler)
+					return { unsubscribe() {} }
+				},
+				registerCommand() {
+					return { unsubscribe() {}, setAvailability() {} }
+				},
+				onDispose(callback: () => unknown) {
+					dispose = async () => { await callback() }
+					return { unsubscribe() {} }
+				},
+				threads: { get: () => idleThread() },
+				configuration: {
+					get: async () => ({}),
+					update: async () => {},
+					delete: async () => {},
+				},
+				system: { executor: { kind: 'local' }, user: { workspace: null } },
+				$: async () => ({
+					exitCode: 0,
+					stdout: JSON.stringify({ id: 'project-test', name: 'Cukup Plugin' }),
+					stderr: '',
+				}),
+			}
+			workHoursPlugin(amp as never)
+			return { handlers, dispose }
+		}
+
+		const completed = { thread: { id: 'T-duplicates' }, id: 'completed-turn' }
+		const unmatchedEnd = { thread: { id: 'T-duplicates' }, id: 'end-without-start' }
+		const unmatchedStart = { thread: { id: 'T-duplicates' }, id: 'start-without-end' }
+
+		try {
+			const first = startPlugin()
+			await first.handlers.get('agent.start')?.(completed, context)
+			await first.handlers.get('agent.start')?.(completed, context)
+			await first.handlers.get('agent.end')?.({ ...completed, status: 'done' }, context)
+			await first.handlers.get('agent.end')?.({ ...completed, status: 'done' }, context)
+			await first.handlers.get('agent.end')?.({ ...unmatchedEnd, status: 'error' }, context)
+			await first.handlers.get('agent.start')?.(unmatchedStart, context)
+			await first.handlers.get('agent.start')?.(unmatchedStart, context)
+			await first.dispose()
+
+			const restarted = startPlugin()
+			await restarted.handlers.get('agent.start')?.(completed, context)
+			await restarted.handlers.get('agent.end')?.({ ...completed, status: 'done' }, context)
+			await restarted.handlers.get('agent.end')?.({ ...unmatchedEnd, status: 'cancelled' }, context)
+			await restarted.dispose()
+
+			const database = new Database(join(stateHome, 'amp-work-hours', 'state.sqlite'))
+			const events = database
+				.query<
+					{ messageId: string; kind: string; status: string | null },
+					[]
+				>(
+					`SELECT message_id AS messageId, kind, status FROM events
+					 WHERE thread_id = 'T-duplicates' ORDER BY rowid`,
+				)
+				.all()
+			const outbox = database
+				.query<{ sequence: number; sessionId: string; kind: string }, []>(
+					`SELECT source_sequence AS sequence, session_id AS sessionId, kind
+					 FROM outbox ORDER BY source_sequence`,
+				)
+				.all()
+			database.close()
+
+			expect(events).toEqual([
+				{ messageId: 'completed-turn', kind: 'start', status: null },
+				{ messageId: 'completed-turn', kind: 'end', status: 'done' },
+				{ messageId: 'start-without-end', kind: 'start', status: null },
+			])
+			expect(outbox.map(({ sequence, kind }) => ({ sequence, kind }))).toEqual([
+				{ sequence: 1, kind: 'agent.start' },
+				{ sequence: 2, kind: 'agent.end' },
+				{ sequence: 3, kind: 'agent.start' },
+			])
+			expect(outbox[1]?.sessionId).toBe(outbox[0]?.sessionId)
+			expect(outbox[2]?.sessionId).not.toBe(outbox[0]?.sessionId)
+		} finally {
+			if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME
+			else process.env.XDG_STATE_HOME = previousStateHome
+		}
+	})
+
 	test('recovers running work at startup and after a retry without agent.start', async () => {
 		const stateHome = mkdtempSync(join(tmpdir(), 'amp-work-hours-plugin-test-'))
 		temporaryDirectories.push(stateHome)
