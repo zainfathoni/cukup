@@ -2,7 +2,7 @@
 
 **Cukup is a privacy-first WakaTime for AI-assisted work.** It automatically measures work with AI agents across projects, machines, and cloud sessions without collecting prompts or source code.
 
-Today Cukup reports whether Amp-backed Working Time is under, complete, or over the hours due. Its accepted product direction separates evidenced human Working Time from full Agent Runtime and adds Harness Adapters, with Amp first and Tycho second. That future metric model and Tycho adapter are designed but not implemented.
+Today Cukup reports whether Amp-backed Working Time is under, complete, or over the hours due. Its accepted product direction separates interaction-based estimated Working Time from evidenced Agent Runtime through a generic boundary and independently maintained Harness Adapters. Those metrics and the experimental adapter protocol are not implemented; the first code slice will preserve Amp's existing behavior.
 
 ## Current status
 
@@ -31,7 +31,7 @@ See [ADR 0001](docs/adr/0001-repository-ownership.md) for the ownership boundari
 
 ## Product direction
 
-Start with the [product vision](docs/product/vision.md), [domain language](CONTEXT.md), and [roadmap](ROADMAP.md). [ADR 0006](docs/adr/0006-harness-adapter-ports.md) records the accepted ports-and-adapters decision, and the [Tycho contract](docs/tycho-adapter.md) distinguishes settled design from missing implementation. GitHub issues own executable work; Fleet remains limited to cross-machine rollout and operations.
+Start with the [product vision](docs/product/vision.md), [domain language](CONTEXT.md), and [roadmap](ROADMAP.md). [ADR 0007](docs/adr/0007-generic-harness-evidence-boundary.md) records the accepted generic evidence boundary and supersedes ADR 0006. [Tycho collector guidance](docs/tycho-adapter.md) records candidate integration constraints, not an accepted upstream contract. GitHub issues own executable work; Fleet remains limited to cross-machine rollout and operations.
 
 ## Development
 

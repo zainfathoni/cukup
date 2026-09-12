@@ -1,64 +1,71 @@
 # Cukup roadmap
 
-> **Status: accepted product direction as of 2026-09-06.** Outcomes below are commitments of direction, not claims that their implementations exist. The deployed product remains Amp-only with event schemas v1/v2 until each prospective outcome passes its own review and rollout.
+> **Status: accepted product direction.** Outcomes are commitments of direction, not claims that their implementations exist. The deployed product remains Amp-only with event schemas v1/v2 until prospective outcomes pass their own review and rollout. [ADR 0007](docs/adr/0007-generic-harness-evidence-boundary.md) is the current Harness Adapter authority.
 
-Cukup is a privacy-first WakaTime for AI-assisted work. Its primary metric is Working Time: evidenced human collaboration with AI. Agent Runtime measures full scheduled and unattended execution separately. Token usage, model cost, prompt count, and output volume are distinct optional dimensions, not substitutes for either time metric.
+Cukup is a privacy-first WakaTime for AI-assisted work. Future Working Time is an interaction-based estimate from explicit human observations; Agent Runtime measures evidenced execution separately, excluding explicit waiting for human input. Tokens, cost, prompts, and output volume are not substitutes for either metric.
 
-This roadmap records outcomes, not an implementation backlog. GitHub issues own scoped work and acceptance criteria; ADRs record durable decisions. Review the roadmap monthly and move outcomes only when evidence changes.
+GitHub issues own scoped work and acceptance criteria; ADRs record durable decisions. Review this roadmap monthly and change outcomes when evidence changes.
 
 ## Now — establish the product foundation
 
 - Reconcile and close or rescope completed Fleet rollout issues #30–#33.
 - Make deployment failures externally visible and rehearse backup restoration and rollback on a routine schedule.
 - Keep path-aware release automation and its deployment-operator selection contract covered by regression checks: documentation-only, plugin-only, and other non-image changes must not publish an image, create a service release version, or trigger production deployment.
-- Complete external-implementation-contributor readiness: safe pull-request CI, credential-free integration fixtures, and a scoped Tycho issue.
-- Agree and land Tycho's supported privacy-clean open-run read contract.
-- Add privacy-safe prompt-composition observations independently to Harnesses that can support them. Until then, disclose submission-only Working Time as a lower bound.
+- Complete external-implementation-contributor readiness: safe pull-request CI, credential-free integration fixtures, and scoped work with executable acceptance criteria.
+- Establish the generic Harness Adapter foundation below. GitHub issue **#3 (production deploy speed/self-healing)** has a separate owner and is outside this initiative; operations bullets above are not adapter deliverables.
 
-## Next — support Tycho and broaden personal use
+## Generic Harness Adapter initiative
 
-- Move the existing Amp lifecycle integration behind the harness port without changing its behavior, making Amp the first adapter rather than the core domain model.
-- Design and roll out prospective protocol semantics that preserve historical v1/v2 Working Time while separately representing Engagement Window-based Working Time and Agent Runtime from an explicit transition.
-- Ship Tycho as the second adapter: a per-machine 60-second reconciler over supported durable Tycho state, with hooks only as optional wake-ups.
-- Prove that concurrent Amp and Tycho Working Time and Agent Runtime are globally unioned rather than double-counted and remain attributable to the correct project and Executor.
-- Make installation and onboarding repeatable for a user who does not have access to the creator's Fleet repository or production environment.
-- Add useful personal exports, goals, and project/agent activity views while keeping working time distinct from tokens, cost, and outcomes.
+Each stage is independently reviewable. Routine engineering decisions belong within its scope; return to the owner for changes to metric semantics, privacy, compatibility, or first-party support scope. These stages are a plan, not blanket implementation or deployment authorization.
 
-## Later — expand the product surface
+| Stage | Deliverable | Gate before proceeding |
+| --- | --- | --- |
+| 1. Documentation foundation | Supersede ADR 0006; reconcile product language, contribution boundaries, and candidate Tycho guidance with ADR 0007. | No active-doc claim that the new metrics/protocol are deployed or that an unmerged Tycho contract is accepted. |
+| 2. Preserve Amp behavior | Isolate native Amp observation behind an internal legacy boundary. | Existing and focused characterization tests preserve v1/v2 records, recovery, ordering, attribution, synchronization, and totals. No new metric semantics. |
+| 3. Experimental protocol | Review version negotiation, explicit capabilities, closed evidence families, identity, timing, and conformance fixtures. | Rich, partial, and process-lifecycle-only sources map without invented human origin or execution time. Specify conflicts, unsupported versions, clocks, duplicates, and recovery. No stable SDK promise. |
+| 4. Durable receiver | Implement bounded delivery, persist-before-acknowledgement, safe retries, and execution-site binding; allow separate collectors and approved embedded packaging. | Restart, offline delivery, storage failure, replay, conflicting IDs, and prohibited-field tests; measurement failure cannot indefinitely block AI work. Verify initial macOS/Linux and Amp-orb support before claiming it. |
+| 5. New measurements in shadow | Separately review cloud protocol/persistence, aggregation, migration, and dashboard slices. | v1/v2 and queued data remain unchanged; union, late evidence, cutover clipping, and unresolved runtime are tested. Dashboard distinguishes estimated, runtime, and legacy metrics, coverage gaps, and unavailable data. |
+| 6. Real collectors and opt-in cutover | Validate supported Amp, Tycho, Claude Code, or other surfaces without fixing their order in advance. | Stable compatibility requires three real harness integrations plus weak-capability/recovery tests. Authoritative cutover separately requires shadow validation, dashboard readiness, and explicit owner acceptance of coverage and one Monday 00:00 Asia/Jakarta account-wide transition. |
 
-- Validate the internal adapter port with a third Harness before publishing an adapter SDK or compatibility promise.
-- Evaluate further Harnesses based on user demand, lifecycle fidelity, and privacy-safe evidence coverage.
-- Offer token and cost telemetry as optional, separately named dimensions if it can preserve the privacy contract.
-- Explore multi-user tenancy, team privacy controls, aggregate reporting, and organization-level workflow trends.
-- Decide whether the long-term distribution model is hosted, self-hosted, or both.
+Stable SDK publication and accounting cutover are distinct gates; neither implies the other. Collectors may be first-party, harness-owned, or third-party, embedded or separate. Protocol compatibility is not official support. An unmerged Tycho fork cannot satisfy a supported integration gate.
+
+### First independently reviewable code slice
+
+After documentation review, extract only the native Amp observation responsibility from the existing plugin into an internal legacy adapter boundary. Preserve the existing persistence transaction, local native-key recovery, random wire identities, sequence/outbox behavior, project resolution, v1/v2 payloads, and historical grace/crash-cap aggregation. Keep the legacy boundary explicitly separate from future Engagement Observations and execution intervals.
+
+Use existing tests plus focused characterization cases for callback/state recovery, duplicates and restart, completed versus unmatched turns, and attribution. Run `bun run check`. This slice must not introduce a daemon, new protocol, new metric, Tycho collector, project-rename fix, dashboard change, or historical migration. Review its diff as a behavior-preserving refactor before starting protocol behavior changes.
+
+### Rollout invariants
+
+- Explicit human interactions alone open or renew 15-minute estimated Working Time windows; execution does not extend them. Missing observations bound a richer-observation window metric, not actual human attention.
+- Agent Runtime initially includes only defensible closed execution intervals, excluding explicit human-input waits. Pending work contributes no provisional duration; missing endpoints remain unresolved.
+- The dashboard keeps target-bearing **Working Time · estimated**, targetless **Agent Runtime**, and historical **Legacy Working Time · turn-based** distinct across charts, filters, and summaries. Never add these overlapping metrics together or fill missing evidence with zero.
+- Account-wide cutover preserves complete legacy records separately; only independently collected new evidence contributes to new metrics after the boundary. Late evidence belongs to occurrence time and may increase past totals.
+- Rollback may pause collection and disclose gaps, but retains accepted records, queues, and compatible ingestion. Returning to legacy target accounting requires a separate owner decision.
+- Attribution uses approved project mappings or explicit bindings, never paths or repository guesses. Native renames refresh future activity automatically; no rename approval workflow or historical relabeling is required.
 
 ## External-contributor readiness checkpoint
 
-Cukup is ready for design contribution now. It is ready for external implementation contribution only when every unchecked gate is complete:
+Cukup is ready for design contribution now. External implementation needs the relevant gates below, not production access:
 
 - [x] MIT contribution terms are explicit.
 - [x] `CONTRIBUTING.md` documents setup, boundaries, review expectations, and `bun run check`.
-- [x] Product language, Harness ports, and the Tycho contract are independent of the Amp implementation.
-- [x] Zain Fathoni is the initial Cukup maintainer; Tycho's creator reviews Tycho-owned contract changes.
+- [x] Accepted generic ownership and metric decisions are independent of native Amp/Tycho APIs.
+- [x] Zain Fathoni is the initial Cukup maintainer; upstream maintainers own acceptance of their native API changes.
 - [ ] Contributor-branch CI runs all non-secret checks and cannot publish or deploy.
 - [ ] Credential-free fixtures exercise the relevant local service and adapter path without Fleet or production access.
-- [ ] A scoped Tycho issue records lifecycle mapping, non-goals, privacy constraints, and executable acceptance criteria.
-- [ ] Tycho's supported open-run read contract is agreed for implementation.
+- [ ] Each implementation slice has scoped work recording non-goals, privacy constraints, and executable acceptance criteria.
+- [ ] Each collector proposal verifies its actual supported surfaces and capability limits; no assumed Tycho open-run contract.
 
-Implementation readiness never requires exposing production operations or granting deployment authority.
+## Next — broaden personal use
 
-## Tycho adapter acceptance outcomes
+- Make installation and onboarding repeatable without access to the creator's Fleet repository or production environment.
+- Add privacy-safe composition observations where supported, independently of other harness capabilities.
+- Add useful personal exports, goals, and project/agent activity views while keeping time distinct from tokens, cost, and outcomes.
 
-The Tycho adapter is complete when:
+## Later — expand the product surface
 
-- one Tycho managed run produces one Agent Runtime interval, while only explicit human interactions open or renew 15-minute Working Time windows;
-- scheduled starts, automatic orchestration, liveness, generated output, finalization, and waiting do not independently create Working Time;
-- interrupted, offline, duplicate, and delayed delivery converge through the same append-only semantics as other Cukup sources;
-- reconciliation remains correct without hooks, runs every 60 seconds per machine, and reads only supported privacy-clean Tycho state;
-- terminal runtime ends require durable terminal timestamps; crashes without one remain unmatched and crash-capped;
-- project and Executor attribution use canonical non-sensitive identifiers, require explicit aliases when identities differ, and fail closed when ambiguous;
-- transmitted and logged data stay within Cukup's documented privacy boundary;
-- overlapping Amp and Tycho intervals do not inflate either metric;
-- missing composition capability is visibly disclosed as lower-bound Working Time;
-- local end-to-end tests cover lifecycle mapping, retries, replay, attribution, aggregation, and prohibited fields;
-- installation, authentication, troubleshooting, and removal are documented without relying on the creator's machine configuration.
+- Evaluate further Harnesses based on demand, evidence fidelity, and privacy-safe coverage.
+- Offer token and cost telemetry as optional, separately named dimensions if it preserves the privacy contract.
+- Explore multi-user tenancy, team privacy controls, aggregate reporting, and organization-level workflow trends.
+- Decide whether long-term distribution is hosted, self-hosted, or both.

@@ -11,9 +11,9 @@ Read these before proposing a behavior change:
 - [Product vision](docs/product/vision.md)
 - [Domain language](CONTEXT.md)
 - [Roadmap](ROADMAP.md)
-- [Harness-adapter ADR](docs/adr/0006-harness-adapter-ports.md)
+- [Generic evidence boundary ADR](docs/adr/0007-generic-harness-evidence-boundary.md)
 - [Service API](docs/service-api.md)
-- [Tycho adapter contract](docs/tycho-adapter.md) for Tycho work
+- [Candidate Tycho collector guidance](docs/tycho-adapter.md) for Tycho work
 
 The deployed v1/v2 protocol still measures Amp turn intervals under its historical semantics. The accepted Working Time/Agent Runtime split is prospective and must not be described as already implemented.
 
@@ -31,10 +31,13 @@ bun run check
 ## Architecture boundaries
 
 - Harness Adapters observe native systems and emit harness-neutral evidence.
-- The Cukup core owns durable local evidence, privacy normalization, identity generation, schema negotiation, outbox ordering, retry, and synchronization.
-- Adapters never construct wire events, write the outbox, infer from workspace paths or Git metadata, or transmit native conversation identifiers.
+- Collectors may be first-party, harness-owned, or third-party, embedded or separate. Experimental protocol compatibility is not official support.
+- The Cukup core owns durable local evidence, closed-schema validation, privacy identities, schema negotiation, outbox ordering, retry, and cloud synchronization. Separate collectors may submit local protocol messages; they do not construct cloud events or write the core's outbox.
+- Native identities and API details remain collector-local. Attribution uses approved project mappings or explicit bindings, never workspace paths or Git metadata. Native conversation identifiers never cross the generic evidence boundary.
 - The service owns immutable ingestion, global interval union, authoritative targets, and summaries.
 - Preserve existing behavior before changing metric semantics. Refactor Amp behind the adapter ports separately from introducing new event schemas or aggregation behavior.
+
+Installing a collector is a trust decision. Closed-schema validation rejects prohibited fields but does not contain a malicious collector or prevent covert leakage through allowed values. Review minimized collection separately from protocol conformance. First-party deployment scope is initially macOS/Linux physical machines and Amp orbs, with execution-site authentication and attribution.
 
 ## Privacy and repository hygiene
 

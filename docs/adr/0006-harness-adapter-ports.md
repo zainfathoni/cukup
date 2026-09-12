@@ -1,9 +1,11 @@
 ---
-status: accepted
+status: superseded
 date: 2026-09-06
 ---
 
 # Separate Harness Adapters from Cukup's measurement core
+
+> **Historical record — superseded by [ADR 0007](0007-generic-harness-evidence-boundary.md).** The original rationale below is retained unchanged. Its Tycho ownership, runtime mapping, crash-cap, provisional-duration, and attribution rules are not current implementation requirements.
 
 ## Context
 
