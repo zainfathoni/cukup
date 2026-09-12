@@ -12,6 +12,7 @@ Read these before proposing a behavior change:
 - [Domain language](CONTEXT.md)
 - [Roadmap](ROADMAP.md)
 - [Generic evidence boundary ADR](docs/adr/0007-generic-harness-evidence-boundary.md)
+- [Experimental local Harness evidence protocol](docs/experimental-local-harness-evidence-protocol.md) for Stage 3 contract work
 - [Service API](docs/service-api.md)
 - [Candidate Tycho collector guidance](docs/tycho-adapter.md) for Tycho work
 

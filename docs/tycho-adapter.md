@@ -22,7 +22,7 @@ Before relying on a surface, establish stable local deduplication identity, time
 
 Hooks may serve as low-latency notifications. Do not forward raw payloads; they may contain paths, session identifiers, summaries, or output. A live-only collector is allowed with honest loss/recovery disclosure. Claim replay only when a supported durable surface actually supplies it. Raw private files are not a default production integration contract; a proposed reliance on them requires a separate compatibility and privacy review.
 
-Wall-clock and monotonic measurements are distinct. Preserve supported occurrence times and their precision; do not populate a monotonic-duration field with wall-clock subtraction or use polling/finalization time as execution completion. Exact protocol timestamp encoding belongs to the experimental protocol review, not this candidate guide.
+Wall-clock and monotonic measurements are distinct. Preserve supported occurrence times and their precision; do not derive execution duration from unsupported wall-clock boundaries or use polling/finalization time as execution completion. The generic timestamp encoding is defined by the [experimental local protocol](experimental-local-harness-evidence-protocol.md); whether any Tycho surface can defensibly populate it still requires separate verification.
 
 ## Attribution and privacy
 

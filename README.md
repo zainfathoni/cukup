@@ -2,7 +2,7 @@
 
 **Cukup is a privacy-first WakaTime for AI-assisted work.** It automatically measures work with AI agents across projects, machines, and cloud sessions without collecting prompts or source code.
 
-Today Cukup reports whether Amp-backed Working Time is under, complete, or over the hours due. Its accepted product direction separates interaction-based estimated Working Time from evidenced Agent Runtime through a generic boundary and independently maintained Harness Adapters. Those metrics and the experimental adapter protocol are not implemented; the first code slice will preserve Amp's existing behavior.
+Today Cukup reports whether Amp-backed Working Time is under, complete, or over the hours due. Its accepted product direction separates interaction-based estimated Working Time from evidenced Agent Runtime through a generic boundary and independently maintained Harness Adapters. The [experimental local evidence message contract](docs/experimental-local-harness-evidence-protocol.md) has conformance fixtures, but no receiver or new metric is deployed; current production remains Amp-only v1/v2.
 
 ## Current status
 

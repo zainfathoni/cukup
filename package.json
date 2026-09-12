@@ -4,7 +4,7 @@
   "type": "module",
   "packageManager": "bun@1.3.10",
   "scripts": {
-    "test": "bun test plugin service",
+    "test": "bun test plugin service experimental",
     "typecheck": "tsc --noEmit",
     "build:plugin": "bun build plugin/index.ts --target=bun --external @ampcode/plugin --outfile dist/plugin.js",
     "build:service": "bun build service/index.ts service/database-ops.ts service/token-admin.ts --target=bun --outdir dist/service && bun build service/dashboard/client.ts --target=browser --minify --outfile dist/service/dashboard.js && cp service/dashboard/dashboard.css dist/service/dashboard.css",
