@@ -1,70 +1,39 @@
-# Tycho Harness Adapter contract
+# Candidate Tycho collector guidance
 
-**Status:** accepted design; implementation has not started.
+**Status:** prospective integration guidance under [ADR 0007](adr/0007-generic-harness-evidence-boundary.md), not an accepted upstream API contract or an implemented adapter. ADR 0006's Tycho-specific design is superseded. Unmerged fork work is evidence for investigation, not a dependency or guarantee.
 
-This contract was derived from Cukup `545aa68cb1079d27d07a674db30a6717b9f65ed5` and Tycho `f6031d83038e83e87da95a3e96746a9f0c7cdd0e`. Later implementation must reverify both current revisions and record any changed assumptions.
+## Boundary and ownership
 
-## Supported integration boundary
+A Tycho collector may be maintained by Cukup, Tycho, or a third party, and may be embedded or separate. It translates supported native facts into the experimental generic local evidence protocol. Cukup owns validation, durable acknowledgement, accounting, privacy identities, and cloud delivery; Tycho need not implement a Cukup outbox in Ruby.
 
-The Tycho adapter lives in Cukup. Tycho supplies supported privacy-clean native facts; it does not implement Cukup's outbox or wire protocol.
+Native run IDs, project keys, API calls, pagination, reconciliation checkpoints, and timestamp interpretation remain collector-local. The generic core must not require Tycho's run model or assume a particular polling cadence. Each proposed integration must reverify current supported upstream surfaces and their timing, privacy, and recovery guarantees before claiming support.
 
-Tycho shell hooks are optional wake-ups. Their current lifecycle payloads omit `run_id` and timestamps, have no acknowledgement or replay, and may contain absolute workspace paths, native session IDs, summaries, or structured model output. They are never forwarded and are not authoritative evidence.
+## Evidence must justify the metric
 
-Correctness comes from a 60-second periodic reconciliation of supported durable Tycho state:
+- **Working Time:** only supported evidence of explicit human composition, submission, follow-up, approval, or takeover opens or renews a 15-minute Engagement Window. Submission/enqueue alone does not establish human origin. Scheduled starts, automatic orchestration/resume, liveness, output, finalization, and waiting do not create Working Time. Unavailable composition or human-origin evidence is disclosed, not inferred.
+- **Agent Runtime:** only defensible closed execution intervals count, excluding explicit waiting for human input. A managed run's start and finalization do not automatically establish continuous execution. Finalization time is not necessarily process exit time. Observable unfinished execution may be pending but contributes no provisional duration; missing endpoints remain unresolved without crash caps or synthetic ends.
+- **Coverage:** declare each supported observation, endpoint, replay, and liveness capability separately. Missing observations bound the richer-observation window metric, not actual attention. Weak runtime evidence does not invalidate independently supported human observations.
 
-- **Open runs:** a required upstream read exposing only `run_id`, `project_key`, `started_at`, terminal/running status, and liveness.
-- **Finalized runs:** Tycho's supported run-scoped usage-metrics surface, including durable run identity and start/finish timestamps.
+## Candidate reads and recovery
 
-Reading `managed_agents.json`, `memory.jsonl`, raw logs, or other private files is not permitted in the shipped adapter. A local prototype may investigate them but cannot satisfy acceptance.
+Open runs naturally form a current snapshot; historical interactions and finalized records may support windowed or cursor-based reads. Do not require all native reads to be windowed. These are collector choices, not generic protocol concepts.
 
-## Metric mapping
+Before relying on a surface, establish stable local deduplication identity, timestamp meaning and precision, retention, pagination, and how late changes are discovered. A query filtered only by start time can miss a much older run finalized today. A disappeared snapshot entry is not a terminal timestamp, and receipt time cannot replace a missing native endpoint.
 
-One Tycho managed run maps to one Agent Runtime interval. Resuming a native session creates another managed run and therefore another runtime interval. Prompt count and native session identity do not define intervals.
+Hooks may serve as low-latency notifications. Do not forward raw payloads; they may contain paths, session identifiers, summaries, or output. A live-only collector is allowed with honest loss/recovery disclosure. Claim replay only when a supported durable surface actually supplies it. Raw private files are not a default production integration contract; a proposed reliance on them requires a separate compatibility and privacy review.
 
-A Tycho interaction creates or renews Working Time only when the adapter observes an explicit human action:
+Wall-clock and monotonic measurements are distinct. Preserve supported occurrence times and their precision; do not populate a monotonic-duration field with wall-clock subtraction or use polling/finalization time as execution completion. Exact protocol timestamp encoding belongs to the experimental protocol review, not this candidate guide.
 
-- composing or submitting a prompt;
-- sending a follow-up;
-- approving an action;
-- explicitly taking over an automatically owned run.
+## Attribution and privacy
 
-Scheduled starts, automatic orchestration/resume, process liveness, generated output, finalization, and waiting for input do not create Working Time. Tycho currently exposes submission/enqueue but no supported privacy-safe composition observation, so initial coverage begins no earlier than submission. A future Tycho TUI/Remote UI capability may emit debounced timestamp-only composition observations; it must never expose drafts, keys, or content.
+Native identities remain local and map to stable Cukup Projects through approved mappings. Matching normalized names alone never merges Tycho and another harness's projects. An explicit non-path launch/session binding is allowed; absent or ambiguous binding remains Unassigned. Native renames refresh future activity automatically, without rename approvals or historical backfilling. Occasional stale labels are acceptable.
 
-Agent Runtime is finalized-first initially. An open run may remain provisional and correct when a durable terminal timestamp appears. No synthetic heartbeat sessions are created. A run that crashes without a durable terminal fact remains unmatched and crash-capped.
+Deploy at the execution site with its authenticated executor binding. Querying another machine must never attribute its work to the collector's machine; cross-host collection needs a separate design. Initial first-party scope is macOS/Linux physical machines and Amp orbs, not every environment where Tycho can run.
 
-## Identity and attribution
+Prompts, output, drafts, commands, paths, repository metadata, credentials, native run/session/project IDs, model/provider details, and arbitrary metadata do not enter generic evidence messages or cloud events. Use sanitized local mappings and diagnostics only. Closed-schema validation does not sandbox a malicious collector; installing one remains a trust decision.
 
-- `run_id` is native reconciliation identity and remains local. The Cukup core creates wire identities.
-- `agent_key`, native session ID, PID, workspace, command, prompt, summary, structured result, model, and provider never cross Cukup's event boundary.
-- Tycho `project_key` is normalized locally. An exact canonical match may map automatically; a differing Amp/Tycho identity requires an explicit local alias.
-- Missing, invalid, or ambiguous mappings are visibly Unassigned. The adapter never falls back to workspace paths, Git remotes, or directory names.
-- Each physical machine runs its own reconciler. It reuses that machine's protected bearer lineage but has a distinct local SQLite database and source instance.
-- Future Agent Runtime may carry closed Harness Type `tycho`. Working Time remains globally unioned with Amp and other Harnesses.
+## Implementation gate
 
-Tycho timestamps are parsed to epoch milliseconds, truncated rather than rounded forward, and serialized as UTC RFC 3339 with exactly three fractional digits. Tycho's wall-clock duration must not populate Cukup's monotonic-duration field.
+A scoped collector proposal must identify the supported upstream revision and surfaces, ownership/package, capability matrix, and credential-free fixtures. Tests must exercise duplicate/conflicting evidence, restart, offline delivery, late finalization, missing endpoints, waiting, human versus automatic origin, attribution, and prohibited fields. Loss limitations must be visible rather than papered over by invented evidence.
 
-## Upstream Tycho requirement
-
-Before shipped implementation, Tycho must expose a supported run-scoped open-run read with:
-
-- stable random `run_id`;
-- stable `project_key`;
-- durable `started_at` with documented precision;
-- running/terminal status;
-- a supported liveness signal.
-
-It must exclude workspace, command, prompt, summary, structured result, native session ID, model output, and credentials. Adding `run_id` and `occurred_at` to hook wake-ups is useful but not required for correctness.
-
-## Acceptance
-
-- Repeated reconciliation is idempotent and emits starts before ends.
-- Missing hooks, restart, delayed finalization, duplicate observations, archive, and more than ten historical runs converge from supported state.
-- A terminal event is emitted only from a durable terminal timestamp.
-- Concurrent Tycho runs and overlapping Amp/Tycho intervals union without inflating either metric.
-- Scheduled and unattended runtime never counts toward the Working Time target without an Engagement Observation.
-- Capability coverage is visible; missing composition support is described as a lower bound.
-- Project mismatches require aliases and invalid identities become Unassigned.
-- Tests reject every prohibited field and require no Fleet access, production credential, DNS, or deployment.
-- Installation, authentication, mapping, status, troubleshooting, and removal are documented.
-
-Design review may begin now. Implementation contribution is not ready until the repository also has safe pull-request CI, credential-free integration fixtures, a scoped Tycho issue, and the agreed upstream open-run contract.
+Follow the [generic initiative stages](../ROADMAP.md#generic-harness-adapter-initiative). A Tycho collector is not a prerequisite for the behavior-preserving Amp extraction, and this guide does not authorize resuming the prior Tycho-specific implementation.

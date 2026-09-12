@@ -12,7 +12,7 @@ The deployed service at `api.cukup.dev` is the cross-source authority for curren
 
 Summary amounts are whole minutes. All timestamps are UTC RFC 3339 strings with exactly three fractional digits, such as `2026-08-31T05:00:00.000Z`. Responses use `application/json` and `Cache-Control: no-store`.
 
-This document specifies the currently implemented v1/v2 API. Under these historical semantics, Amp turn intervals plus grace are called Working Time. The accepted future direction in [ADR 0006](adr/0006-harness-adapter-ports.md) separates Engagement Window-based Working Time from Agent Runtime prospectively. No future metric field, event kind, or schema described by that decision exists in this API yet, and existing v1/v2 evidence will never be reinterpreted.
+This document specifies the currently implemented v1/v2 API. Under these historical semantics, Amp turn intervals plus grace are called Working Time. The accepted future direction in [ADR 0007](adr/0007-generic-harness-evidence-boundary.md) separates Engagement Window-based Working Time from Agent Runtime prospectively. No future metric field, event kind, or schema described by that decision exists in this API yet, and existing v1/v2 evidence will never be reinterpreted.
 
 ## Transport and authentication
 

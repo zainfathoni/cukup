@@ -7,23 +7,23 @@ Cukup measures AI-assisted Working Time and Agent Runtime across supported Harne
 ## Language
 
 **Working Time**:
-The union of Engagement Windows after Cukup's timezone and clipping rules. Working Time measures evidenced human collaboration with AI and is the only time metric compared with a work target.
-_Avoid_: Agent Runtime, editor time, screen time, online time
+An interaction-based estimate of human collaboration with AI, calculated as the union of Engagement Windows after Cukup's timezone and clipping rules. Working Time is not measured attention and is the only time metric compared with a work target.
+_Avoid_: Agent Runtime, measured attention, editor time, screen time, online time
 
 **Agent Runtime**:
-The union of observed intervals in which supported Harnesses execute work, including scheduled and unattended execution. Agent Runtime is reported separately and is never compared with a human work target.
-_Avoid_: Working Time, human attention, productivity
+The union of evidenced agent execution intervals, including inference, tool execution, and scheduled or unattended execution, but excluding explicit waiting for human input. Agent Runtime is reported separately and is never compared with a human work target.
+_Avoid_: Working Time, human attention, productivity, process lifetime, CPU time
 
 **Harness**:
 An AI-agent environment observed by Cukup, such as Amp or Tycho. A Harness is not an Executor: one Executor may run multiple Harnesses concurrently.
 _Avoid_: Executor, model, provider
 
 **Harness Adapter**:
-The Cukup boundary that observes one Harness and translates its supported signals into harness-neutral evidence. Adapters may have different observation capabilities but must preserve the same timing and privacy semantics.
-_Avoid_: Harness plugin, event uploader
+An integration that observes one Harness and translates its supported signals into harness-neutral evidence with declared timing and privacy semantics. Its ownership and packaging do not determine its observation capabilities or official support status.
+_Avoid_: Measurement policy, cloud event uploader
 
 **Adapter Capability**:
-A declared category of evidence a Harness Adapter can observe, such as prompt composition, submission, approval, or runtime. Capability disclosure describes measurement coverage; it never changes the definition of Working Time. Missing composition capability means reported Working Time is a lower bound.
+A declared category of evidence a Harness Adapter can observe, such as prompt composition, submission, approval, or runtime, describing coverage rather than changing metric definitions. Missing observations make Working Time a lower bound on the window metric obtainable with richer coverage, not on actual human effort.
 _Avoid_: Permission, feature flag, accuracy score
 
 **Harness Type**:
@@ -39,19 +39,23 @@ A bounded Working Time interval opened or renewed by an Engagement Observation a
 _Avoid_: Agent run, activity session, inferred attention
 
 **Recovered Evidence**:
-Harness-neutral evidence reconstructed from durable Harness state after a notification was missed. A durable native timestamp may retain its original instant; otherwise recovery begins only when observed. A missing terminal fact remains open and crash-capped rather than receiving a fabricated end.
+Harness-neutral evidence reconstructed from durable Harness state after a notification was missed, retaining original occurrence timestamps only when their meaning is supported. Otherwise recovery begins when observed; missing runtime endpoints remain unresolved rather than receiving fabricated completion times.
 _Avoid_: Synthetic lifecycle event, guessed timestamp, hook replay
 
 **Authoritative Summary**:
 The service-calculated daily or weekly classification of Working Time against its target.
 _Avoid_: Local estimate, cached total
 
+**Cukup Project**:
+A stable classification of work shared across approved Harness mappings or explicit user bindings, whose identity survives changes to its name or slug. Renaming changes presentation, not which project owns attributed evidence.
+_Avoid_: Harness-native project, Project Slug, repository
+
 **Project Slug**:
-A lowercase kebab-case classification resolved locally from an exact Harness-native project identity and attached to evidence for consistent filtering across Harnesses and Executors. An exact normalized identity may map automatically; differing identities require an explicit local alias. Invalid, missing, or ambiguous mappings remain Unassigned and are never guessed from workspace or repository metadata.
-_Avoid_: Project Label, repository path, Git remote, package name, per-checkout setting
+A lowercase kebab-case name for a Cukup Project, distinct from its identity and refreshed from supported native project information for future activity. Old and new names may coexist in recorded activity after a rename; matching slugs alone do not establish that projects from different Harnesses are the same project.
+_Avoid_: Project identity, repository path, Git remote, package name, per-checkout setting
 
 **Project Activity**:
-The targetless union of Working Time intervals carrying one Project Slug. Project Activity is intentionally non-additive across slugs when concurrent projects overlap. Agent Runtime by project is a separate view.
+The targetless union of Working Time intervals attributed to one Cukup Project, independent of its name changes. Activity across projects is intentionally non-additive when intervals overlap; Agent Runtime by project is a separate view.
 _Avoid_: Project Working Time, allocated time
 
 **Executor Label**:
@@ -75,5 +79,5 @@ The Executor Label for physical evidence whose Bearer Lineage never bound to a c
 _Avoid_: Unknown machine, hidden evidence
 
 **Unassigned Work**:
-Working Time without a Project Slug, including historical evidence recorded before project attribution existed.
+Working Time without a resolved project attribution, including historical evidence recorded before project attribution existed. Missing or ambiguous mappings remain Unassigned rather than being guessed from paths, repository metadata, or prompt content.
 _Avoid_: Unknown project, uncategorized event
