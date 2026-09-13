@@ -40,8 +40,10 @@ This ledger is the authoritative implementation sequence within top-level Stage 
 | 4B2 | Complete | Explicit-drain collector client with a bounded sanitized durable spool and retry-safe FIFO delivery. |
 | 4B3A | Complete | Caller-managed secure state-directory provisioning, SQLite runtime ownership, endpoint publication/discovery, and clean stop. |
 | 4B3B | Complete | Immediate synchronous receiver-token rotation with no credential overlap and reconcile-or-withdraw failure behavior. |
-| 4B3C | Current slice | Foreground Bun receiver command with strict arguments and serialized `SIGHUP` rotation plus `SIGTERM`/`SIGINT` shutdown. No daemonization or autonomous delivery poller. |
-| Remaining Stage 4 work | Not started | Independently reviewable packaging, installation, and removal, followed by macOS, Linux, and Amp-orb lifecycle verification before any support claim. |
+| 4B3C | Complete | Foreground Bun receiver command with strict arguments and serialized `SIGHUP` rotation plus `SIGTERM`/`SIGINT` shutdown. No daemonization or autonomous delivery poller. |
+| Experimental Amp shadow collector | Complete experimental slice | Real supported Amp hooks produce live, Unassigned execution segments without claiming engagement evidence, recovery, or official Amp support. |
+| Actual Amp-orb technical proof | Complete experimental slice | [Corrected proof](docs/incidents/2026-09-13-experimental-amp-proof.md) used temporary activation—not installer or service packaging—and established actual hooks across consecutive turns, supervised receiver lifecycle, durable outage spooling, receiver-restart retention, and plugin-reload rediscovery and drain. The expected restart-lost open segment remained pending. There are no autonomous retries; endpoint changes require plugin reload; no engagement evidence was established. This is not macOS, Linux, official support, packaging-completion, deployment, or cutover evidence. |
+| Remaining Stage 4 work | Not started | Repeatable installation and removal, service packaging, and macOS/Linux verification before any support claim. Amp-orb service packaging was not established by the temporary technical proof. |
 
 Top-level Stage 5 remains the separate cloud protocol, persistence, aggregation, migration, and shadow-dashboard phase. Top-level Stage 6 remains the separate real-collector validation and owner-approved opt-in cutover phase.
 
