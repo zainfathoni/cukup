@@ -121,7 +121,7 @@ export class LocalHarnessEvidenceClient {
 	readonly #requestTimeoutMs: number
 
 	constructor(options: LocalHarnessEvidenceClientOptions) {
-		this.#origin = parseOrigin(options.origin)
+		this.#origin = parseLocalHarnessEvidenceClientOrigin(options.origin)
 		this.#tokenProvider = options.tokenProvider
 		this.#fetch = options.fetch ?? fetch
 		this.#now = options.now ?? Date.now
@@ -576,7 +576,8 @@ const QUEUE_SELECT = `SELECT q.sequence, q.snapshot_id AS snapshotId,
 	s.retry_at_ms AS retryAtMs
 	FROM queued_evidence q JOIN delivery_snapshots s ON s.id = q.snapshot_id`
 
-function parseOrigin(value: string): string {
+/** @internal Shared by experimental endpoint discovery to keep exact loopback origins canonical. */
+export function parseLocalHarnessEvidenceClientOrigin(value: string): string {
 	const match = /^http:\/\/127\.0\.0\.1:([1-9]\d{0,4})$/.exec(value)
 	if (match === null || Number(match[1]) > 65_535) {
 		throw new Error('Evidence client origin must be an exact IPv4 loopback HTTP origin')

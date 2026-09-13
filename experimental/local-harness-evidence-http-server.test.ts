@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import {
 	LOCAL_HARNESS_EVIDENCE_MAX_BODY_BYTES,
 	LOCAL_HARNESS_EVIDENCE_NEGOTIATION_PATH,
+	LOCAL_HARNESS_EVIDENCE_READINESS_PATH,
 	LOCAL_HARNESS_EVIDENCE_SUBMISSION_PATH,
 	startLocalHarnessEvidenceHttpServer,
 	type LocalHarnessEvidenceHttpServer,
@@ -194,6 +195,26 @@ function rawPostHeaders(port: number, contentLength: number, authorization?: str
 }
 
 describe('experimental local Harness evidence HTTP server', () => {
+	test('exposes exact side-effect-free readiness only to the canonical bearer', async () => {
+		const { origin, token } = setup()
+		const wrongToken = randomBytes(32).toString('base64url')
+		for (const authorization of [undefined, `Bearer ${wrongToken}`]) {
+			const response = await fetch(`${origin}${LOCAL_HARNESS_EVIDENCE_READINESS_PATH}`, {
+				headers: authorization === undefined ? {} : { authorization },
+			})
+			expect(response.status).toBe(401)
+			expect(await response.text()).toBe('{"error":"unauthorized"}')
+		}
+		const response = await fetch(`${origin}${LOCAL_HARNESS_EVIDENCE_READINESS_PATH}`, {
+			headers: { authorization: `Bearer ${token}` },
+		})
+		expect(response.status).toBe(200)
+		expect(response.headers.get('content-type')).toBe('application/json; charset=utf-8')
+		expect(await response.text()).toBe(
+			'{"protocol":"cukup.experimental.harness-evidence","protocol_version":1,"ready":true}',
+		)
+	})
+
 	test('binds only IPv4 loopback, reports its ephemeral port, and stops without closing the receiver', async () => {
 		const { origin, receiver, server } = setup()
 		expect(server.hostname).toBe('127.0.0.1')
