@@ -270,6 +270,8 @@ export function createExperimentalAmpShadowCollector(
 		if (!active || active.messageId !== String(event.id)) return
 		endSegment(threadId, now())
 		activeTurns.delete(threadId)
+		stateSubscriptions.get(threadId)?.unsubscribe()
+		stateSubscriptions.delete(threadId)
 	}
 
 	hookSubscriptions.push(

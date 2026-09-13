@@ -176,9 +176,19 @@ describe('experimental Amp shadow collector', () => {
 		harness.state('one', 'running')
 		harness.emit('agent.end', { ...one, status: 'done', messages: [] })
 		harness.emit('agent.end', { ...one, status: 'done', messages: [] })
+		expect(harness.unsubscribed()).toBe(1)
+		const next = event('one', 'next')
+		harness.emit('agent.start', next)
+		harness.state('one', 'running')
+		harness.emit('agent.end', { ...next, status: 'done', messages: [] })
 		harness.state('two', 'awaiting-approval')
 		await collector.dispose()
-		expect(records(envelopes).map((item) => item.family)).toEqual(['execution_start', 'execution_end'])
+		expect(records(envelopes).map((item) => item.family)).toEqual([
+			'execution_start',
+			'execution_end',
+			'execution_start',
+			'execution_end',
+		])
 	})
 
 	test('omits an end when its start was not durably queued, avoiding a FIFO blocker', async () => {
