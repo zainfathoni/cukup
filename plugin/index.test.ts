@@ -977,15 +977,24 @@ describe('work-hours plugin', () => {
 		const stateHome = mkdtempSync(join(tmpdir(), 'amp-work-hours-plugin-shadow-test-'))
 		temporaryDirectories.push(stateHome)
 		const previousStateHome = process.env.XDG_STATE_HOME
+		const previousFetch = globalThis.fetch
 		process.env.XDG_STATE_HOME = stateHome
+		process.env.CUKUP_SERVICE_URL = 'disabled-for-isolated-shadow-proof'
 		process.env.CUKUP_EXPERIMENTAL_AMP_SHADOW = '1'
 		process.env.CUKUP_EXPERIMENTAL_RUNTIME_STATE_DIR = join(stateHome, 'runtime')
 		const runtime = startLocalHarnessEvidenceRuntime({
 			stateDirectory: process.env.CUKUP_EXPERIMENTAL_RUNTIME_STATE_DIR,
 		})
+		let cloudRequests = 0
+		globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+			const url = new URL(input instanceof Request ? input.url : input)
+			if (url.hostname !== '127.0.0.1') cloudRequests += 1
+			return previousFetch(input, init)
+		}) as typeof fetch
 		const handlers = new Map<string, Array<(event: any, context?: any) => unknown>>()
 		const observers = new Set<(state: 'running' | 'idle') => void>()
 		let dispose = async () => {}
+		let tokenMintCalls = 0
 		const amp = {
 			logger: { log() {} },
 			on(name: string, handler: (event: any, context?: any) => unknown) {
@@ -1011,13 +1020,12 @@ describe('work-hours plugin', () => {
 				}),
 			},
 			configuration: { get: async () => ({}), update: async () => {}, delete: async () => {} },
-			system: { executor: { kind: 'local' }, user: { workspace: null }, workspaceRoot: null },
+			system: { executor: { kind: 'remote' }, user: { workspace: null }, workspaceRoot: null },
 			helpers: { filePathFromURI: () => '/synthetic' },
-			$: async () => ({
-				exitCode: 0,
-				stdout: JSON.stringify({ id: 'project-test', name: 'Synthetic Project' }),
-				stderr: '',
-			}),
+			$: async (strings: TemplateStringsArray) => {
+				if (strings.join('').includes('orb id-token')) tokenMintCalls += 1
+				return { exitCode: 1, stdout: '', stderr: '' }
+			},
 		}
 		const context = { ui: { notify: async () => {} } }
 		const event = { thread: { id: 'T-synthetic' }, id: 'message-synthetic', message: 'private' }
@@ -1042,8 +1050,11 @@ describe('work-hours plugin', () => {
 			expect(receiver.query<{ count: number }, []>('SELECT count(*) AS count FROM execution_segments').get()!.count).toBe(1)
 			expect(receiver.query<{ count: number }, []>('SELECT count(*) AS count FROM execution_segments WHERE end_at IS NOT NULL').get()!.count).toBe(1)
 			receiver.close()
+			expect(tokenMintCalls).toBe(0)
+			expect(cloudRequests).toBe(0)
 		} finally {
 			await runtime.stop()
+			globalThis.fetch = previousFetch
 			if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME
 			else process.env.XDG_STATE_HOME = previousStateHome
 		}
