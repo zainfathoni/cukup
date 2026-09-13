@@ -12,6 +12,11 @@ import {
 	unavailableTokenProvider,
 	type TokenProvider,
 } from './auth.ts'
+import {
+	createExperimentalAmpShadowCollector,
+	EXPERIMENTAL_AMP_SHADOW_WARNING,
+	type ExperimentalAmpShadowCollector,
+} from './experimental-amp-shadow-collector.ts'
 import { createLegacyAmpAdapter } from './legacy-amp-adapter.ts'
 import { CukupServiceClient, isTargetOverrideDate, ServiceRequestError } from './protocol.ts'
 import { formatStatusDisplay } from './status.ts'
@@ -47,6 +52,7 @@ export default function (amp: PluginAPI) {
 	})
 	const legacyAmpAdapter = createLegacyAmpAdapter({ amp, store, sync, now })
 	const { resolveProjectAttribution } = legacyAmpAdapter
+	const experimentalAmpShadowCollector = startExperimentalAmpShadowCollector(amp)
 
 	amp.registerCommand(
 		'work-hours-status',
@@ -200,10 +206,38 @@ export default function (amp: PluginAPI) {
 
 	sync.start()
 	amp.onDispose(async () => {
-		await legacyAmpAdapter.dispose()
-		await sync.dispose()
-		store.close()
+		const shadowDisposal = experimentalAmpShadowCollector?.dispose()
+		const legacyDisposal = (async () => {
+			await legacyAmpAdapter.dispose()
+			await sync.dispose()
+			store.close()
+		})()
+		const [legacyResult] = await Promise.allSettled([legacyDisposal, shadowDisposal])
+		if (legacyResult.status === 'rejected') throw legacyResult.reason
 	})
+}
+
+function startExperimentalAmpShadowCollector(amp: PluginAPI): ExperimentalAmpShadowCollector | undefined {
+	if (process.env.CUKUP_EXPERIMENTAL_AMP_SHADOW !== '1') return undefined
+	const runtimeStateDirectory = process.env.CUKUP_EXPERIMENTAL_RUNTIME_STATE_DIR?.trim()
+	if (!runtimeStateDirectory) {
+		amp.logger.log(EXPERIMENTAL_AMP_SHADOW_WARNING)
+		return undefined
+	}
+	const stateHome = process.env.XDG_STATE_HOME?.trim() || join(homedir(), '.local', 'state')
+	const collectorStateDirectory =
+		process.env.CUKUP_EXPERIMENTAL_AMP_SHADOW_STATE_DIR?.trim() ||
+		join(stateHome, 'amp-work-hours', 'experimental-amp-shadow')
+	try {
+		return createExperimentalAmpShadowCollector({
+			amp,
+			runtimeStateDirectory,
+			collectorStateDirectory,
+		})
+	} catch {
+		amp.logger.log(EXPERIMENTAL_AMP_SHADOW_WARNING)
+		return undefined
+	}
 }
 
 export function executorProfileFor(

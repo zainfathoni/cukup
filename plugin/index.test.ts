@@ -3,6 +3,7 @@ import { Database } from 'bun:sqlite'
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { startLocalHarnessEvidenceRuntime } from '../experimental/local-harness-evidence-runtime.ts'
 import workHoursPlugin, { executorProfileFor } from './index.ts'
 import { jakartaDateString } from './tracker.ts'
 
@@ -10,6 +11,9 @@ const temporaryDirectories: string[] = []
 let previousTokenFile: string | undefined
 let previousServiceURL: string | undefined
 let previousProjectID: string | undefined
+let previousExperimentalShadow: string | undefined
+let previousExperimentalRuntimeState: string | undefined
+let previousExperimentalCollectorState: string | undefined
 
 function idleThread() {
 	return {
@@ -24,9 +28,15 @@ beforeEach(() => {
 	previousTokenFile = process.env.CUKUP_TOKEN_FILE
 	previousServiceURL = process.env.CUKUP_SERVICE_URL
 	previousProjectID = process.env.AMP_PROJECT_ID
+	previousExperimentalShadow = process.env.CUKUP_EXPERIMENTAL_AMP_SHADOW
+	previousExperimentalRuntimeState = process.env.CUKUP_EXPERIMENTAL_RUNTIME_STATE_DIR
+	previousExperimentalCollectorState = process.env.CUKUP_EXPERIMENTAL_AMP_SHADOW_STATE_DIR
 	process.env.CUKUP_TOKEN_FILE = '/nonexistent/cukup-plugin-test-token'
 	process.env.CUKUP_SERVICE_URL = 'https://api.cukup.dev'
 	process.env.AMP_PROJECT_ID = 'project-test'
+	delete process.env.CUKUP_EXPERIMENTAL_AMP_SHADOW
+	delete process.env.CUKUP_EXPERIMENTAL_RUNTIME_STATE_DIR
+	delete process.env.CUKUP_EXPERIMENTAL_AMP_SHADOW_STATE_DIR
 })
 
 afterEach(() => {
@@ -39,6 +49,12 @@ afterEach(() => {
 	else process.env.CUKUP_SERVICE_URL = previousServiceURL
 	if (previousProjectID === undefined) delete process.env.AMP_PROJECT_ID
 	else process.env.AMP_PROJECT_ID = previousProjectID
+	if (previousExperimentalShadow === undefined) delete process.env.CUKUP_EXPERIMENTAL_AMP_SHADOW
+	else process.env.CUKUP_EXPERIMENTAL_AMP_SHADOW = previousExperimentalShadow
+	if (previousExperimentalRuntimeState === undefined) delete process.env.CUKUP_EXPERIMENTAL_RUNTIME_STATE_DIR
+	else process.env.CUKUP_EXPERIMENTAL_RUNTIME_STATE_DIR = previousExperimentalRuntimeState
+	if (previousExperimentalCollectorState === undefined) delete process.env.CUKUP_EXPERIMENTAL_AMP_SHADOW_STATE_DIR
+	else process.env.CUKUP_EXPERIMENTAL_AMP_SHADOW_STATE_DIR = previousExperimentalCollectorState
 })
 
 describe('work-hours plugin', () => {
@@ -955,5 +971,81 @@ describe('work-hours plugin', () => {
 			executorProfileFor('remote', () => { throw new Error('remote hostname must not be read') }),
 		).toEqual({ kind: 'remote', executorLabel: 'amp-orb' })
 		expect(executorProfileFor('unknown')).toBeUndefined()
+	})
+
+	test('keeps real legacy records and outbox unchanged while the enabled shadow collector writes only its receiver', async () => {
+		const stateHome = mkdtempSync(join(tmpdir(), 'amp-work-hours-plugin-shadow-test-'))
+		temporaryDirectories.push(stateHome)
+		const previousStateHome = process.env.XDG_STATE_HOME
+		process.env.XDG_STATE_HOME = stateHome
+		process.env.CUKUP_EXPERIMENTAL_AMP_SHADOW = '1'
+		process.env.CUKUP_EXPERIMENTAL_RUNTIME_STATE_DIR = join(stateHome, 'runtime')
+		const runtime = startLocalHarnessEvidenceRuntime({
+			stateDirectory: process.env.CUKUP_EXPERIMENTAL_RUNTIME_STATE_DIR,
+		})
+		const handlers = new Map<string, Array<(event: any, context?: any) => unknown>>()
+		const observers = new Set<(state: 'running' | 'idle') => void>()
+		let dispose = async () => {}
+		const amp = {
+			logger: { log() {} },
+			on(name: string, handler: (event: any, context?: any) => unknown) {
+				const registered = handlers.get(name) ?? []
+				registered.push(handler)
+				handlers.set(name, registered)
+				return { unsubscribe() {} }
+			},
+			registerCommand() { return { unsubscribe() {}, setAvailability() {} } },
+			onDispose(callback: () => unknown) {
+				dispose = async () => { await callback() }
+				return { unsubscribe() {} }
+			},
+			threads: {
+				get: () => ({
+					state: {
+						get: async () => 'idle' as const,
+						subscribe(observer: (state: 'running' | 'idle') => void) {
+							observers.add(observer)
+							return { unsubscribe: () => observers.delete(observer) }
+						},
+					},
+				}),
+			},
+			configuration: { get: async () => ({}), update: async () => {}, delete: async () => {} },
+			system: { executor: { kind: 'local' }, user: { workspace: null }, workspaceRoot: null },
+			helpers: { filePathFromURI: () => '/synthetic' },
+			$: async () => ({
+				exitCode: 0,
+				stdout: JSON.stringify({ id: 'project-test', name: 'Synthetic Project' }),
+				stderr: '',
+			}),
+		}
+		const context = { ui: { notify: async () => {} } }
+		const event = { thread: { id: 'T-synthetic' }, id: 'message-synthetic', message: 'private' }
+
+		try {
+			workHoursPlugin(amp as never)
+			await Promise.all((handlers.get('agent.start') ?? []).map((handler) => handler(event, context)))
+			for (const observer of observers) observer('running')
+			await Promise.all(
+				(handlers.get('agent.end') ?? []).map((handler) =>
+					handler({ ...event, status: 'done', messages: [] }, context),
+				),
+			)
+			await Bun.sleep(100)
+			await dispose()
+
+			const legacy = new Database(join(stateHome, 'amp-work-hours', 'state.sqlite'), { readonly: true })
+			expect(legacy.query<{ count: number }, []>('SELECT count(*) AS count FROM events').get()!.count).toBe(2)
+			expect(legacy.query<{ count: number }, []>('SELECT count(*) AS count FROM outbox').get()!.count).toBe(2)
+			legacy.close()
+			const receiver = new Database(join(stateHome, 'runtime', 'receiver.sqlite'), { readonly: true })
+			expect(receiver.query<{ count: number }, []>('SELECT count(*) AS count FROM execution_segments').get()!.count).toBe(1)
+			expect(receiver.query<{ count: number }, []>('SELECT count(*) AS count FROM execution_segments WHERE end_at IS NOT NULL').get()!.count).toBe(1)
+			receiver.close()
+		} finally {
+			await runtime.stop()
+			if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME
+			else process.env.XDG_STATE_HOME = previousStateHome
+		}
 	})
 })
