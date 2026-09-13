@@ -1,10 +1,20 @@
 import { Database } from 'bun:sqlite'
-import { chmodSync, closeSync, mkdirSync, openSync, statSync } from 'node:fs'
+import {
+	chmodSync,
+	closeSync,
+	constants,
+	fchmodSync,
+	fstatSync,
+	lstatSync,
+	mkdirSync,
+	openSync,
+} from 'node:fs'
 import { dirname } from 'node:path'
 import {
 	LOCAL_PROTOCOL,
 	LOCAL_PROTOCOL_VERSION,
 	canonicalizeEvidence,
+	isUuidV4,
 	negotiateVersion,
 	parseEvidenceEnvelope,
 	parseNegotiationEnvelope,
@@ -16,7 +26,6 @@ import {
 } from './local-harness-evidence.ts'
 
 const DATABASE_VERSION = 1
-const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export type CollectorBinding = Readonly<{
 	collectorInstanceId: string
@@ -58,17 +67,28 @@ type SupportedEnvelope = Extract<ParsedEnvelope, { collectorInstanceId: string }
 /** @internal Exported only so the atomic pre-SQLite permission boundary can be tested directly. */
 export function prepareLocalHarnessEvidenceDatabaseFile(path: string): void {
 	validateDatabasePath(path)
-	let created = false
 	try {
-		closeSync(openSync(path, 'wx', 0o600))
-		created = true
+		if (!lstatSync(path).isFile()) {
+			throw new Error('Receiver database path must identify a regular file')
+		}
+	} catch (error) {
+		if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error
+	}
+	let descriptor: number
+	try {
+		descriptor = openSync(path, constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
 	} catch (error) {
 		if (!isFileExistsError(error)) throw error
+		descriptor = openSync(path, constants.O_RDWR | constants.O_NOFOLLOW)
 	}
-	if (!created && !statSync(path).isFile()) {
-		throw new Error('Receiver database path must identify a regular file')
+	try {
+		if (!fstatSync(descriptor).isFile()) {
+			throw new Error('Receiver database path must identify a regular file')
+		}
+		fchmodSync(descriptor, 0o600)
+	} finally {
+		closeSync(descriptor)
 	}
-	chmodSync(path, 0o600)
 }
 
 function validateDatabasePath(path: string): void {
@@ -91,7 +111,7 @@ export class LocalHarnessEvidenceReceiver {
 
 	constructor(path: string, executionSiteId: string) {
 		validateDatabasePath(path)
-		if (!UUID_V4.test(executionSiteId)) throw new Error('Execution-site identity must be a UUIDv4')
+		if (!isUuidV4(executionSiteId)) throw new Error('Execution-site identity must be a UUIDv4')
 		this.#executionSiteId = executionSiteId
 		const directory = dirname(path)
 		const createdDirectory = mkdirSync(directory, { recursive: true, mode: 0o700 })

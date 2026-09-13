@@ -1,10 +1,11 @@
 import { timingSafeEqual } from 'node:crypto'
-import { LOCAL_PROTOCOL } from './local-harness-evidence.ts'
+import { LOCAL_PROTOCOL, LOCAL_PROTOCOL_VERSION } from './local-harness-evidence.ts'
 import type { LocalHarnessEvidenceReceiver } from './local-harness-evidence-receiver.ts'
 
 export const LOCAL_HARNESS_EVIDENCE_MAX_BODY_BYTES = 1024 * 1024
 export const LOCAL_HARNESS_EVIDENCE_NEGOTIATION_PATH =
 	'/experimental/local-harness-evidence/negotiate'
+export const LOCAL_HARNESS_EVIDENCE_READINESS_PATH = '/experimental/local-harness-evidence/ready'
 export const LOCAL_HARNESS_EVIDENCE_SUBMISSION_PATH =
 	'/experimental/local-harness-evidence/evidence'
 
@@ -48,6 +49,11 @@ export function startLocalHarnessEvidenceHttpServer(
 			if (!isAuthorized(request, expectedAuthorization)) return json({ error: 'unauthorized' }, 401)
 
 			const path = new URL(request.url).pathname
+			if (path === LOCAL_HARNESS_EVIDENCE_READINESS_PATH) {
+				return request.method === 'GET'
+					? json({ protocol: LOCAL_PROTOCOL, protocol_version: LOCAL_PROTOCOL_VERSION, ready: true }, 200)
+					: json({ error: 'method_not_allowed' }, 405)
+			}
 			if (
 				path !== LOCAL_HARNESS_EVIDENCE_NEGOTIATION_PATH &&
 				path !== LOCAL_HARNESS_EVIDENCE_SUBMISSION_PATH
