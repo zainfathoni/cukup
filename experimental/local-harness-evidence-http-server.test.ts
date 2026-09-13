@@ -215,6 +215,47 @@ describe('experimental local Harness evidence HTTP server', () => {
 		)
 	})
 
+	test('validates token replacement before mutation and supports a no-overlap cutover', async () => {
+		const { origin, token, server } = setup()
+		const replacement = randomBytes(32).toString('base64url')
+		expect(() => server.replaceToken('not-a-token')).toThrow(
+			'Receiver token must be 32 random bytes encoded as unpadded base64url',
+		)
+		expect(
+			(
+				await fetch(`${origin}${LOCAL_HARNESS_EVIDENCE_READINESS_PATH}`, {
+					headers: { authorization: `Bearer ${token}` },
+				})
+			).status,
+		).toBe(200)
+
+		server.disableAuthentication()
+		for (const candidate of [token, replacement]) {
+			expect(
+				(
+					await fetch(`${origin}${LOCAL_HARNESS_EVIDENCE_READINESS_PATH}`, {
+						headers: { authorization: `Bearer ${candidate}` },
+					})
+				).status,
+			).toBe(401)
+		}
+		server.replaceToken(replacement)
+		expect(
+			(
+				await fetch(`${origin}${LOCAL_HARNESS_EVIDENCE_READINESS_PATH}`, {
+					headers: { authorization: `Bearer ${token}` },
+				})
+			).status,
+		).toBe(401)
+		expect(
+			(
+				await fetch(`${origin}${LOCAL_HARNESS_EVIDENCE_READINESS_PATH}`, {
+					headers: { authorization: `Bearer ${replacement}` },
+				})
+			).status,
+		).toBe(200)
+	})
+
 	test('binds only IPv4 loopback, reports its ephemeral port, and stops without closing the receiver', async () => {
 		const { origin, receiver, server } = setup()
 		expect(server.hostname).toBe('127.0.0.1')

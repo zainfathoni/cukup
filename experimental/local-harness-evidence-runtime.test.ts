@@ -1,5 +1,7 @@
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, spyOn, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
+import * as crypto from 'node:crypto'
+import * as fs from 'node:fs'
 import { mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,6 +11,8 @@ import {
 	startLocalHarnessEvidenceRuntime,
 	type LocalHarnessEvidenceRuntime,
 } from './local-harness-evidence-runtime.ts'
+import * as httpServer from './local-harness-evidence-http-server.ts'
+import { LOCAL_HARNESS_EVIDENCE_READINESS_PATH } from './local-harness-evidence-http-server.ts'
 import { LOCAL_PROTOCOL, LOCAL_PROTOCOL_VERSION } from './local-harness-evidence.ts'
 
 const COLLECTOR = '20000000-0000-4000-8000-000000000001'
@@ -59,6 +63,48 @@ function envelope() {
 			},
 		],
 	}
+}
+
+function spoolRow(path: string) {
+	const database = new Database(path, { readonly: true, strict: true })
+	try {
+		return database
+			.query<
+				{
+					sequence: number
+					evidenceId: string
+					recordJson: string
+					payloadBytes: number
+					recordState: string
+					collectorInstanceId: string
+					protocolVersion: number
+					capabilitiesJson: string
+					snapshotState: string
+					retryAttempt: number
+					retryAtMs: number
+				},
+				[]
+			>(
+				`SELECT q.sequence, q.evidence_id AS evidenceId, q.record_json AS recordJson,
+					q.payload_bytes AS payloadBytes, q.record_state AS recordState,
+					s.collector_instance_id AS collectorInstanceId,
+					s.protocol_version AS protocolVersion, s.capabilities_json AS capabilitiesJson,
+					s.snapshot_state AS snapshotState, s.retry_attempt AS retryAttempt,
+					s.retry_at_ms AS retryAtMs
+				 FROM queued_evidence q JOIN delivery_snapshots s ON s.id = q.snapshot_id`,
+			)
+			.get()!
+	} finally {
+		database.close()
+	}
+}
+
+async function readiness(origin: string, token: string): Promise<number> {
+	return (
+		await fetch(`${origin}${LOCAL_HARNESS_EVIDENCE_READINESS_PATH}`, {
+			headers: { authorization: `Bearer ${token}` },
+		})
+	).status
 }
 
 describe('programmatic local Harness evidence runtime', () => {
@@ -118,6 +164,286 @@ describe('programmatic local Harness evidence runtime', () => {
 		} finally {
 			database.close()
 		}
+	})
+
+	test('rotates the live token immediately, repeatedly, and preserves only the replacement on restart', async () => {
+		const stateDirectory = state()
+		const runtime = start(stateDirectory)
+		const first = readFileSync(join(stateDirectory, 'receiver-token'), 'utf8')
+		runtime.rotateReceiverToken()
+		const second = readFileSync(join(stateDirectory, 'receiver-token'), 'utf8')
+		expect(second).not.toBe(first)
+		expect(await readiness(runtime.endpoint.origin, first)).toBe(401)
+		expect(await readiness(runtime.endpoint.origin, second)).toBe(200)
+
+		runtime.rotateReceiverToken()
+		const third = readFileSync(join(stateDirectory, 'receiver-token'), 'utf8')
+		expect(third).not.toBe(second)
+		expect(await readiness(runtime.endpoint.origin, second)).toBe(401)
+		expect(await readiness(runtime.endpoint.origin, third)).toBe(200)
+		await runtime.stop()
+		runtimes.splice(runtimes.indexOf(runtime), 1)
+
+		const restarted = start(stateDirectory)
+		expect(readFileSync(join(stateDirectory, 'receiver-token'), 'utf8')).toBe(third)
+		expect(await readiness(restarted.endpoint.origin, first)).toBe(401)
+		expect(await readiness(restarted.endpoint.origin, second)).toBe(401)
+		expect(await readiness(restarted.endpoint.origin, third)).toBe(200)
+	})
+
+	test('an existing discovered client retains exact evidence across a submission-boundary 401 and reopen', async () => {
+		const rootPath = root()
+		const stateDirectory = state(rootPath)
+		const runtime = start(stateDirectory)
+		const spoolPath = join(rootPath, 'collector', 'spool.sqlite')
+		let now = Date.now()
+		let rotateBeforeSubmission = true
+		const client = await createDiscoveredLocalHarnessEvidenceClient({
+			stateDirectory,
+			spoolPath,
+			now: () => now,
+			fetch: async (input, init) => {
+				if (
+					rotateBeforeSubmission &&
+					String(input).endsWith('/experimental/local-harness-evidence/evidence')
+				) {
+					rotateBeforeSubmission = false
+					runtime.rotateReceiverToken()
+				}
+				return fetch(input, init)
+			},
+		})
+		expect(client.enqueue(envelope())).toEqual({ status: 'queued', records: 1 })
+		const before = spoolRow(spoolPath)
+		expect(await client.drainStep()).toEqual({
+			status: 'retryable',
+			attempted: 1,
+			delivered: 0,
+			blocked: 0,
+		})
+		expect(client.status()).toMatchObject({ queued: 1, blocked: 0, retryingGroups: 1 })
+		const retained = spoolRow(spoolPath)
+		expect({ ...retained, retryAttempt: 0, retryAtMs: 0 }).toEqual(before)
+		expect(retained.retryAttempt).toBe(1)
+		expect(retained.retryAtMs).toBe(now + 1_000)
+		client.close()
+
+		const reopened = await createDiscoveredLocalHarnessEvidenceClient({
+			stateDirectory,
+			spoolPath,
+			now: () => now,
+		})
+		try {
+			expect(reopened.status()).toMatchObject({ queued: 1, blocked: 0, retryingGroups: 1 })
+			now += 1_000
+			expect(await reopened.drainStep()).toEqual({
+				status: 'delivered',
+				attempted: 1,
+				delivered: 1,
+				blocked: 0,
+			})
+			expect(reopened.status().queued).toBe(0)
+		} finally {
+			reopened.close()
+		}
+		const receiver = new Database(join(stateDirectory, 'receiver.sqlite'), { readonly: true, strict: true })
+		try {
+			expect(
+				receiver
+					.query<
+						{ evidenceId: string; collectorInstanceId: string; protocolVersion: number; capabilitiesJson: string; recordJson: string },
+						[]
+					>(
+						`SELECT evidence_id AS evidenceId, collector_instance_id AS collectorInstanceId,
+							protocol_version AS protocolVersion, capabilities_json AS capabilitiesJson,
+							record_json AS recordJson FROM accepted_evidence`,
+					)
+					.get(),
+		).toEqual({
+				evidenceId: before.evidenceId,
+				collectorInstanceId: before.collectorInstanceId,
+				protocolVersion: before.protocolVersion,
+				capabilitiesJson: before.capabilitiesJson,
+				recordJson: before.recordJson,
+			})
+		} finally {
+			receiver.close()
+		}
+	})
+
+	test('fails closed when the authoritative token was externally altered', async () => {
+		const stateDirectory = state()
+		const runtime = start(stateDirectory)
+		const oldToken = readFileSync(join(stateDirectory, 'receiver-token'), 'utf8')
+		writeFileSync(join(stateDirectory, 'receiver-token'), 'malformed', { mode: 0o600 })
+		expect(() => runtime.rotateReceiverToken()).toThrow(RUNTIME_ERROR)
+		expect(await readiness(runtime.endpoint.origin, oldToken)).toBe(401)
+		expect(() => statSync(join(stateDirectory, 'endpoint.json'))).toThrow()
+		await expect(discoverLocalHarnessEvidenceEndpoint(stateDirectory)).rejects.toThrow(DISCOVERY_ERROR)
+	})
+
+	test('reconciles authentication to the authoritative file across publication uncertainty', async () => {
+		const stateDirectory = state()
+		const runtime = start(stateDirectory)
+		const oldToken = readFileSync(join(stateDirectory, 'receiver-token'), 'utf8')
+		const originalFsync = fs.fsyncSync
+		let calls = 0
+		const injected = spyOn(fs, 'fsyncSync').mockImplementation((descriptor) => {
+			calls += 1
+			if (calls === 2) throw new Error('private publication diagnostic')
+			return originalFsync(descriptor)
+		})
+		let message = ''
+		try {
+			runtime.rotateReceiverToken()
+		} catch (error) {
+			message = String(error)
+		} finally {
+			injected.mockRestore()
+		}
+		expect(message).toContain(RUNTIME_ERROR)
+		expect(message).not.toContain('private publication diagnostic')
+		const authoritative = readFileSync(join(stateDirectory, 'receiver-token'), 'utf8')
+		expect(authoritative).not.toBe(oldToken)
+		expect(await readiness(runtime.endpoint.origin, oldToken)).toBe(401)
+		expect(await readiness(runtime.endpoint.origin, authoritative)).toBe(200)
+		expect(await discoverLocalHarnessEvidenceEndpoint(stateDirectory)).toEqual(runtime.endpoint)
+	})
+
+	test('keeps the old token authoritative when replacement fails before rename', async () => {
+		const stateDirectory = state()
+		const runtime = start(stateDirectory)
+		const oldToken = readFileSync(join(stateDirectory, 'receiver-token'), 'utf8')
+		const injected = spyOn(fs, 'fsyncSync').mockImplementation(() => {
+			throw new Error('private write diagnostic')
+		})
+		let message = ''
+		try {
+			runtime.rotateReceiverToken()
+		} catch (error) {
+			message = String(error)
+		} finally {
+			injected.mockRestore()
+		}
+		expect(message).toContain(RUNTIME_ERROR)
+		expect(message).not.toContain('private write diagnostic')
+		expect(readFileSync(join(stateDirectory, 'receiver-token'), 'utf8')).toBe(oldToken)
+		expect(await readiness(runtime.endpoint.origin, oldToken)).toBe(200)
+		expect(await discoverLocalHarnessEvidenceEndpoint(stateDirectory)).toEqual(runtime.endpoint)
+	})
+
+	test('reconciles after live authentication update fails following durable publication', async () => {
+		const stateDirectory = state()
+		const originalStart = httpServer.startLocalHarnessEvidenceHttpServer
+		let failReplacement = true
+		const injected = spyOn(httpServer, 'startLocalHarnessEvidenceHttpServer').mockImplementation(
+			(options) => {
+				const server = originalStart(options)
+				return Object.freeze({
+					...server,
+					replaceToken: (token: string) => {
+						if (failReplacement) {
+							failReplacement = false
+							throw new Error('private server mutation diagnostic')
+						}
+						server.replaceToken(token)
+					},
+				})
+			},
+		)
+		const runtime = start(stateDirectory)
+		injected.mockRestore()
+		const oldToken = readFileSync(join(stateDirectory, 'receiver-token'), 'utf8')
+		let message = ''
+		try {
+			runtime.rotateReceiverToken()
+		} catch (error) {
+			message = String(error)
+		}
+		expect(message).toContain(RUNTIME_ERROR)
+		expect(message).not.toContain('private server mutation diagnostic')
+		const authoritative = readFileSync(join(stateDirectory, 'receiver-token'), 'utf8')
+		expect(authoritative).not.toBe(oldToken)
+		expect(await readiness(runtime.endpoint.origin, oldToken)).toBe(401)
+		expect(await readiness(runtime.endpoint.origin, authoritative)).toBe(200)
+		expect(await discoverLocalHarnessEvidenceEndpoint(stateDirectory)).toEqual(runtime.endpoint)
+	})
+
+	test('normalizes entropy failure before mutation and keeps the old token usable', async () => {
+		const stateDirectory = state()
+		const runtime = start(stateDirectory)
+		const oldToken = readFileSync(join(stateDirectory, 'receiver-token'), 'utf8')
+		const injected = spyOn(crypto, 'randomBytes').mockImplementation(() => {
+			throw new Error('private entropy diagnostic')
+		})
+		let message = ''
+		try {
+			runtime.rotateReceiverToken()
+		} catch (error) {
+			message = String(error)
+		} finally {
+			injected.mockRestore()
+		}
+		expect(message).toContain(RUNTIME_ERROR)
+		expect(message).not.toContain('private entropy diagnostic')
+		expect(readFileSync(join(stateDirectory, 'receiver-token'), 'utf8')).toBe(oldToken)
+		expect(await readiness(runtime.endpoint.origin, oldToken)).toBe(200)
+		expect(await discoverLocalHarnessEvidenceEndpoint(stateDirectory)).toEqual(runtime.endpoint)
+	})
+
+	test('normalizes temporary-name entropy failure before authentication mutation', async () => {
+		const stateDirectory = state()
+		const runtime = start(stateDirectory)
+		const oldToken = readFileSync(join(stateDirectory, 'receiver-token'), 'utf8')
+		const injected = spyOn(crypto, 'randomUUID').mockImplementation(() => {
+			throw new Error('private temporary-name diagnostic')
+		})
+		let message = ''
+		try {
+			runtime.rotateReceiverToken()
+		} catch (error) {
+			message = String(error)
+		} finally {
+			injected.mockRestore()
+		}
+		expect(message).toBe(`Error: ${RUNTIME_ERROR}`)
+		expect(message).not.toContain('private temporary-name diagnostic')
+		expect(readFileSync(join(stateDirectory, 'receiver-token'), 'utf8')).toBe(oldToken)
+		expect(await readiness(runtime.endpoint.origin, oldToken)).toBe(200)
+		expect(await discoverLocalHarnessEvidenceEndpoint(stateDirectory)).toEqual(runtime.endpoint)
+	})
+
+	test('withdraws discovery when post-publication authentication reconciliation fails', async () => {
+		const stateDirectory = state()
+		const originalStart = httpServer.startLocalHarnessEvidenceHttpServer
+		const injected = spyOn(httpServer, 'startLocalHarnessEvidenceHttpServer').mockImplementation(
+			(options) => {
+				const server = originalStart(options)
+				return Object.freeze({
+					...server,
+					replaceToken: () => {
+						throw new Error('private persistent server diagnostic')
+					},
+				})
+			},
+		)
+		const runtime = start(stateDirectory)
+		injected.mockRestore()
+		const oldToken = readFileSync(join(stateDirectory, 'receiver-token'), 'utf8')
+		let message = ''
+		try {
+			runtime.rotateReceiverToken()
+		} catch (error) {
+			message = String(error)
+		}
+		expect(message).toBe(`Error: ${RUNTIME_ERROR}`)
+		expect(message).not.toContain('private persistent server diagnostic')
+		const replacement = readFileSync(join(stateDirectory, 'receiver-token'), 'utf8')
+		expect(replacement).not.toBe(oldToken)
+		expect(await readiness(runtime.endpoint.origin, oldToken)).toBe(401)
+		expect(await readiness(runtime.endpoint.origin, replacement)).toBe(401)
+		expect(() => statSync(join(stateDirectory, 'endpoint.json'))).toThrow()
+		await expect(discoverLocalHarnessEvidenceEndpoint(stateDirectory)).rejects.toThrow(DISCOVERY_ERROR)
 	})
 
 	test('restart preserves site and token, replaces a stale endpoint, and stale discovery fails', async () => {

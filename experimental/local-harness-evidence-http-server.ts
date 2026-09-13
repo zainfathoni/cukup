@@ -19,6 +19,8 @@ type ParsedBody = Record<string, unknown> | typeof TOO_LARGE | typeof INVALID_BO
 export type LocalHarnessEvidenceHttpServer = Readonly<{
 	hostname: typeof LOOPBACK_HOSTNAME
 	port: number
+	disableAuthentication: () => void
+	replaceToken: (token: string) => void
 	stop: () => Promise<void>
 }>
 
@@ -38,7 +40,7 @@ export function startLocalHarnessEvidenceHttpServer(
 	if (!isLocalHarnessEvidenceReceiverToken(options.token)) {
 		throw new Error('Receiver token must be 32 random bytes encoded as unpadded base64url')
 	}
-	const expectedAuthorization = Buffer.from(`Bearer ${options.token}`)
+	let expectedAuthorization: Buffer | undefined = Buffer.from(`Bearer ${options.token}`)
 	const server = Bun.serve({
 		hostname: LOOPBACK_HOSTNAME,
 		port: options.port ?? 0,
@@ -109,6 +111,15 @@ export function startLocalHarnessEvidenceHttpServer(
 	return Object.freeze({
 		hostname: LOOPBACK_HOSTNAME,
 		port: server.port!,
+		disableAuthentication: () => {
+			expectedAuthorization = undefined
+		},
+		replaceToken: (token: string) => {
+			if (!isLocalHarnessEvidenceReceiverToken(token)) {
+				throw new Error('Receiver token must be 32 random bytes encoded as unpadded base64url')
+			}
+			expectedAuthorization = Buffer.from(`Bearer ${token}`)
+		},
 		stop: () => server.stop(true),
 	})
 }
@@ -120,7 +131,8 @@ export function isLocalHarnessEvidenceReceiverToken(value: string): boolean {
 	return decoded.byteLength === 32 && decoded.toString('base64url') === value
 }
 
-function isAuthorized(request: Request, expected: Buffer): boolean {
+function isAuthorized(request: Request, expected: Buffer | undefined): boolean {
+	if (expected === undefined) return false
 	const supplied = request.headers.get('authorization')
 	if (supplied === null) return false
 	const suppliedBytes = Buffer.from(supplied)
