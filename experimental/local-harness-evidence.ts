@@ -382,7 +382,9 @@ function parseEvidence(
 	receivedAtMs: number,
 ): ParsedEvidence {
 	const evidenceId =
-		isRecord(value) && typeof value.evidence_id === 'string' ? value.evidence_id : ''
+		isRecord(value) && typeof value.evidence_id === 'string' && UUID_V4.test(value.evidence_id)
+			? value.evidence_id
+			: ''
 	if (!isRecord(value)) return { evidenceId, reason: 'invalid_evidence' }
 	const fields =
 		value.family === 'engagement'
@@ -399,7 +401,7 @@ function parseEvidence(
 			reason: hasProhibitedKey(value, fields) ? 'prohibited_field' : 'unknown_field',
 		}
 	}
-	if (!UUID_V4.test(evidenceId) || typeof value.recovered !== 'boolean') {
+	if (evidenceId === '' || typeof value.recovered !== 'boolean') {
 		return { evidenceId, reason: 'invalid_evidence' }
 	}
 	const timing = parseTiming(value.timing, receivedAtMs)

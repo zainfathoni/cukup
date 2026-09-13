@@ -12,6 +12,7 @@ import {
 	type Capability,
 	type ConformanceResult,
 	type Evidence,
+	type ParsedEnvelope,
 } from './local-harness-evidence.ts'
 
 const DATABASE_VERSION = 1
@@ -51,6 +52,8 @@ type SegmentRow = {
 	startAtMs: number
 	endEvidenceId: string | null
 }
+
+type SupportedEnvelope = Extract<ParsedEnvelope, { collectorInstanceId: string }>
 
 /** @internal Exported only so the atomic pre-SQLite permission boundary can be tested directly. */
 export function prepareLocalHarnessEvidenceDatabaseFile(path: string): void {
@@ -171,7 +174,42 @@ export class LocalHarnessEvidenceReceiver {
 		if ('reason' in parsed) {
 			return [{ scope: 'envelope', status: 'rejected', reason: parsed.reason }]
 		}
+		return this.#submitParsed(binding, parsed, receivedAtMs)
+	}
 
+	/**
+	 * Submits an envelope for the receiver's authenticated execution site. The collector, version,
+	 * and capabilities are taken only from the validated envelope and its durable negotiation.
+	 */
+	submitAuthenticated(envelope: unknown, receivedAtMs = Date.now()): ConformanceResult[] {
+		const parsed = parseEvidenceEnvelope(envelope, receivedAtMs)
+		if ('unsupported' in parsed) {
+			return [{ scope: 'envelope', status: 'unsupported_version', reason: 'unsupported_version' }]
+		}
+		if ('reason' in parsed) {
+			return [{ scope: 'envelope', status: 'rejected', reason: parsed.reason }]
+		}
+		return this.#submitParsed(
+			{
+				collectorInstanceId: parsed.collectorInstanceId,
+				executionSiteId: this.#executionSiteId,
+				protocolVersion: LOCAL_PROTOCOL_VERSION,
+				capabilities: parsed.capabilities,
+			},
+			parsed,
+			receivedAtMs,
+		)
+	}
+
+	close(): void {
+		this.#database.close()
+	}
+
+	#submitParsed(
+		binding: CollectorBinding,
+		parsed: SupportedEnvelope,
+		receivedAtMs: number,
+	): ConformanceResult[] {
 		const collector = this.#collector(binding.collectorInstanceId)
 		const expectedCapabilities = JSON.stringify([...binding.capabilities].sort())
 		const envelopeCapabilities = JSON.stringify([...parsed.capabilities].sort())
@@ -224,10 +262,6 @@ export class LocalHarnessEvidenceReceiver {
 			return outcomes
 		})
 		return apply.immediate()
-	}
-
-	close(): void {
-		this.#database.close()
 	}
 
 	#acceptEvidence(

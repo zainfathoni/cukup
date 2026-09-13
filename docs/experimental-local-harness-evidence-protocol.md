@@ -1,6 +1,6 @@
 # Experimental local Harness evidence protocol
 
-**Status:** explicitly experimental message contract for local conformance work. It is not the deployed cloud v1/v2 API, a transport endpoint, an SDK compatibility promise, or official support for any Harness. Compatibility and support are unstable until three real Harness integrations and weak-capability/recovery validation pass the roadmap gate. The deployed contract in [service-api.md](service-api.md) is unchanged.
+**Status:** explicitly experimental message and loopback transport contract for local conformance work. It is not the deployed cloud v1/v2 API, a deployed receiver or daemon, an SDK compatibility promise, or official support for any Harness. Compatibility and support are unstable until three real Harness integrations and weak-capability/recovery validation pass the roadmap gate. The deployed contract in [service-api.md](service-api.md) is unchanged.
 
 This specification implements the Stage 3 contract boundary accepted in [ADR 0007](adr/0007-generic-harness-evidence-boundary.md). Examples and fixtures are synthetic and generic. They do not assume the unmerged Tycho fork or revive the superseded ownership, runtime, provisional-duration, or crash-cap decisions in ADR 0006.
 
@@ -150,6 +150,46 @@ For each record in a valid supported envelope, logical outcomes are:
 - `rejected`: closed-schema, privacy, capability, identity, timing, or ordering failure; no partial repair occurs;
 - `unsupported_version`: an envelope-level outcome with no `evidence_id`; version negotiation failed before evidence inspection.
 
-Malformed or unknown-field supported-version envelopes receive one fixed envelope-level `rejected` outcome without an `evidence_id`; raw values are not reflected or logged. Within a valid envelope, records are evaluated in order, so a start may precede its end. Rejection never reserves an identity. Stage 4A implements durable persist-before-outcome, atomic accepted changes within a submission, and restart-safe replay/closure in the local core. Transport acknowledgement framing, bounded retry, retention, storage-exhaustion policy, and sanitized collector spooling remain deferred. Conflict never overwrites accepted evidence, and measurement failure must never indefinitely block Harness work.
+Malformed or unknown-field supported-version envelopes receive one fixed envelope-level `rejected` outcome without an `evidence_id`; raw values are not reflected or logged. A record-level rejection includes its `evidence_id` only when that value is a valid UUIDv4; a missing or invalid identity is represented as the fixed empty string rather than reflected. Within a valid envelope, records are evaluated in order, so a start may precede its end. Rejection never reserves an identity. Stage 4A implements durable persist-before-outcome, atomic accepted changes within a submission, and restart-safe replay/closure in the local core. Bounded collector retry, retention, storage-exhaustion policy, and sanitized collector spooling remain deferred. Conflict never overwrites accepted evidence, and measurement failure must never indefinitely block Harness work.
 
 The executable parser in [`experimental/local-harness-evidence.ts`](../experimental/local-harness-evidence.ts) and credential-free fixtures continue to define Stage 3 message conformance. The Stage 4A receiver adds only the dedicated local persistence described above. Neither component implements a listener, outbox, cloud upload, accounting, aggregation, support claim, or deployed route.
+
+## Stage 4B1 experimental loopback transport
+
+The transport-only wrapper in [`experimental/local-harness-evidence-http-server.ts`](../experimental/local-harness-evidence-http-server.ts) starts a Bun HTTP server explicitly bound to IPv4 loopback `127.0.0.1`. It uses an ephemeral port by default (`port: 0`) and reports the actual bound address and port to its programmatic caller. The caller owns and closes the `LocalHarnessEvidenceReceiver`; stopping the wrapper closes only the HTTP listener. This slice creates no endpoint or credential file, performs no endpoint discovery, and installs no daemon or background service. It does not listen on IPv6, a public interface, a Unix socket, or a deployed `/v1/*` route, and it adds no HTTPS claim.
+
+Exactly two JSON routes exist:
+
+| Method and path | Request | Successful closed response |
+| --- | --- | --- |
+| `POST /experimental/local-harness-evidence/negotiate` | The closed negotiation offer above. | The existing negotiation response with `selected_version`, or the existing `unsupported_versions` response. |
+| `POST /experimental/local-harness-evidence/evidence` | The closed versioned evidence envelope above. | `{"outcomes":[...]}`, containing the Stage 4A logical outcomes only after the receiver transaction commits. |
+
+One server wraps one receiver and therefore one receiver-controlled execution site. The wrapper accepts no hostname, machine, executor, path, native identity, or client-provided binding. For evidence submission, it validates the envelope and resolves its exact collector, protocol version, and capability set against an immutable negotiation snapshot in the receiver database. An older snapshot remains usable after a newer capability set is negotiated and after receiver restart.
+
+### Authentication and framing
+
+The programmatic caller supplies a pre-provisioned receiver token. It must have the strict shape of 32 random bytes encoded as 43 characters of unpadded base64url. Every request must carry exactly `Authorization: Bearer <receiver token>`. Authentication happens before route, method, media-type, or body handling; missing and incorrect authorization both receive the same `401 {"error":"unauthorized"}`. Tokens in URLs, JSON bodies, or cookies are never credentials. The implementation does not log requests, tokens, bodies, or receiver errors. Token generation, secure token-file lifecycle, provisioning, and rotation remain deferred.
+
+Requests must use `Content-Type: application/json` (case-insensitive, with optional media-type parameters). The maximum encoded request body is 1 MiB (1,048,576 bytes). A declared larger `Content-Length` is rejected before reading or parsing the body. Undeclared and chunked bodies are read incrementally and rejected as soon as their accumulated size exceeds that limit; the transport never buffers more than the limit for JSON parsing. Empty, malformed, invalid UTF-8, array, scalar, and null JSON bodies all receive the same fixed invalid-request response. The Bun listener explicitly disables development endpoints and port reuse. Its native body ceiling is raised to JavaScript's maximum safe integer so ordinary HTTP declarations, including those above Bun's default 128 MiB ceiling, reach authentication and the application limit; malformed HTTP or declarations outside the runtime's representable range may still receive a runtime-level failure before the application handler.
+
+Transport errors are closed JSON objects and never reflect a route, request value, identifier, token, body, database diagnostic, or stack trace:
+
+| Status | Body | Meaning |
+| --- | --- | --- |
+| 400 | `{"error":"invalid_request"}` | Invalid JSON framing or negotiation offer. |
+| 401 | `{"error":"unauthorized"}` | Missing or incorrect bearer authorization. |
+| 404 | `{"error":"not_found"}` | Authenticated request to an unknown path. |
+| 405 | `{"error":"method_not_allowed"}` | Authenticated request using a non-POST method on a known path. |
+| 409 | `{"error":"collector_binding_conflict"}` | Negotiation conflicts with the receiver-controlled execution-site binding. |
+| 413 | `{"error":"request_too_large"}` | Declared or streamed body exceeds 1 MiB. |
+| 415 | `{"error":"unsupported_media_type"}` | Authenticated request is not JSON. |
+| 503 | `{"error":"service_unavailable"}` | Receiver persistence failed; `Retry-After: 1` is included and no outcome array is returned. |
+
+A supported, object-shaped evidence request reaches the durable core. Its closed envelope-level or record-level result is returned with status 200. In particular, an unsupported `protocol_version` remains an envelope-level `unsupported_version` result and its evidence is not inspected. A persistence exception rolls back the Stage 4A transaction and returns only the fixed retryable 503 response, so the transport never manufactures an acknowledgement.
+
+### Remaining Stage 4 work
+
+Stage 4B1 is only local framing. Stage 4B2 still needs a collector client with bounded delivery attempts, receiver-unavailable behavior, and a sanitized durable offline spool/retry design. Storage exhaustion and retention policy also remain open. Later independently reviewed work must address endpoint and credential provisioning/discovery/rotation, daemon installation/start/stop/removal, initial macOS/Linux and Amp-orb packaging verification, and real Harness collectors. No macOS, Linux, Amp-orb, Tycho, or other Harness support is claimed by this transport slice.
+
+Cloud protocol/outbox/upload, new metric accounting or aggregation, dashboard work, migration and cutover, deployment, and stable compatibility remain Stage 5 or later gates. Cukup production remains Amp-only v1/v2 with its historical semantics; this experimental server is not deployed and creates no new authoritative metric.
