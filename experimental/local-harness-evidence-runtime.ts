@@ -52,6 +52,7 @@ export type LocalHarnessEvidenceEndpoint = Readonly<{
 
 export type LocalHarnessEvidenceRuntime = Readonly<{
 	endpoint: LocalHarnessEvidenceEndpoint
+	rotateReceiverToken: () => void
 	stop: () => Promise<void>
 }>
 
@@ -68,7 +69,6 @@ export type DiscoveredLocalHarnessEvidenceClientOptions = Omit<
 
 /**
  * Owns one exact durable state directory and one explicitly caller-managed receiver lifecycle.
- * Credential rotation is deliberately not exposed until overlap and stale-client semantics are decided.
  */
 export function startLocalHarnessEvidenceRuntime(
 	options: LocalHarnessEvidenceRuntimeOptions,
@@ -86,13 +86,13 @@ export function startLocalHarnessEvidenceRuntime(
 		rmSync(paths.endpoint, { force: true })
 
 		const executionSiteId = provisionValue(paths.identity, () => randomUUID(), isUuidV4)
-		const token = provisionValue(
+		let activeToken = provisionValue(
 			paths.token,
 			() => randomBytes(32).toString('base64url'),
 			isLocalHarnessEvidenceReceiverToken,
 		)
 		receiver = new LocalHarnessEvidenceReceiver(paths.database, executionSiteId)
-		server = startLocalHarnessEvidenceHttpServer({ receiver, token, port: options.port })
+		server = startLocalHarnessEvidenceHttpServer({ receiver, token: activeToken, port: options.port })
 		const endpoint = Object.freeze({
 			protocol: LOCAL_PROTOCOL,
 			protocol_version: LOCAL_PROTOCOL_VERSION,
@@ -103,6 +103,51 @@ export function startLocalHarnessEvidenceRuntime(
 		let stopped = false
 		return Object.freeze({
 			endpoint,
+			rotateReceiverToken: () => {
+				if (stopped) throw new Error(RUNTIME_ERROR)
+				let persistedToken: string
+				try {
+					persistedToken = readOwnerFile(paths.token, 43)
+					if (
+						!isLocalHarnessEvidenceReceiverToken(persistedToken) ||
+						persistedToken !== activeToken
+					) {
+						throw new Error()
+					}
+				} catch {
+					failClosedRotation(paths.endpoint, server!)
+					throw new Error(RUNTIME_ERROR)
+				}
+
+				let replacement: string
+				let temporaryId: string
+				try {
+					do {
+						replacement = randomBytes(32).toString('base64url')
+					} while (replacement === persistedToken)
+					temporaryId = randomUUID()
+					if (!isLocalHarnessEvidenceReceiverToken(replacement)) throw new Error()
+				} catch {
+					throw new Error(RUNTIME_ERROR)
+				}
+				try {
+					server!.disableAuthentication()
+					atomicWrite(paths.token, replacement, temporaryId)
+					server!.replaceToken(replacement)
+					activeToken = replacement
+				} catch {
+					try {
+						const authoritative = readOwnerFile(paths.token, 43)
+						if (!isLocalHarnessEvidenceReceiverToken(authoritative)) throw new Error()
+						if (authoritative !== persistedToken && authoritative !== replacement) throw new Error()
+						server!.replaceToken(authoritative)
+						activeToken = authoritative
+					} catch {
+						failClosedRotation(paths.endpoint, server!)
+					}
+					throw new Error(RUNTIME_ERROR)
+				}
+			},
 			stop: async () => {
 				if (stopped) return
 				stopped = true
@@ -157,6 +202,15 @@ export function startLocalHarnessEvidenceRuntime(
 		}
 		throw new Error(RUNTIME_ERROR)
 	}
+}
+
+function failClosedRotation(endpointPath: string, server: LocalHarnessEvidenceHttpServer): void {
+	try {
+		server.disableAuthentication()
+	} catch {}
+	try {
+		rmSync(endpointPath, { force: true })
+	} catch {}
 }
 
 /** Discovers only a currently reachable runtime; stale descriptors never produce a client origin. */
@@ -335,8 +389,8 @@ function provisionValue(path: string, create: () => string, valid: (value: strin
 	return value
 }
 
-function atomicWrite(path: string, value: string): void {
-	const temporary = `${path}.tmp-${randomUUID()}`
+function atomicWrite(path: string, value: string, temporaryId: string = randomUUID()): void {
+	const temporary = `${path}.tmp-${temporaryId}`
 	let descriptor: number | undefined
 	try {
 		descriptor = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
