@@ -34,7 +34,7 @@ export type LocalHarnessEvidenceHttpServerOptions = Readonly<{
 export function startLocalHarnessEvidenceHttpServer(
 	options: LocalHarnessEvidenceHttpServerOptions,
 ): LocalHarnessEvidenceHttpServer {
-	if (!isReceiverToken(options.token)) {
+	if (!isLocalHarnessEvidenceReceiverToken(options.token)) {
 		throw new Error('Receiver token must be 32 random bytes encoded as unpadded base64url')
 	}
 	const expectedAuthorization = Buffer.from(`Bearer ${options.token}`)
@@ -107,7 +107,8 @@ export function startLocalHarnessEvidenceHttpServer(
 	})
 }
 
-function isReceiverToken(value: string): boolean {
+/** Validates the shared strict receiver-token representation without retaining or reflecting it. */
+export function isLocalHarnessEvidenceReceiverToken(value: string): boolean {
 	if (!TOKEN.test(value)) return false
 	const decoded = Buffer.from(value, 'base64url')
 	return decoded.byteLength === 32 && decoded.toString('base64url') === value
