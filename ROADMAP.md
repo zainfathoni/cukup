@@ -29,6 +29,22 @@ Each stage is independently reviewable. Routine engineering decisions belong wit
 
 Stable SDK publication and accounting cutover are distinct gates; neither implies the other. Collectors may be first-party, harness-owned, or third-party, embedded or separate. Protocol compatibility is not official support. An unmerged Tycho fork cannot satisfy a supported integration gate.
 
+### Stage 4 durable receiver substage ledger
+
+This ledger is the authoritative implementation sequence within top-level Stage 4. Completion means the experimental slice and its focused contract tests exist; it does not claim deployment, stable compatibility, or first-party operating-system support.
+
+| Substage | Status | Independently reviewable deliverable |
+| --- | --- | --- |
+| 4A | Complete | Transport-independent durable receiver core with persist-before-outcome, immutable negotiation/site binding, replay, conflict, and pending-segment behavior. |
+| 4B1 | Complete | Authenticated, bounded IPv4-loopback HTTP transport around the caller-owned receiver. |
+| 4B2 | Complete | Explicit-drain collector client with a bounded sanitized durable spool and retry-safe FIFO delivery. |
+| 4B3A | Complete | Caller-managed secure state-directory provisioning, SQLite runtime ownership, endpoint publication/discovery, and clean stop. |
+| 4B3B | Complete | Immediate synchronous receiver-token rotation with no credential overlap and reconcile-or-withdraw failure behavior. |
+| 4B3C | Current slice | Foreground Bun receiver command with strict arguments and serialized `SIGHUP` rotation plus `SIGTERM`/`SIGINT` shutdown. No daemonization or autonomous delivery poller. |
+| Remaining Stage 4 work | Not started | Independently reviewable packaging, installation, and removal, followed by macOS, Linux, and Amp-orb lifecycle verification before any support claim. |
+
+Top-level Stage 5 remains the separate cloud protocol, persistence, aggregation, migration, and shadow-dashboard phase. Top-level Stage 6 remains the separate real-collector validation and owner-approved opt-in cutover phase.
+
 ### First independently reviewable code slice
 
 After documentation review, extract only the native Amp observation responsibility from the existing plugin into an internal legacy adapter boundary. Preserve the existing persistence transaction, local native-key recovery, random wire identities, sequence/outbox behavior, project resolution, v1/v2 payloads, and historical grace/crash-cap aggregation. Keep the legacy boundary explicitly separate from future Engagement Observations and execution intervals.
