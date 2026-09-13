@@ -20,8 +20,8 @@ export const CAPABILITIES = [
 	'process.lifecycle',
 ] as const
 
-type Capability = (typeof CAPABILITIES)[number]
-type EvidenceReason =
+export type Capability = (typeof CAPABILITIES)[number]
+export type EvidenceReason =
 	| 'unknown_field'
 	| 'prohibited_field'
 	| 'invalid_evidence'
@@ -29,7 +29,7 @@ type EvidenceReason =
 	| 'invalid_timing'
 	| 'invalid_order'
 	| 'identity_conflict'
-type EnvelopeReason = 'unknown_field' | 'prohibited_field' | 'invalid_envelope'
+export type EnvelopeReason = 'unknown_field' | 'prohibited_field' | 'invalid_envelope'
 
 export type ConformanceResult =
 	| { evidence_id: string; status: 'accepted' | 'duplicate' }
@@ -38,13 +38,13 @@ export type ConformanceResult =
 	| { scope: 'envelope'; status: 'rejected'; reason: EnvelopeReason }
 	| { scope: 'envelope'; status: 'unsupported_version'; reason: 'unsupported_version' }
 
-type Timing = {
+export type Timing = {
 	wall_time: string
 	provenance: 'native_occurrence' | 'collector_observation'
 	precision_ms: number
 }
 
-type ProjectAttribution =
+export type ProjectAttribution =
 	| {
 			kind: 'cukup_project'
 			project_id: string
@@ -52,7 +52,7 @@ type ProjectAttribution =
 	  }
 	| { kind: 'unassigned'; reason: 'absent' | 'ambiguous' }
 
-type Engagement = {
+export type Engagement = {
 	family: 'engagement'
 	evidence_id: string
 	interaction: 'composition' | 'submission' | 'follow_up' | 'approval' | 'takeover'
@@ -62,7 +62,7 @@ type Engagement = {
 	project_attribution: ProjectAttribution
 }
 
-type ExecutionStart = {
+export type ExecutionStart = {
 	family: 'execution_start'
 	evidence_id: string
 	segment_id: string
@@ -71,7 +71,7 @@ type ExecutionStart = {
 	project_attribution: ProjectAttribution
 }
 
-type ExecutionEnd = {
+export type ExecutionEnd = {
 	family: 'execution_end'
 	evidence_id: string
 	segment_id: string
@@ -79,7 +79,31 @@ type ExecutionEnd = {
 	timing: Timing
 }
 
-type Evidence = Engagement | ExecutionStart | ExecutionEnd
+export type Evidence = Engagement | ExecutionStart | ExecutionEnd
+
+export type NegotiationOffer = {
+	protocol: typeof LOCAL_PROTOCOL
+	supported_versions: number[]
+	collector_instance_id: string
+	capabilities: Capability[]
+}
+
+export type ParsedNegotiationEnvelope = {
+	protocol: typeof LOCAL_PROTOCOL
+	supportedVersions: number[]
+	collectorInstanceId: string
+	readCapabilities: () => unknown
+}
+
+export type ParsedEnvelope =
+	| {
+			collectorInstanceId: string
+			protocolVersion: number
+			capabilities: Capability[]
+			evidence: ParsedEvidence[]
+	  }
+	| { reason: EnvelopeReason }
+	| { unsupported: true }
 
 const CAPABILITY_SET = new Set<string>(CAPABILITIES)
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -90,6 +114,12 @@ const ENVELOPE_FIELDS = new Set([
 	'collector_instance_id',
 	'capabilities',
 	'evidence',
+])
+const NEGOTIATION_FIELDS = new Set([
+	'protocol',
+	'supported_versions',
+	'collector_instance_id',
+	'capabilities',
 ])
 const ENGAGEMENT_FIELDS = new Set([
 	'family',
@@ -142,15 +172,64 @@ export function negotiateVersion(
 	offered: readonly number[],
 	receiverSupported: readonly number[] = [LOCAL_PROTOCOL_VERSION],
 ): number | undefined {
+	if (!isVersionDeclaration(offered)) return undefined
+	const supported = new Set(receiverSupported)
+	return [...offered].sort((a, b) => b - a).find((version) => supported.has(version))
+}
+
+/** Parses the same closed capability declaration used by evidence envelopes. */
+export function parseNegotiationOffer(value: unknown): NegotiationOffer | undefined {
+	const envelope = parseNegotiationEnvelope(value)
+	if (envelope === undefined) return undefined
+	return parseVersion1NegotiationOffer(envelope)
+}
+
+/** Parses only version-independent negotiation fields without reading version-specific capabilities. */
+export function parseNegotiationEnvelope(value: unknown): ParsedNegotiationEnvelope | undefined {
 	if (
-		offered.length === 0 ||
-		offered.some((version) => !Number.isSafeInteger(version) || version < 1) ||
-		new Set(offered).size !== offered.length
+		!isRecord(value) ||
+		unknownKeys(value, NEGOTIATION_FIELDS).length > 0 ||
+		Object.keys(value).length !== NEGOTIATION_FIELDS.size
 	) {
 		return undefined
 	}
-	const supported = new Set(receiverSupported)
-	return [...offered].sort((a, b) => b - a).find((version) => supported.has(version))
+	if (
+		value.protocol !== LOCAL_PROTOCOL ||
+		!Array.isArray(value.supported_versions) ||
+		!isVersionDeclaration(value.supported_versions) ||
+		typeof value.collector_instance_id !== 'string' ||
+		!UUID_V4.test(value.collector_instance_id)
+	) {
+		return undefined
+	}
+	return {
+		protocol: LOCAL_PROTOCOL,
+		supportedVersions: value.supported_versions,
+		collectorInstanceId: value.collector_instance_id,
+		readCapabilities: () => value.capabilities,
+	}
+}
+
+/** Validates the version 1 capability declaration after version 1 has been selected. */
+export function parseVersion1NegotiationOffer(
+	envelope: ParsedNegotiationEnvelope,
+): NegotiationOffer | undefined {
+	const capabilities = envelope.readCapabilities()
+	if (!isCapabilityDeclaration(capabilities)) return undefined
+	return {
+		protocol: envelope.protocol,
+		supported_versions: envelope.supportedVersions,
+		collector_instance_id: envelope.collectorInstanceId,
+		capabilities,
+	}
+}
+
+function isVersionDeclaration(value: readonly unknown[]): value is number[] {
+	return (
+		value.length > 0 &&
+		value.every((version) => Number.isSafeInteger(version) && (version as number) >= 1) &&
+		new Set(value).size === value.length
+	)
 }
 
 /**
@@ -170,7 +249,7 @@ export function validateConformanceDeliveries(
 	const results: ConformanceResult[] = []
 
 	for (const value of deliveries) {
-		const envelopeResult = parseEnvelope(value, receivedAtMs)
+		const envelopeResult = parseEvidenceEnvelope(value, receivedAtMs)
 		if ('unsupported' in envelopeResult) {
 			results.push({
 				scope: 'envelope',
@@ -246,15 +325,13 @@ export function validateConformanceDeliveries(
 	return results
 }
 
-type ParsedEvidence = { value: Evidence } | { evidenceId: string; reason: EvidenceReason }
+export type ParsedEvidence = { value: Evidence } | { evidenceId: string; reason: EvidenceReason }
 
-function parseEnvelope(
+/** Parses a supported envelope without retaining unknown or rejected payload fields. */
+export function parseEvidenceEnvelope(
 	value: unknown,
 	receivedAtMs: number,
-):
-	| { evidence: ParsedEvidence[] }
-	| { reason: EnvelopeReason }
-	| { unsupported: true } {
+): ParsedEnvelope {
 	if (
 		isRecord(value) &&
 		Number.isSafeInteger(value.protocol_version) &&
@@ -273,21 +350,30 @@ function parseEnvelope(
 		value.protocol_version !== LOCAL_PROTOCOL_VERSION ||
 		typeof value.collector_instance_id !== 'string' ||
 		!UUID_V4.test(value.collector_instance_id) ||
-		!Array.isArray(value.capabilities) ||
 		!Array.isArray(value.evidence) ||
-		value.capabilities.length === 0 ||
-		value.capabilities.some((capability) => typeof capability !== 'string' || !CAPABILITY_SET.has(capability)) ||
-		new Set(value.capabilities).size !== value.capabilities.length ||
-		hasRecoveryWithoutBaseCapability(value.capabilities)
+		!isCapabilityDeclaration(value.capabilities)
 	) {
 		return { reason: 'invalid_envelope' }
 	}
 	const capabilities = new Set(value.capabilities as Capability[])
 	return {
+		collectorInstanceId: value.collector_instance_id,
+		protocolVersion: value.protocol_version,
+		capabilities: value.capabilities as Capability[],
 		evidence: value.evidence.map((evidence) =>
 			parseEvidence(evidence, capabilities, receivedAtMs),
 		),
 	}
+}
+
+function isCapabilityDeclaration(value: unknown): value is Capability[] {
+	return (
+		Array.isArray(value) &&
+		value.length > 0 &&
+		value.every((capability) => typeof capability === 'string' && CAPABILITY_SET.has(capability)) &&
+		new Set(value).size === value.length &&
+		!hasRecoveryWithoutBaseCapability(value)
+	)
 }
 
 function parseEvidence(
@@ -473,6 +559,11 @@ function stableStringify(value: unknown): string {
 			.join(',')}}`
 	}
 	return JSON.stringify(value)
+}
+
+/** Canonicalizes an already parsed evidence fact for durable immutable comparison. */
+export function canonicalizeEvidence(value: Evidence): string {
+	return stableStringify(value)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
