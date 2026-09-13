@@ -59,6 +59,30 @@ describe('experimental local Harness evidence contract', () => {
 		])
 	})
 
+	test('does not reflect an invalid evidence identity in rejection outcomes', () => {
+		const privateValue = 'private-native-id-or-token'
+		expect(
+			validateConformanceDeliveries(
+				[
+					{
+						protocol: LOCAL_PROTOCOL,
+						protocol_version: LOCAL_PROTOCOL_VERSION,
+						collector_instance_id: fixtures.collector_instance_id,
+						capabilities: ['engagement.submission'],
+						evidence: [
+							{ evidence_id: privateValue, family: privateValue },
+							{ ...fixtures.cases[0]!.deliveries[0]!.evidence[0], evidence_id: privateValue },
+						],
+					},
+				],
+				fixtures.received_at,
+			),
+		).toEqual([
+			{ evidence_id: '', status: 'rejected', reason: 'invalid_evidence' },
+			{ evidence_id: '', status: 'rejected', reason: 'invalid_evidence' },
+		])
+	})
+
 	for (const fixture of fixtures.cases) {
 		test(fixture.name, () => {
 			const deliveries = fixture.deliveries.map((delivery: FixtureDelivery) => ({
