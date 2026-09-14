@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { CAPABILITIES, LOCAL_PROTOCOL, type Evidence, type ProjectAttribution } from './harness-evidence-protocol.ts'
 import { SHADOW_SCHEMA, ShadowEvidenceStore } from './shadow-evidence.ts'
-import { buildShadowIntervals, summarizeShadow } from './shadow-aggregation.ts'
+import { buildShadowIntervals, summarizeShadow, summarizeShadowAfterCutover } from './shadow-aggregation.ts'
 import { summarizeWork } from './aggregation.ts'
 import { ServiceStore } from './store.ts'
 
@@ -16,6 +16,7 @@ const project = (n: number): ProjectAttribution => ({ kind: 'cukup_project', pro
 const unassigned: ProjectAttribution = { kind: 'unassigned', reason: 'ambiguous' }
 const ms = Date.parse
 const minute = 60_000
+const cutoverMs = ms('2026-09-13T17:00:00Z') // Monday 00:00 Asia/Jakarta.
 function fixture(store?: ShadowEvidenceStore) {
 	if (!store) {
 		const db = new Database(':memory:')
@@ -122,6 +123,84 @@ test('accepted within-skew future evidence clips at as-of, including exact bound
 	expect(summarizeShadow(shadow.records(), { ...query, asOfMs: ms(received) + 1 }).global).toEqual({ workingTimeEstimatedMs: 4 * minute + 1, agentRuntimeMs: 9 * minute + 1 })
 })
 
+test('cutover clips asymmetric engagement and execution boundaries across report periods and as-of', () => {
+	const { shadow, add } = fixture()
+	add('engagement', '2026-09-13T16:40:00Z', 70, project(90)) // Wholly before.
+	add('engagement', '2026-09-13T16:53:00Z', 70, project(91)) // Eight minutes after.
+	add('engagement', '2026-09-13T17:00:00Z', 71, unassigned) // Exact boundary.
+	add('execution_start', '2026-09-13T16:30:00Z', 72, project(90), 80)
+	add('execution_end', '2026-09-13T16:59:00Z', 72, project(90), 80)
+	add('execution_start', '2026-09-13T16:50:00Z', 72, project(90), 81)
+	add('execution_end', '2026-09-13T17:10:00Z', 72, project(90), 81)
+	add('execution_start', '2026-09-13T17:20:00Z', 71, project(91), 82)
+	add('execution_end', '2026-09-13T17:27:00Z', 71, project(91), 82)
+	add('execution_start', '2026-09-13T18:00:00Z', 70, unassigned, 83) // Pending stays zero.
+	add('engagement', '2026-09-14T17:10:00Z', 70, project(90))
+	const rows = shadow.records()
+	const before = structuredClone(rows)
+	const query = (date: { year: number; month: number; day: number }, timezone: string, asOfMs = ms('2026-12-01T00:00:00Z')) => ({
+		date, timezone, period: 'day' as const, asOfMs, cutoverMs,
+	})
+
+	const beforePeriod = summarizeShadowAfterCutover(rows, query({ year: 2026, month: 9, day: 13 }, 'Asia/Jakarta'))
+	expect(beforePeriod.endMs).toBe(cutoverMs)
+	expect(beforePeriod.global).toEqual({ workingTimeEstimatedMs: 0, agentRuntimeMs: 0 })
+	expect(beforePeriod.projects).toEqual([])
+	expect(beforePeriod.sites).toEqual([])
+
+	const straddling = summarizeShadowAfterCutover(rows, query({ year: 2026, month: 9, day: 13 }, 'UTC'))
+	expect(straddling.global).toEqual({ workingTimeEstimatedMs: 15 * minute, agentRuntimeMs: 17 * minute })
+	expect(straddling.projects).toEqual([
+		{ projectId: id(90), totals: { workingTimeEstimatedMs: 0, agentRuntimeMs: 10 * minute } },
+		{ projectId: id(91), totals: { workingTimeEstimatedMs: 8 * minute, agentRuntimeMs: 7 * minute } },
+		{ projectId: null, totals: { workingTimeEstimatedMs: 15 * minute, agentRuntimeMs: 0 } },
+	])
+	expect(straddling.sites.map((lane) => [lane.executionSiteId, lane.totals])).toEqual([
+		[id(170), { workingTimeEstimatedMs: 8 * minute, agentRuntimeMs: 0 }],
+		[id(171), { workingTimeEstimatedMs: 15 * minute, agentRuntimeMs: 7 * minute }],
+		[id(172), { workingTimeEstimatedMs: 0, agentRuntimeMs: 10 * minute }],
+	])
+
+	const afterPeriod = summarizeShadowAfterCutover(rows, query({ year: 2026, month: 9, day: 14 }, 'UTC'))
+	expect(afterPeriod.global).toEqual({ workingTimeEstimatedMs: 15 * minute, agentRuntimeMs: 0 })
+	expect(afterPeriod.projects).toEqual([{ projectId: id(90), totals: { workingTimeEstimatedMs: 15 * minute, agentRuntimeMs: 0 } }])
+
+	for (const [asOfMs, expectedMs] of [
+		[cutoverMs - 1, 0], [cutoverMs, 0], [cutoverMs + 1, 1],
+	] as const) {
+		expect(summarizeShadowAfterCutover(rows, query({ year: 2026, month: 9, day: 13 }, 'UTC', asOfMs)).global)
+			.toEqual({ workingTimeEstimatedMs: expectedMs, agentRuntimeMs: expectedMs })
+	}
+	expect(rows).toEqual(before)
+	expect(shadow.records()).toEqual(before)
+})
+
+test('late closure revises occurrence-time runtime without using receipt time or fabricating pending duration', () => {
+	const { shadow, add } = fixture()
+	add('execution_start', '2026-09-13T16:50:00Z', 70, project(90), 80, '2026-09-13T16:51:00Z')
+	const query = { ...report(14), cutoverMs, asOfMs: ms('2026-09-20T00:00:00Z') }
+	expect(summarizeShadowAfterCutover(shadow.records(), query).global.agentRuntimeMs).toBe(0)
+	add('execution_end', '2026-09-13T17:12:00Z', 70, project(90), 80, '2026-12-01T00:00:00Z')
+	const rows = shadow.records()
+	expect(summarizeShadowAfterCutover(rows, query).global.agentRuntimeMs).toBe(12 * minute)
+	expect(summarizeShadowAfterCutover(rows.map((row) => ({ ...row, receivedAtMs: ms('2027-02-01T00:00:00Z') })), query))
+		.toEqual(summarizeShadowAfterCutover(rows, query))
+})
+
+test('cutover must be exactly Monday midnight in Asia/Jakarta', () => {
+	const query = { ...report(), cutoverMs }
+	expect(() => summarizeShadowAfterCutover([], query)).not.toThrow()
+	expect(() => summarizeShadowAfterCutover([], { ...query, cutoverMs: ms('2026-09-14T17:00:00Z') }))
+		.toThrow('Cutover must be Monday 00:00 in Asia/Jakarta') // Tuesday midnight.
+	expect(() => summarizeShadowAfterCutover([], { ...query, cutoverMs: ms('2026-09-14T00:00:00Z') }))
+		.toThrow('Cutover must be Monday 00:00 in Asia/Jakarta') // Monday 07:00.
+	expect(() => summarizeShadowAfterCutover([], { ...query, cutoverMs: ms('1942-03-22T16:30:00Z') }))
+		.toThrow('Cutover must be Monday 00:00 in Asia/Jakarta') // Monday began at 01:30 after a clock jump.
+	expect(() => summarizeShadowAfterCutover([], { ...query, cutoverMs: ms('0001-01-06T16:52:48Z') }))
+		.toThrow('Cutover must be Monday 00:00 in Asia/Jakarta') // Sunday midnight in historical Jakarta.
+	expect(() => summarizeShadowAfterCutover([], { ...query, cutoverMs: ms('0001-01-07T16:52:48Z') })).not.toThrow()
+})
+
 test('civil reports split elapsed intervals across spring and autumn DST and Monday boundaries', () => {
 	for (const [month, day, start, end, hours, previousMinutes, nextMinutes, engagement] of [
 		[3, 8, '2026-03-08T04:43:00Z', '2026-03-09T04:29:00Z', 23, 17, 29, '2026-03-08T06:56:00Z'],
@@ -173,6 +252,7 @@ test('empty and orphan-only snapshots have no intervals; derived snapshots do no
 		if (attribution.kind !== 'unassigned') throw new Error('Expected original Unassigned start')
 		attribution.reason = 'absent'
 		summarizeShadow(rows, report())
+		summarizeShadowAfterCutover(rows, { ...report(), cutoverMs })
 		expect(rows).toEqual(before)
 		expect(shadow.records()).toEqual(before)
 		expect(store.attributedEvents()).toEqual(legacy)
