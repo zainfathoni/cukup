@@ -68,7 +68,8 @@ This ledger is the authoritative implementation sequence within top-level Stage 
 | 5O | Complete authenticated dashboard slice | [Shadow disclosures dashboard](docs/stage-5o-shadow-disclosures-dashboard.md): schema-2 independent report panel, privacy-safe labels, Stage 5M/5N ready/stale/unavailable delivery, and accessible capability/loss/pending/synchronization rendering without totals coupling. No collector scheduling, clock-trust activation, cutover, migration, deployment, or support claim. |
 | 5P | Complete design-contract slice; implementation externally blocked | [Workload OIDC execution-site contract](docs/stage-5p-oidc-execution-site-contract.md): required Amp-attested incarnation lifecycle, opaque service identity, immutable collector/replay ownership, and generic-only claim/privacy policy. Current documented tokens do not establish recreation-safe identity. Project attribution remains Unassigned and OIDC synchronization unsupported; legacy OIDC unchanged. No implementation or activation. |
 | 5Q | Complete design-contract slice | [Legacy history and reporting authority](docs/stage-5q-legacy-history-authority.md): rejects legacy-to-generic evidence backfill and heuristic cross-authority deduplication; preserves legacy semantics and separates authority at a future owner-approved account-wide Stage 5F boundary. Defines independent reconciliation vectors and approval/backup/privacy gates; an optional audit ledger is non-authoritative and deferred. No implementation or activation. |
-| Remaining Stage 5 work | Deferred to separate slices | Resolve Stage 5P's external attestation/durability blockers before proposing OIDC/Amp-orb ingestion; separately review approved evidence-time project mappings, OIDC synchronization, any Stage 5Q audit tooling, durable authority selection/restoration safeguards, report/target routing, and cutover activation. Legacy evidence backfill is rejected, not an implementation task. |
+| 5R | Complete design-contract slice | [Durable authority activation](docs/stage-5r-authority-activation-contract.md): one owner-approved account-wide Monday 00:00 Asia/Jakarta boundary, durable approval and atomic activation, trusted-time and restoration fences, separate report/API/target routing, unavailable behavior and explicit coverage/readiness gates. No implementation, selected date, or activation. |
+| Remaining Stage 5 work | Deferred to separate slices | Resolve Stage 5P's external attestation/durability blockers before proposing OIDC/Amp-orb ingestion; separately review approved evidence-time project mappings, OIDC synchronization, any Stage 5Q audit tooling, and implementations of Stage 5R control/recovery state, trusted time, report/API/client/target routing and activation gates. Legacy evidence backfill is rejected, not an implementation task. |
 
 Stages 5A and 5B change service persistence and are **not deployment-neutral**: an eventual main push may trigger service publication and requires explicit owner approval. Stage 5C is deployment-neutral because its experimental client is not imported by a runtime, installer, receiver, or service build entrypoint; activation still requires the already reviewed Stage 5B/schema-6 service. No deployment or production migration is authorized by this ledger. Support claims and top-level Stage 6 real-collector validation and owner-approved opt-in cutover remain separate gates.
 
@@ -111,6 +112,12 @@ provenance or a deterministic cross-authority identity. Legacy remains target au
 owner-approved activation; historical legacy totals retain their semantics, including late revisions.
 No migration, authority selection, database operation, publication, deployment, or support is activated.
 Cumulative prerequisite publication/schema and rollback constraints remain unchanged.
+
+Stage 5R is documentation-only and publication-neutral. Its future armed boundary prevents delayed
+activation or restoration from silently extending legacy target authority; active post-boundary
+targets use only independent generic engagement. Storage, clocks, owner controls, compatible consumers
+and recovery remain implementation gates, and Stage 5P's OIDC blocker remains explicit. No date is
+selected, no authority activated, and no cumulative prerequisite publication implication is removed.
 
 ### First independently reviewable code slice
 
