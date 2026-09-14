@@ -5,6 +5,11 @@ opt-in, shadow-only, and not an official Amp support claim. It emits the existin
 local Harness evidence protocol to a separately running local runtime. It never writes generic
 evidence to the deployed legacy v1/v2 store or cloud sync path.
 
+[Stage 5D](stage-5d-physical-amp-shadow.md) additionally reuses these same hook semantics through a
+separate, default-off physical cloud outbox integration. Its exact opt-in, file credentials,
+physical-only restriction, spool, and bounded drain/status command are independent of the
+local-runtime activation documented below. Neither destination changes legacy v1/v2 behavior.
+
 ## Verified Amp capability
 
 The collector uses supported `@ampcode/plugin` APIs available to this repository:
