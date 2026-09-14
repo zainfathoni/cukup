@@ -1,6 +1,6 @@
 # Stage 5C: physical cloud shadow outbox
 
-Stage 5C adds one programmatic, inactive client boundary for a physical execution site. [`PhysicalShadowEvidenceOutbox`](../experimental/physical-shadow-evidence-outbox.ts) accepts one fact from the existing closed generic Harness evidence vocabulary, durably creates its own collector UUIDv4, assigns a strictly increasing cloud-shadow source sequence, and persists the complete normalized one-fact envelope before any network call. It does not activate the experimental Amp collector, install a receiver, or start a background loop. Its owner must call `enqueue` and `drainStep` explicitly.
+Stage 5C adds one programmatic, inactive client boundary for a physical execution site. [`PhysicalShadowEvidenceOutbox`](../experimental/physical-shadow-evidence-outbox.ts) accepts one fact from the existing closed generic Harness evidence vocabulary, durably creates its own collector UUIDv4, assigns a strictly increasing cloud-shadow source sequence, and persists the complete normalized one-fact envelope before any network call. [Stage 5T](stage-5t-physical-coverage-delivery.md) later extends this same queue to explicit Stage 5H coverage facts without changing these evidence guarantees. It does not install a receiver or start a background loop. Its owner must call enqueue and drain boundaries explicitly.
 
 ## Durable delivery boundary
 

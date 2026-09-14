@@ -204,6 +204,37 @@ async function authenticatedResponse(
 			envelope: body.value.envelope,
 		}, now()))
 	}
+	if (url.pathname === '/v1/shadow-coverage') {
+		if (request.method !== 'POST') {
+			return json({ error: 'method_not_allowed' }, 405, { allow: 'POST' })
+		}
+		if (principal.kind !== 'bearer') {
+			return json({ error: 'physical_bearer_required' }, 403)
+		}
+		const executionSiteId = store.shadowExecutionSite(principal.tokenId)
+		if (!executionSiteId) return json({ error: 'executor_profile_required' }, 403)
+		if (url.search !== '') return json({ error: 'invalid_request' }, 400)
+		if (request.headers.has('content-encoding') ||
+			!/^application\/json(?:\s*;\s*charset\s*=\s*(?:utf-8|"utf-8"))?\s*$/i.test(
+				request.headers.get('content-type') ?? '',
+			)) return json({ error: 'unsupported_media_type' }, 415)
+		const body = await synchronizationBody(request, MAX_REQUEST_BYTES)
+		if ('error' in body) {
+			return json({ error: body.error === 'payload_too_large' ? 'payload_too_large' : 'invalid_request' },
+				body.error === 'payload_too_large' ? 413 : 400)
+		}
+		if (!isShadowRequest(body.value)) {
+			return json({ status: 'rejected', reason: 'invalid_record' })
+		}
+		const outcome = store.appendPhysicalCoverage(principal.tokenId, {
+			sourceSequence: body.value.source_sequence, envelope: body.value.envelope,
+		}, now())
+		if ('error' in outcome) {
+			return outcome.error === 'unauthorized'
+				? json(outcome, 401, { 'www-authenticate': 'Bearer' }) : json(outcome, 403)
+		}
+		return json(outcome)
+	}
 	if (url.pathname === '/v1/shadow-synchronization') {
 		if (request.method !== 'POST') return json({ error: 'method_not_allowed' }, 405, { allow: 'POST' })
 		if (principal.kind !== 'bearer') return json({ error: 'physical_bearer_required' }, 403)
@@ -287,6 +318,7 @@ function logPath(pathname: string): string {
 		pathname === '/v1/capabilities' ||
 		pathname === '/v1/executor-profile' ||
 		pathname === '/v1/shadow-evidence' ||
+		pathname === '/v1/shadow-coverage' ||
 		pathname === '/v1/events:batch' ||
 		pathname === '/v1/summary' ||
 		pathname === '/' ||

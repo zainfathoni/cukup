@@ -51,6 +51,9 @@ Unassigned because no approved Cukup Project UUID mapping exists. No engagement,
 process-liveness duration, recovered endpoint, or cross-restart hook deduplication is claimed.
 
 The collector's bounded observation queue persists each fact locally before requesting delivery.
+On the first successful ownership of a durable spool, Stage 5T first persists one prospective declaration
+of the collector's exact static `execution.segments` set. Its identity/effective instant are restart-idempotent;
+it does not cover older evidence and no loss fact is inferred. Evidence and coverage then share one FIFO.
 Hooks return without awaiting network. Startup requests one drain step; enqueues request bounded
 steps and coalesce requests while a step is in flight. A step handles only the oldest record and
 uses at most two requests (profile then shadow ingestion), each with a 1-second abort timeout.
@@ -83,11 +86,12 @@ ingestion, outage/restart/replay, response-loss duplicate handling, file-token r
 commands/disposal, subscription/ownership ordering, legacy byte isolation, concurrent legacy
 recording/sync, and privacy sentinels. No physical production run or actual cloud call is claimed.
 
-Stage 5D changes plugin code and documentation only. It changes no service publication input,
-route, schema, service declaration, installer, deployment setting, or production activation.
-An owner-approved future activation requires the Stage 5B/schema-6 service; the transferred 5A/5B
-prerequisites retain their separate publication and migration implications. Stage 5D itself does
-not trigger the path-filtered service publication workflow.
+Stage 5D originally changed plugin code and documentation only. Stage 5T also adds a service route and is
+therefore not publication-neutral; see its compatibility and rollout constraints. Stage 5D changes no
+authority setting and remains default-off. Stage 5T changes no service schema, service declaration,
+installer, deployment setting, or production activation. An owner-approved future activation requires
+the current schema-8 service with the Stage 5T route; earlier Stage 5D-only deployments are incompatible
+with capability delivery. Stage 5D itself did not trigger the path-filtered service publication workflow.
 
 OIDC/Amp-orb cloud execution-site design, non-Amp collectors, unsupported engagement evidence,
 aggregation/union, clipping, dashboard/coverage, historical migration/backfill, production rollout,

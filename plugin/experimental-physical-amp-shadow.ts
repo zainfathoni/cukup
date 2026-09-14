@@ -63,6 +63,8 @@ export function startExperimentalPhysicalAmpShadow(
 			now: options.now,
 			requestTimeoutMs: 1_000,
 		})
+		const declaration = outbox.enqueueCapabilityDeclaration()
+		if (declaration.status !== 'queued') throw new Error('Physical capability declaration unavailable')
 		collector = createExperimentalAmpShadowCollector({
 			amp,
 			collectorStateDirectory: directory,

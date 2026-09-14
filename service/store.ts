@@ -10,7 +10,7 @@ import {
 	projectShadowDisclosures,
 	type ShadowDisclosureDelivery,
 } from './shadow-disclosures.ts'
-import { SHADOW_COVERAGE_SCHEMA, SHADOW_SCHEMA, ShadowEvidenceStore } from './shadow-evidence.ts'
+import { SHADOW_COVERAGE_SCHEMA, SHADOW_SCHEMA, ShadowEvidenceStore, type ShadowOutcome } from './shadow-evidence.ts'
 import { SHADOW_SYNCHRONIZATION_SCHEMA, ShadowSynchronizationStore, type SynchronizationClockSource } from './shadow-synchronization.ts'
 import type {
 	AttributedStoredWorkEvent,
@@ -233,6 +233,23 @@ export class ServiceStore {
 				   AND executor_label IS NOT NULL AND execution_site_id IS NOT NULL`,
 			)
 			.get(tokenId)?.executionSiteId
+	}
+
+	/** Revalidates bearer authority in the same writer transaction as the immutable coverage append. */
+	appendPhysicalCoverage(
+		tokenId: string,
+		input: { sourceSequence: unknown; envelope: unknown },
+		receivedAtMs: number,
+	): ShadowOutcome | { error: 'unauthorized' | 'executor_profile_required' } {
+		return this.#database.transaction(() => {
+			const authorization = this.synchronization.authorize(tokenId)
+			if ('error' in authorization) return authorization
+			return this.shadow.appendCoverage({
+				executionSiteId: authorization.site,
+				sourceSequence: input.sourceSequence,
+				envelope: input.envelope,
+			}, receivedAtMs)
+		}).immediate()
 	}
 
 	/** Current internal disclosure delivery plus privacy-safe site-label candidates for report projection. */

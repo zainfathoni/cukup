@@ -186,17 +186,17 @@ export class ShadowSynchronizationStore {
 }
 
 /** Bounded streaming bytes; JSON.parse validates grammar, the token walk rejects duplicate decoded keys. */
-export async function synchronizationBody(request: Request): Promise<
+export async function synchronizationBody(request: Request, maxBytes = 1024): Promise<
 	{ value: unknown } | { error: 'invalid_json' | 'payload_too_large' }
 > {
 	const reader = request.body?.getReader()
-	const bytes = new Uint8Array(1024)
+	const bytes = new Uint8Array(maxBytes)
 	let length = 0
 	try {
 		if (reader) for (;;) {
 			const { done, value } = await reader.read()
 			if (done) break
-			if (length + value.byteLength > 1024) {
+			if (length + value.byteLength > maxBytes) {
 				void reader.cancel().catch(() => {})
 				return { error: 'payload_too_large' }
 			}
