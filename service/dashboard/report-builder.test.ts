@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { AttributedStoredWorkEvent, StoredWorkEvent } from '../types.ts'
+import type { ShadowDisclosureLane } from '../shadow-disclosures.ts'
 import {
 	availableDashboardLabels,
 	buildDashboardReport,
@@ -104,6 +105,10 @@ function fixture(targetOverrides = new Map<string, number>()): {
 			attributedEvents: () => events,
 			targetOverrides: () => targetOverrides,
 			listBearerMetadata: () => credentials,
+			shadowDisclosures: () => ({
+				delivery: { availability: 'ready', disclosures: [] },
+				labels: new Map(),
+			}),
 		},
 	}
 }
@@ -454,5 +459,137 @@ describe('dashboard report aggregation', () => {
 		expect(report.timeline.state).toBe('ready')
 		expect(report.trend.state).toBe('ready')
 		expect(report.executors.state).toBe('ready')
+		expect(report.shadow_disclosures.state).toBe('ready')
+	})
+
+	test('sanitizes asymmetric ready disclosure lanes without coupling them to totals', () => {
+		const value = fixture()
+		const lane = (
+			collector: string,
+			site: string,
+			synchronization: ShadowDisclosureLane['synchronization'],
+		): ShadowDisclosureLane => ({
+			collectorId: collector,
+			executionSiteId: site,
+			startMs: now - 2 * minute,
+			endMs: now,
+			capabilityIntervals: [{
+				startMs: now - 2 * minute,
+				endMs: now,
+				workingTimeV1: {
+					status: 'declared_limited',
+					missingCapabilities: ['engagement.composition'],
+					missingRecoveryCapabilities: ['recovery.engagement.composition'],
+				},
+				agentRuntimeV1: {
+					status: 'declared_for_scope',
+					missingRecoveryCapabilities: ['recovery.execution_end.native'],
+				},
+			}],
+			collectionIntegrity: {
+				otherwise: 'unknown',
+				losses: [{
+					status: 'known_loss',
+					factId: `fact-${collector}`,
+					startMs: now - minute,
+					endMs: now,
+					capabilities: ['engagement.submission'],
+					reason: 'operator_discard',
+				}],
+			},
+			executionClosure: {
+				status: 'pending',
+				starts: [{ evidenceId: `evidence-${collector}`, segmentId: `segment-${collector}`, startMs: now - minute }],
+			},
+			synchronization,
+		})
+		const states: ShadowDisclosureLane['synchronization'][] = ['clear', 'queued', 'retrying', 'blocked', 'unknown']
+		const disclosures = states.map((state, index) => lane(`collector-${index}`, `site-${index}`, state))
+		const report = buildDashboardReport({
+			...value.store,
+			shadowDisclosures: (bounds) => {
+				expect(bounds).toEqual({
+					startMs: Date.parse('2026-08-24T17:00:00.000Z'),
+					endMs: now,
+				})
+				return {
+					delivery: { availability: 'ready', disclosures },
+					labels: new Map([
+						['site-0', 'machine-a'],
+						['site-1', 'machine-b'],
+					]),
+				}
+			},
+		}, { projects: [], executors: [], range: { preset: 7 } }, now)
+		expect(report.schema_version).toBe(2)
+		expect(report.shadow_disclosures.state).toBe('ready')
+		if (report.shadow_disclosures.state !== 'ready') throw new Error('Expected disclosures')
+		expect(report.shadow_disclosures.data.lanes.map((entry) => [entry.label, entry.synchronization])).toEqual([
+			['machine-a', 'clear'],
+			['machine-b', 'queued'],
+			['Shadow collector · collector 1', 'retrying'],
+			['Shadow collector · collector 2', 'blocked'],
+			['Shadow collector · collector 3', 'unknown'],
+		])
+		const first = report.shadow_disclosures.data.lanes[0]!
+		expect(first.known_losses).toEqual([{
+			start: '2026-08-31T04:59:00.000Z',
+			end: '2026-08-31T05:00:00.000Z',
+			capabilities: ['engagement.submission'],
+			reason: 'operator_discard',
+		}])
+		expect(first.pending_execution).toEqual({ status: 'pending', started_at: ['2026-08-31T04:59:00.000Z'] })
+		const serialized = JSON.stringify(report.shadow_disclosures)
+		for (const prohibited of ['collector-0', 'site-0', 'fact-', 'evidence-', 'segment-', 'records', 'bytes']) {
+			expect(serialized).not.toContain(prohibited)
+		}
+		if (report.overall.state !== 'ready') throw new Error('Expected legacy overall')
+		expect(report.overall.data.today.worked_minutes).toBe(105)
+	})
+
+	test('keeps empty-ready and disclosure failure distinct while other panels remain independent', () => {
+		const value = fixture()
+		const empty = buildDashboardReport(value.store, { projects: [], executors: [], range: { preset: 7 } }, now)
+		expect(empty.shadow_disclosures).toEqual({
+			state: 'ready',
+			data: {
+				start: '2026-08-24T17:00:00.000Z',
+				end: '2026-08-31T05:00:00.000Z',
+				lanes: [],
+			},
+		})
+		const unavailable = buildDashboardReport({
+			...value.store,
+			shadowDisclosures: () => { throw new Error('shadow query failure') },
+		}, { projects: [], executors: [], range: { preset: 7 } }, now)
+		expect(unavailable.shadow_disclosures).toEqual({
+			state: 'unavailable',
+			message: 'Shadow disclosures are unavailable.',
+		})
+		expect(unavailable.overall.state).toBe('ready')
+		expect(unavailable.timeline.state).toBe('ready')
+		expect(unavailable.trend.state).toBe('ready')
+		expect(unavailable.executors.state).toBe('ready')
+	})
+
+	test('does not misreport a wholly future custom disclosure window as ready-empty', () => {
+		const value = fixture()
+		let queried = false
+		const report = buildDashboardReport({
+			...value.store,
+			shadowDisclosures: () => {
+				queried = true
+				return { delivery: { availability: 'ready', disclosures: [] }, labels: new Map() }
+			},
+		}, {
+			projects: [],
+			executors: [],
+			range: { preset: 'custom', start_date: '2026-09-01', end_date: '2026-09-02' },
+		}, now)
+		expect(queried).toBeFalse()
+		expect(report.shadow_disclosures).toEqual({
+			state: 'unavailable',
+			message: 'The selected disclosure window has not started.',
+		})
 	})
 })

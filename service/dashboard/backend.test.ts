@@ -205,8 +205,16 @@ describe('dashboard HTTP contract', () => {
 		})
 		expect(accepted.status).toBe(200)
 		const acceptedReport = await accepted.json() as any
-		expect(acceptedReport.schema_version).toBe(1)
+		expect(acceptedReport.schema_version).toBe(2)
 		expect(acceptedReport.timeline.data.date).toBe('2026-08-30')
+		expect(acceptedReport.shadow_disclosures).toEqual({
+			state: 'ready',
+			data: {
+				start: '2026-08-24T17:00:00.000Z',
+				end: '2026-08-31T05:00:00.000Z',
+				lanes: [],
+			},
+		})
 		for (const invalid of [
 			{ projects: [], executors: [], timeline_date: 'not-a-date', range: { preset: 7 } },
 			{ projects: ['private-label'], executors: [], range: { preset: 7 } },

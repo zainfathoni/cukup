@@ -88,8 +88,41 @@ export type ExecutorSummary = {
 	credential_state: 'active' | 'revoked' | 'not-applicable'
 }
 
+export type ShadowCapabilityAssessment =
+	| { status: 'unknown' }
+	| { status: 'declared_for_scope'; missing_recovery_capabilities: string[] }
+	| {
+		status: 'declared_limited'
+		missing_capabilities: string[]
+		missing_recovery_capabilities: string[]
+	}
+
+export type ShadowDisclosureLaneReport = {
+	label: string
+	capability_intervals: Array<{
+		start: string
+		end: string
+		working_time_v1: ShadowCapabilityAssessment
+		agent_runtime_v1: ShadowCapabilityAssessment
+	}>
+	known_losses: Array<{
+		start: string
+		end: string
+		capabilities: string[]
+		reason: string
+	}>
+	pending_execution: { status: 'none_pending' | 'pending'; started_at: string[] }
+	synchronization: 'clear' | 'queued' | 'retrying' | 'blocked' | 'unknown'
+}
+
+export type ShadowDisclosuresReport = {
+	start: string
+	end: string
+	lanes: ShadowDisclosureLaneReport[]
+}
+
 export type DashboardReport = {
-	schema_version: 1
+	schema_version: 2
 	as_of: string
 	timezone: string
 	available_projects: string[]
@@ -98,6 +131,33 @@ export type DashboardReport = {
 	timeline: Panel<Timeline>
 	trend: Panel<Trend>
 	executors: Panel<ExecutorSummary[]>
+	shadow_disclosures: Panel<ShadowDisclosuresReport>
+}
+
+type DashboardReportV1 = Omit<DashboardReport, 'schema_version' | 'shadow_disclosures'> & {
+	schema_version: 1
+}
+
+/** Keeps a mixed-version dashboard response usable without inventing shadow data. */
+export function normalizeDashboardReport(value: unknown): DashboardReport {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) {
+		throw new Error('Invalid dashboard report')
+	}
+	const report = value as Record<string, unknown>
+	if (report.schema_version === 2 && report.shadow_disclosures !== undefined) {
+		return report as DashboardReport
+	}
+	if (report.schema_version === 1 && report.shadow_disclosures === undefined) {
+		return {
+			...(report as DashboardReportV1),
+			schema_version: 2,
+			shadow_disclosures: {
+				state: 'unavailable',
+				message: 'Shadow disclosures require the current dashboard report version.',
+			},
+		}
+	}
+	throw new Error('Unsupported dashboard report version')
 }
 
 export type DashboardSelection = {

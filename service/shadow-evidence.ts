@@ -100,6 +100,14 @@ const SELECT = `SELECT e.evidence_id AS evidenceId, e.collector_id AS collectorI
 export class ShadowEvidenceStore {
 	constructor(private readonly database: Database) {}
 
+	/** Registered projection lanes, including collectors with synchronization but no facts yet. */
+	collectors(): { collectorId: string; executionSiteId: string }[] {
+		return this.database.query<{ collectorId: string; executionSiteId: string }, []>(
+			`SELECT collector_id AS collectorId, execution_site_id AS executionSiteId
+			 FROM shadow_collectors ORDER BY collector_id`,
+		).all()
+	}
+
 	/** One closed envelope containing one fact, plus its immutable source sequence and site. */
 	append(input: unknown, receivedAtMs = Date.now()): ShadowOutcome {
 		const reject = (reason: Extract<ShadowOutcome, { status: 'rejected' }>['reason']): ShadowOutcome =>

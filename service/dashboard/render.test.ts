@@ -120,6 +120,60 @@ describe('dashboard rendering', () => {
 		expect(html).toContain('nixos-workstation')
 	})
 
+	test('renders ready shadow dimensions independently without identifiers or totals', () => {
+		const html = renderDashboardContent(mockDashboardReport, selection)
+		const shadowHtml = html.slice(html.indexOf('<h2 id="shadow-disclosures-title">'))
+		expect(html).toContain('<h2 id="shadow-disclosures-title">Shadow disclosures</h2>')
+		expect(html).toContain('Synchronization: Clear')
+		expect(html).toContain('Synchronization: Blocked')
+		expect(html).toContain('Declared for scope.')
+		expect(html).toContain('Declared limited.')
+		expect(html).toContain('No accepted matching declaration establishes this scope.')
+		expect(html).toContain('<h4>Known losses</h4>')
+		expect(html).toContain('source without replay')
+		expect(html).toContain('<strong>Pending.</strong>')
+		expect(html).toContain('not a claim of no work')
+		expect(html).toContain('not coverage or work totals and must not be added')
+		for (const prohibited of ['evidence_id', 'fact_id', 'segment_id', 'collector_instance_id', 'records', 'bytes']) {
+			expect(shadowHtml).not.toContain(prohibited)
+		}
+	})
+
+	test('renders stale, unavailable, and empty-ready disclosure states without false lanes or zero claims', () => {
+		const stale = structuredClone(mockDashboardReport)
+		if (stale.shadow_disclosures.state !== 'ready') throw new Error('Expected ready fixture')
+		stale.shadow_disclosures = {
+			state: 'stale',
+			data: {
+				...stale.shadow_disclosures.data,
+				lanes: stale.shadow_disclosures.data.lanes.map((lane) => ({ ...lane, synchronization: 'unknown' })),
+			},
+			last_successful_at: stale.as_of,
+			message: 'Retained disclosure context; synchronization unknown.',
+		}
+		const staleHtml = renderDashboardContent(stale, selection)
+		expect(staleHtml).toContain('<strong>Stale data.</strong>')
+		expect(staleHtml).toContain('Synchronization: Unknown')
+		expect(staleHtml).not.toContain('Synchronization: Clear')
+		expect(staleHtml).not.toContain('Synchronization: Blocked')
+		expect(staleHtml).toContain('source without replay')
+
+		const unavailable = structuredClone(mockDashboardReport)
+		unavailable.shadow_disclosures = { state: 'unavailable', message: 'Disclosure query failed.' }
+		const unavailableHtml = renderDashboardContent(unavailable, selection)
+		expect(unavailableHtml).toContain('<strong>Unavailable.</strong> Disclosure query failed. No value is shown as zero.')
+		expect(unavailableHtml).not.toContain('class="disclosure-lane"')
+		expect(unavailableHtml).not.toContain('Synchronization:')
+
+		const empty = structuredClone(mockDashboardReport)
+		if (empty.shadow_disclosures.state !== 'ready') throw new Error('Expected ready fixture')
+		empty.shadow_disclosures.data.lanes = []
+		const emptyHtml = renderDashboardContent(empty, selection)
+		expect(emptyHtml).toContain('No accepted matching disclosure facts or current status lanes.')
+		expect(emptyHtml).toContain('does not establish complete coverage or no work')
+		expect(emptyHtml).not.toContain('class="disclosure-lane"')
+	})
+
 	test('escapes labels in markup and embedded initial state', () => {
 		const report = structuredClone(mockDashboardReport)
 		report.available_projects = ['<script>alert(1)</script>']
@@ -127,5 +181,14 @@ describe('dashboard rendering', () => {
 		expect(html).not.toContain('<script>alert(1)</script>')
 		expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
 		expect(html).toContain('\\u003cscript>')
+	})
+
+	test('keeps a maximum-length unbroken disclosure label available for safe wrapping', () => {
+		const report = structuredClone(mockDashboardReport)
+		if (report.shadow_disclosures.state !== 'ready') throw new Error('Expected ready fixture')
+		const label = 'a'.repeat(253)
+		report.shadow_disclosures.data.lanes[0]!.label = label
+		const html = renderDashboardContent(report, selection)
+		expect(html).toContain(`<h3 id="disclosure-lane-0">${label}</h3>`)
 	})
 })

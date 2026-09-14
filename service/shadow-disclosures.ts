@@ -50,15 +50,16 @@ export type ShadowSynchronizationRead = {
 		snapshot: Pick<SynchronizationObservation, 'collector_instance_id' | 'state'>
 	}
 }
-export type ShadowDisclosureDelivery =
-	| { availability: 'ready' | 'stale'; disclosures: ShadowDisclosureLane[] }
+export type SynchronizationDisclosure = ShadowDisclosureLane['synchronization']
+export type ShadowDisclosureDelivery<T extends { synchronization: SynchronizationDisclosure } = ShadowDisclosureLane> =
+	| { availability: 'ready' | 'stale'; disclosures: T[] }
 	| { availability: 'unavailable' }
 
 /** Pure delivery boundary. Stale cached disclosures cannot retain current synchronization state. */
-export function deliverShadowDisclosures(
-	availability: ShadowDisclosureDelivery['availability'],
-	disclosures: readonly ShadowDisclosureLane[] = [],
-): ShadowDisclosureDelivery {
+export function deliverShadowDisclosures<T extends { synchronization: SynchronizationDisclosure }>(
+	availability: ShadowDisclosureDelivery<T>['availability'],
+	disclosures: readonly T[] = [],
+): ShadowDisclosureDelivery<T> {
 	if (availability === 'unavailable') return { availability }
 	return {
 		availability,

@@ -98,14 +98,27 @@ Custom request (both dates inclusive):
 
 The request is a closed schema. Projects and executors must be unique exact values from the report's available-label lists. The optional `timeline_date` is a real `YYYY-MM-DD` civil date; the UI sets it from the trend heatmap, and when it is absent the timeline shows the current Jakarta day. A preset is exactly `7`, `30`, or `90`. A custom range uses real `YYYY-MM-DD` civil dates, is ordered, and contains at most 366 inclusive days. The content type is `application/json`, and the body limit is 32 KiB. Invalid requests receive generic errors that do not echo selections.
 
-Response schema 1 contains:
+The Stage 5O application response is schema 2. It preserves every schema-1 field and behavior and adds
+one independent panel; this local change is not a claim that production has been deployed. Schema 2 contains:
 
-- `schema_version: 1`, UTC `as_of`, and `timezone: "Asia/Jakarta"`;
+- `schema_version: 2`, UTC `as_of`, and `timezone: "Asia/Jakarta"`;
 - `available_projects`, always including `Unassigned`, and source-derived `available_executors`;
 - `overall`: globally unioned, target-bearing `today` and Monday-based current `week` values using authoritative exact-date target overrides;
 - `timeline`: intervals and raw-evidence concurrency markers for the selected `timeline_date`, defaulting to the current Jakarta day, plus one Gantt lane per Project Slug and per Executor Label that has selected activity on that day. Lane intervals are unioned within their lane, so a lane never overlaps itself and cross-lane overlap is genuine concurrency. Project lanes and executor lanes describe the same minutes and must not be added;
 - `trend`: globally unioned Overall Working Time plus independent, non-stacked, targetless selected Project, Executor, and combined series, and one `days` entry per date in the range. A day entry carries the target-bearing verdict for the Overall series — the only series that bears a target — with its interval count, first and last activity, and non-additive Project and Executor breakdowns. Filters never alter it, exactly as they never alter the Overall panel;
-- `executors`: `occurred_at`-derived latest activity, `received_at`-derived latest synchronization, and `active`, `revoked`, or `not-applicable` credential state.
+- `executors`: `occurred_at`-derived latest activity, `received_at`-derived latest synchronization, and `active`, `revoked`, or `not-applicable` credential state;
+- `shadow_disclosures`: privacy-safe labels plus independent capability assessments, explicit known
+  losses, pending execution, and current synchronization for Stage 5M collector/site lanes. It has no
+  evidence/fact/project IDs, raw UUIDs when labels identify a lane, spool counts/bytes, or totals.
+
+The disclosure window follows the selected trend range and is clipped at the report's server-owned
+current time. This does not make disclosures part of trend or Working Time. A ready panel with no
+lanes means no accepted matching disclosure facts or current status lanes, not complete coverage or
+no work. Unavailable carries no data. Browser stale retention passes the lanes through Stage 5N at
+delivery time, forcing every synchronization value to unknown while retaining usable capability,
+loss, and pending-execution context. A wholly future custom range is unavailable rather than
+ready-empty. During mixed-version serving, the schema-2 browser keeps a schema-1 report usable by
+adding only a payload-free unavailable disclosure panel; unsupported versions fail the refresh.
 
 Every data section is a panel with `state: "ready"`, `"stale"`, or `"unavailable"`. The server marks an independently failed query unavailable; the browser preserves an earlier successful panel as stale. Neither layer substitutes zero for failure.
 

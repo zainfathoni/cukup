@@ -5,6 +5,8 @@ import type {
 	DayDetail,
 	ExecutorSummary,
 	Panel,
+	ShadowCapabilityAssessment,
+	ShadowDisclosureLaneReport,
 	TargetPeriod,
 	Timeline,
 	TimelineLane,
@@ -554,6 +556,60 @@ function renderExecutors(panel: DashboardReport['executors'], timezone: string):
 	return `<section aria-labelledby="executors-title"><div class="section-heading"><div><p class="eyebrow">Operational context, not presence</p><h2 id="executors-title">Executors</h2></div></div><p class="guidance">Last activity is evidence, not an online/offline health signal. Last synchronized records when evidence reached Cukup.</p>${panelNotice(panel)}${panel.state === 'unavailable' ? '' : `<div class="executor-grid">${panel.data.map((executor) => executorCard(executor, timezone)).join('')}</div>`}</section>`
 }
 
+/* ---------- Shadow disclosures ---------- */
+
+function capabilityName(value: string): string {
+	return value.replaceAll('.', ' · ').replaceAll('_', ' ')
+}
+
+function capabilityList(values: readonly string[]): string {
+	return values.map((value) => escapeHtml(capabilityName(value))).join(', ')
+}
+
+function assessment(heading: string, value: ShadowCapabilityAssessment): string {
+	if (value.status === 'unknown') {
+		return `<div class="disclosure-assessment assessment-unknown"><h4>${heading}</h4><p><strong>Unknown.</strong> No accepted matching declaration establishes this scope.</p></div>`
+	}
+	const recovery = value.missing_recovery_capabilities.length === 0
+		? '<p>Required recovery capabilities declared.</p>'
+		: `<p><strong>Recovery not declared:</strong> ${capabilityList(value.missing_recovery_capabilities)}</p>`
+	if (value.status === 'declared_for_scope') {
+		return `<div class="disclosure-assessment assessment-declared"><h4>${heading}</h4><p><strong>Declared for scope.</strong></p>${recovery}</div>`
+	}
+	return `<div class="disclosure-assessment assessment-limited"><h4>${heading}</h4><p><strong>Declared limited.</strong> Missing: ${capabilityList(value.missing_capabilities)}.</p>${recovery}</div>`
+}
+
+function synchronizationLabel(value: ShadowDisclosureLaneReport['synchronization']): string {
+	return value === 'unknown' ? 'Unknown' : value[0]!.toUpperCase() + value.slice(1)
+}
+
+function disclosureLane(lane: ShadowDisclosureLaneReport, timezone: string, index: number): string {
+	const capabilities = lane.capability_intervals.map((interval) =>
+		`<li><p class="disclosure-period"><time datetime="${escapeHtml(interval.start)}">${formatTimestamp(interval.start, timezone)}</time> – <time datetime="${escapeHtml(interval.end)}">${formatTimestamp(interval.end, timezone)}</time></p><div class="assessment-grid">${assessment('Working Time · estimated', interval.working_time_v1)}${assessment('Agent Runtime', interval.agent_runtime_v1)}</div></li>`,
+	).join('')
+	const losses = lane.known_losses.length === 0
+		? '<p class="muted">No accepted matching loss facts in this window; collection integrity otherwise remains unknown.</p>'
+		: `<ul class="loss-list">${lane.known_losses.map((loss) =>
+			`<li><strong>${escapeHtml(loss.reason.replaceAll('_', ' '))}</strong><br><time datetime="${escapeHtml(loss.start)}">${formatTimestamp(loss.start, timezone)}</time> – <time datetime="${escapeHtml(loss.end)}">${formatTimestamp(loss.end, timezone)}</time><br><span class="muted">Affected: ${capabilityList(loss.capabilities)}</span></li>`,
+		).join('')}</ul>`
+	const pending = lane.pending_execution.status === 'pending'
+		? `<strong>Pending.</strong> Accepted execution starts remain open at ${lane.pending_execution.started_at.map((at) => `<time datetime="${escapeHtml(at)}">${formatTimestamp(at, timezone)}</time>`).join(', ')}.`
+		: 'No accepted matching open execution starts in this window; this is not a claim of no work.'
+	return `<article class="disclosure-lane" aria-labelledby="disclosure-lane-${index}"><div class="disclosure-lane-heading"><h3 id="disclosure-lane-${index}">${escapeHtml(lane.label)}</h3><span class="sync-state sync-${lane.synchronization}">Synchronization: ${synchronizationLabel(lane.synchronization)}</span></div><div class="disclosure-block"><h4>Capability assessment</h4><ul class="capability-intervals">${capabilities}</ul></div><div class="disclosure-columns"><div class="disclosure-block"><h4>Known losses</h4>${losses}</div><div class="disclosure-block"><h4>Execution closure</h4><p>${pending}</p></div></div></article>`
+}
+
+function renderShadowDisclosures(
+	panel: DashboardReport['shadow_disclosures'],
+	timezone: string,
+): string {
+	const content = panel.state === 'unavailable'
+		? ''
+		: panel.data.lanes.length === 0
+			? '<div class="disclosure-empty"><strong>No accepted matching disclosure facts or current status lanes.</strong> This does not establish complete coverage or no work.</div>'
+			: `<div class="disclosure-grid">${panel.data.lanes.map((lane, index) => disclosureLane(lane, timezone, index)).join('')}</div>`
+	return `<section aria-labelledby="shadow-disclosures-title"><div class="section-heading"><div><p class="eyebrow">Experimental shadow · disclosure only</p><h2 id="shadow-disclosures-title">Shadow disclosures</h2></div></div><p class="guidance">Capability declarations, explicit known losses, open execution starts, and current synchronization are independent dimensions. They are not coverage or work totals and must not be added.</p>${panelNotice(panel)}${content}</section>`
+}
+
 /* ---------- Document ---------- */
 
 export function renderDashboardContent(
@@ -561,10 +617,10 @@ export function renderDashboardContent(
 	selection: DashboardSelection,
 	refreshing = false,
 ): string {
-	const partial = [report.overall, report.timeline, report.trend, report.executors].some(
+	const partial = [report.overall, report.timeline, report.trend, report.executors, report.shadow_disclosures].some(
 		(panel) => panel.state !== 'ready',
 	)
-	return `<header class="masthead"><div><p class="eyebrow">Personal dashboard</p><div class="wordmark"><h1>Cukup</h1><span class="wordmark-tag">${escapeHtml(report.timezone)}</span></div></div><div class="freshness ${partial ? 'freshness-partial' : ''}"><span class="freshness-mark" aria-hidden="true"></span><span>${partial ? '<strong>Partial report.</strong> ' : ''}Authoritative as of <time datetime="${escapeHtml(report.as_of)}">${formatTimestamp(report.as_of, report.timezone)}</time></span><span class="sr-only" role="status" aria-live="polite">${refreshing ? 'Refreshing dashboard' : partial ? 'Dashboard has stale or unavailable panels' : 'Dashboard up to date'}</span></div></header><main>${renderOverall(report.overall)}${renderFilters(report, selection, refreshing)}${renderTimeline(report.timeline, report.timezone, report.as_of)}${renderTrend(report.trend, selection, report.timezone)}${renderExecutors(report.executors, report.timezone)}</main><footer class="page-footer"><p>Cukup reports Working Time, never prompts or content. Filtered activity is targetless and non-additive.</p></footer>`
+	return `<header class="masthead"><div><p class="eyebrow">Personal dashboard</p><div class="wordmark"><h1>Cukup</h1><span class="wordmark-tag">${escapeHtml(report.timezone)}</span></div></div><div class="freshness ${partial ? 'freshness-partial' : ''}"><span class="freshness-mark" aria-hidden="true"></span><span>${partial ? '<strong>Partial report.</strong> ' : ''}Authoritative as of <time datetime="${escapeHtml(report.as_of)}">${formatTimestamp(report.as_of, report.timezone)}</time></span><span class="sr-only" role="status" aria-live="polite">${refreshing ? 'Refreshing dashboard' : partial ? 'Dashboard has stale or unavailable panels' : 'Dashboard up to date'}</span></div></header><main>${renderOverall(report.overall)}${renderFilters(report, selection, refreshing)}${renderTimeline(report.timeline, report.timezone, report.as_of)}${renderTrend(report.trend, selection, report.timezone)}${renderExecutors(report.executors, report.timezone)}${renderShadowDisclosures(report.shadow_disclosures, report.timezone)}</main><footer class="page-footer"><p>Cukup reports Working Time, never prompts or content. Filtered activity and shadow disclosures are non-additive.</p></footer>`
 }
 
 export function renderDashboardDocument(

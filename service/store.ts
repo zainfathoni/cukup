@@ -4,6 +4,12 @@ import { chmodSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { generateBearerToken, hashBearerToken, type IssuedToken } from './auth.ts'
 import { MAX_CLOCK_SKEW_MS, defaultServiceDatabasePath } from './config.ts'
+import type { Interval } from './aggregation.ts'
+import {
+	deliverShadowDisclosures,
+	projectShadowDisclosures,
+	type ShadowDisclosureDelivery,
+} from './shadow-disclosures.ts'
 import { SHADOW_COVERAGE_SCHEMA, SHADOW_SCHEMA, ShadowEvidenceStore } from './shadow-evidence.ts'
 import { SHADOW_SYNCHRONIZATION_SCHEMA, ShadowSynchronizationStore, type SynchronizationClockSource } from './shadow-synchronization.ts'
 import type {
@@ -227,6 +233,47 @@ export class ServiceStore {
 				   AND executor_label IS NOT NULL AND execution_site_id IS NOT NULL`,
 			)
 			.get(tokenId)?.executionSiteId
+	}
+
+	/** Current internal disclosure delivery plus privacy-safe site-label candidates for report projection. */
+	shadowDisclosures(report: Interval): {
+		delivery: ShadowDisclosureDelivery
+		labels: ReadonlyMap<string, string>
+	} {
+		const collectors = this.shadow.collectors()
+		const synchronization = collectors.map(({ collectorId, executionSiteId }) => ({
+			collectorId,
+			executionSiteId,
+			read: this.synchronization.read(collectorId, executionSiteId),
+		}))
+		const disclosures = projectShadowDisclosures(
+			this.shadow.records(),
+			this.shadow.coverageRecords(),
+			report,
+			synchronization,
+		)
+		return {
+			delivery: deliverShadowDisclosures('ready', disclosures),
+			labels: this.#shadowExecutionSiteLabels(),
+		}
+	}
+
+	#shadowExecutionSiteLabels(): ReadonlyMap<string, string> {
+		const rows = this.#database.query<{ executionSiteId: string; executorLabel: string }, []>(
+			`SELECT DISTINCT execution_site_id AS executionSiteId, executor_label AS executorLabel
+			 FROM auth_tokens
+			 WHERE execution_site_id IS NOT NULL AND executor_label IS NOT NULL
+			 ORDER BY execution_site_id, executor_label`,
+		).all()
+		const candidates = new Map<string, Set<string>>()
+		for (const row of rows) {
+			const labels = candidates.get(row.executionSiteId) ?? new Set<string>()
+			labels.add(row.executorLabel)
+			candidates.set(row.executionSiteId, labels)
+		}
+		return new Map([...candidates].flatMap(([site, labels]) =>
+			labels.size === 1 ? [[site, [...labels][0]!] as const] : [],
+		))
 	}
 
 	listBearerMetadata(): Array<{

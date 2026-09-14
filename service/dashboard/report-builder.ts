@@ -14,6 +14,10 @@ import {
 import { SERVICE_TIMEZONE } from '../config.ts'
 import type { AttributedStoredWorkEvent, StoredWorkEvent } from '../types.ts'
 import type {
+	ShadowDisclosureDelivery,
+	ShadowDisclosureLane,
+} from '../shadow-disclosures.ts'
+import type {
 	ActivityInterval,
 	DashboardReport,
 	DashboardSelection,
@@ -21,6 +25,8 @@ import type {
 	DayDetail,
 	ExecutorSummary,
 	Panel,
+	ShadowCapabilityAssessment,
+	ShadowDisclosuresReport,
 	Timeline,
 	TimelineLane,
 	Trend,
@@ -35,6 +41,10 @@ export type DashboardReportStore = {
 		revokedAt: string | null
 		executorLabel: string | null
 	}>
+	shadowDisclosures(report: Interval): {
+		delivery: ShadowDisclosureDelivery
+		labels: ReadonlyMap<string, string>
+	}
 }
 
 export type DashboardLabels = { projects: string[]; executors: string[] }
@@ -122,7 +132,7 @@ export function buildDashboardReport(
 		// Label discovery is not allowed to make otherwise independent panels look healthy.
 	}
 	return {
-		schema_version: 1,
+		schema_version: 2,
 		as_of: asOf,
 		timezone: SERVICE_TIMEZONE,
 		available_projects: labels.projects,
@@ -145,6 +155,89 @@ export function buildDashboardReport(
 		executors: buildPanel('Executor details are unavailable.', () =>
 			buildExecutors(store.attributedEvents(), store.listBearerMetadata()),
 		),
+		shadow_disclosures: buildShadowDisclosures(store, selection, nowMs),
+	}
+}
+
+function buildShadowDisclosures(
+	store: DashboardReportStore,
+	selection: DashboardSelection,
+	nowMs: number,
+): Panel<ShadowDisclosuresReport> {
+	const range = trendRange(selection, nowMs)
+	const startMs = startOfZonedDay(range.start, SERVICE_TIMEZONE)
+	const selectedEndMs = startOfZonedDay(addDays(range.end, 1), SERVICE_TIMEZONE)
+	const endMs = Math.min(nowMs, selectedEndMs)
+	if (startMs >= endMs) {
+		return { state: 'unavailable', message: 'The selected disclosure window has not started.' }
+	}
+	try {
+		const source = store.shadowDisclosures({ startMs, endMs })
+		if (source.delivery.availability !== 'ready') throw new Error('Current disclosure delivery unavailable')
+		return {
+			state: 'ready',
+			data: {
+				start: new Date(startMs).toISOString(),
+				end: new Date(endMs).toISOString(),
+				lanes: disclosureLanes(source.delivery.disclosures, source.labels),
+			},
+		}
+	} catch {
+		return { state: 'unavailable', message: 'Shadow disclosures are unavailable.' }
+	}
+}
+
+function disclosureLanes(
+	lanes: readonly ShadowDisclosureLane[],
+	labels: ReadonlyMap<string, string>,
+): ShadowDisclosuresReport['lanes'] {
+	const bases = lanes.map((lane) => labels.get(lane.executionSiteId) ?? 'Shadow collector')
+	const totals = new Map<string, number>()
+	for (const base of bases) totals.set(base, (totals.get(base) ?? 0) + 1)
+	const ordinals = new Map<string, number>()
+	return lanes.map((lane, index) => {
+		const base = bases[index]!
+		const ordinal = (ordinals.get(base) ?? 0) + 1
+		ordinals.set(base, ordinal)
+		return {
+			label: totals.get(base) === 1 ? base : `${base} · collector ${ordinal}`,
+			capability_intervals: lane.capabilityIntervals.map((interval) => ({
+				start: new Date(interval.startMs).toISOString(),
+				end: new Date(interval.endMs).toISOString(),
+				working_time_v1: reportAssessment(interval.workingTimeV1),
+				agent_runtime_v1: reportAssessment(interval.agentRuntimeV1),
+			})),
+			known_losses: lane.collectionIntegrity.losses.map((loss) => ({
+				start: new Date(loss.startMs).toISOString(),
+				end: new Date(loss.endMs).toISOString(),
+				capabilities: [...loss.capabilities],
+				reason: loss.reason,
+			})),
+			pending_execution: {
+				status: lane.executionClosure.status,
+				started_at: lane.executionClosure.starts.map((start) =>
+					new Date(start.startMs).toISOString(),
+				),
+			},
+			synchronization: lane.synchronization,
+		}
+	})
+}
+
+function reportAssessment(
+	assessment: ShadowDisclosureLane['capabilityIntervals'][number]['workingTimeV1'],
+): ShadowCapabilityAssessment {
+	if (assessment.status === 'unknown') return assessment
+	if (assessment.status === 'declared_for_scope') {
+		return {
+			status: assessment.status,
+			missing_recovery_capabilities: [...assessment.missingRecoveryCapabilities],
+		}
+	}
+	return {
+		status: assessment.status,
+		missing_capabilities: [...assessment.missingCapabilities],
+		missing_recovery_capabilities: [...assessment.missingRecoveryCapabilities],
 	}
 }
 

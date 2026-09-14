@@ -45,7 +45,7 @@ function dayDetail(
 }
 
 export const mockDashboardReport: DashboardReport = {
-	schema_version: 1,
+	schema_version: 2,
 	as_of: '2026-08-31T09:42:00.000Z',
 	timezone: 'Asia/Jakarta',
 	available_projects: ['cukup', LONG_SLUG, 'personal-site', 'Unassigned'],
@@ -233,6 +233,54 @@ export const mockDashboardReport: DashboardReport = {
 				credential_state: 'active',
 			},
 		],
+	},
+	shadow_disclosures: {
+		state: 'ready',
+		data: {
+			start: '2026-08-25T17:00:00.000Z',
+			end: '2026-08-31T09:42:00.000Z',
+			lanes: [
+				{
+					label: 'nixos-workstation',
+					capability_intervals: [{
+						start: '2026-08-25T17:00:00.000Z',
+						end: '2026-08-31T09:42:00.000Z',
+						working_time_v1: {
+							status: 'declared_for_scope',
+							missing_recovery_capabilities: ['recovery.engagement.composition'],
+						},
+						agent_runtime_v1: {
+							status: 'declared_limited',
+							missing_capabilities: ['execution.segments'],
+							missing_recovery_capabilities: ['recovery.execution_end.native'],
+						},
+					}],
+					known_losses: [{
+						start: '2026-08-29T03:00:00.000Z',
+						end: '2026-08-29T05:00:00.000Z',
+						capabilities: ['engagement.submission'],
+						reason: 'source_without_replay',
+					}],
+					pending_execution: {
+						status: 'pending',
+						started_at: ['2026-08-31T08:40:00.000Z'],
+					},
+					synchronization: 'clear',
+				},
+				{
+					label: 'workstation-spare',
+					capability_intervals: [{
+						start: '2026-08-25T17:00:00.000Z',
+						end: '2026-08-31T09:42:00.000Z',
+						working_time_v1: { status: 'unknown' },
+						agent_runtime_v1: { status: 'unknown' },
+					}],
+					known_losses: [],
+					pending_execution: { status: 'none_pending', started_at: [] },
+					synchronization: 'blocked',
+				},
+			],
+		},
 	},
 }
 
