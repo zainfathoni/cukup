@@ -1,4 +1,5 @@
 import { Database } from 'bun:sqlite'
+import { randomUUID } from 'node:crypto'
 import { chmodSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { generateBearerToken, hashBearerToken, type IssuedToken } from './auth.ts'
@@ -14,7 +15,7 @@ import type {
 	WorkEvent,
 } from './types.ts'
 
-const DATABASE_VERSION = 5
+const DATABASE_VERSION = 6
 
 const EXECUTOR_LABEL_CHECK = `
 	CHECK (
@@ -123,8 +124,12 @@ export class ServiceStore {
 	rotateBearer(tokenId: string, nowMs = Date.now(), issued = generateBearerToken()): IssuedToken {
 		const rotate = this.#database.transaction(() => {
 			const current = this.#database
-				.query<{ tokenId: string; executorLabel: string | null }, [string]>(
-					`SELECT token_id AS tokenId, executor_label AS executorLabel FROM auth_tokens
+				.query<
+					{ tokenId: string; executorLabel: string | null; executionSiteId: string | null },
+					[string]
+				>(
+					`SELECT token_id AS tokenId, executor_label AS executorLabel,
+					        execution_site_id AS executionSiteId FROM auth_tokens
 					 WHERE token_id = ? AND revoked_at IS NULL`,
 				)
 				.get(tokenId)
@@ -138,10 +143,17 @@ export class ServiceStore {
 				.run(at, tokenId)
 			this.#database
 				.query(
-					`INSERT INTO auth_tokens (token_id, token_hash, created_at, executor_label)
-					 VALUES (?, ?, ?, ?)`,
+					`INSERT INTO auth_tokens (
+						token_id, token_hash, created_at, executor_label, execution_site_id
+					) VALUES (?, ?, ?, ?, ?)`,
 				)
-				.run(issued.tokenId, issued.tokenHash, at, current.executorLabel)
+				.run(
+					issued.tokenId,
+					issued.tokenHash,
+					at,
+					current.executorLabel,
+					current.executionSiteId,
+				)
 			this.#database
 				.query(`UPDATE auth_tokens SET replaced_by = ? WHERE token_id = ?`)
 				.run(issued.tokenId, tokenId)
@@ -195,13 +207,23 @@ export class ServiceStore {
 			if (claimed) return { outcome: 'conflict' }
 			this.#database
 				.query(
-					`UPDATE auth_tokens SET executor_label = ?
+					`UPDATE auth_tokens SET executor_label = ?, execution_site_id = ?
 					 WHERE token_id = ? AND revoked_at IS NULL AND executor_label IS NULL`,
 				)
-				.run(executorLabel, tokenId)
+				.run(executorLabel, randomUUID(), tokenId)
 			return { outcome: 'bound', executorLabel }
 		})
 		return bind.immediate()
+	}
+
+	shadowExecutionSite(tokenId: string): string | undefined {
+		return this.#database
+			.query<{ executionSiteId: string }, [string]>(
+				`SELECT execution_site_id AS executionSiteId FROM auth_tokens
+				 WHERE token_id = ? AND revoked_at IS NULL
+				   AND executor_label IS NOT NULL AND execution_site_id IS NOT NULL`,
+			)
+			.get(tokenId)?.executionSiteId
 	}
 
 	listBearerMetadata(): Array<{
@@ -468,7 +490,8 @@ export class ServiceStore {
 						created_at TEXT NOT NULL,
 						revoked_at TEXT,
 						replaced_by TEXT REFERENCES auth_tokens(token_id),
-						executor_label TEXT ${EXECUTOR_LABEL_CHECK}
+						executor_label TEXT ${EXECUTOR_LABEL_CHECK},
+						execution_site_id TEXT
 					) STRICT;
 
 					CREATE TABLE source_owners (
@@ -513,11 +536,37 @@ export class ServiceStore {
 				this.#database.exec(`${TARGET_OVERRIDES_V4_TABLE};`)
 			}
 
-			this.#database.exec(SHADOW_SCHEMA)
+			if (version < 5) this.#database.exec(SHADOW_SCHEMA)
+			if (version !== 0) {
+				const hasExecutionSite = this.#database
+					.query<{ value: number }, []>(
+						`SELECT COUNT(*) AS value FROM pragma_table_info('auth_tokens')
+						 WHERE name = 'execution_site_id'`,
+					)
+					.get()!.value === 1
+				if (!hasExecutionSite) {
+					this.#database.exec('ALTER TABLE auth_tokens ADD COLUMN execution_site_id TEXT')
+				}
+				const bound = this.#database
+					.query<{ tokenId: string }, []>(
+						`SELECT token_id AS tokenId FROM auth_tokens
+						 WHERE revoked_at IS NULL AND executor_label IS NOT NULL
+						   AND execution_site_id IS NULL`,
+					)
+					.all()
+				for (const { tokenId } of bound) {
+					this.#database
+						.query('UPDATE auth_tokens SET execution_site_id = ? WHERE token_id = ?')
+						.run(randomUUID(), tokenId)
+				}
+			}
 			this.#database.exec(`
 				CREATE UNIQUE INDEX IF NOT EXISTS auth_tokens_active_executor_label
 					ON auth_tokens(executor_label)
 					WHERE revoked_at IS NULL AND executor_label IS NOT NULL;
+				CREATE UNIQUE INDEX IF NOT EXISTS auth_tokens_active_execution_site_id
+					ON auth_tokens(execution_site_id)
+					WHERE revoked_at IS NULL AND execution_site_id IS NOT NULL;
 				CREATE INDEX IF NOT EXISTS source_owners_bearer_owner
 					ON source_owners(owner_id) WHERE owner_kind = 'bearer';
 				CREATE INDEX IF NOT EXISTS events_occurred_at_ms ON events(occurred_at_ms);

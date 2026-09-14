@@ -12,7 +12,7 @@ The deployed service at `api.cukup.dev` is the cross-source authority for curren
 
 Summary amounts are whole minutes. All timestamps are UTC RFC 3339 strings with exactly three fractional digits, such as `2026-08-31T05:00:00.000Z`. Responses use `application/json` and `Cache-Control: no-store`.
 
-This document specifies the currently implemented v1/v2 API. Under these historical semantics, Amp turn intervals plus grace are called Working Time. The accepted future direction in [ADR 0007](adr/0007-generic-harness-evidence-boundary.md) separates Engagement Window-based Working Time from Agent Runtime prospectively. No future metric field, event kind, or schema described by that decision exists in this API yet, and existing v1/v2 evidence will never be reinterpreted.
+This document specifies the implemented legacy v1/v2 API and the isolated, non-authoritative shadow-ingestion route. Under the historical semantics, Amp turn intervals plus grace are called Working Time. The accepted future direction in [ADR 0007](adr/0007-generic-harness-evidence-boundary.md) separates Engagement Window-based Working Time from Agent Runtime prospectively. Shadow evidence does not enter summaries or dashboards, and existing v1/v2 evidence is never reinterpreted.
 
 ## Transport and authentication
 
@@ -74,6 +74,16 @@ The hostname must exactly match one canonical lowercase hostname in `CUKUP_FLEET
 ```
 
 A different binding for the same active lineage or a label held by another active lineage returns `409 {"error":"executor_profile_conflict"}`. A malformed or unrecognized profile returns `422 {"error":"invalid_executor_profile"}` without reflecting a label. Workload OIDC returns `403 {"error":"physical_bearer_required"}` and never accepts a hostname; OIDC-owned evidence derives the Executor Label `amp-orb`. A physical v2 event submitted before binding is rejected, while existing physical v1 ingestion remains unchanged.
+
+Binding also creates an independent random UUIDv4 execution-site ID inside the service. It is never returned and is copied to a replacement credential during atomic bearer rotation.
+
+## `POST /v1/shadow-evidence`
+
+This service-only shadow route accepts one generic evidence envelope from an authenticated physical bearer whose executor profile is already bound. The JSON wrapper accepts exactly `source_sequence` and `envelope`; the envelope must satisfy the complete closed generic protocol contract and contain exactly one evidence fact. The wrapper never accepts an execution site, hostname, executor label, source owner/instance, or metadata. The service resolves the random site from the authenticated bearer lineage and passes only `{executionSiteId, sourceSequence, envelope}` to internal shadow persistence.
+
+Accepted and exact retry responses are `200 {"status":"accepted"}` and `200 {"status":"duplicate"}`. Valid JSON that is invalid, unsupported, conflicted, or out of order preserves the internal closed outcome as `200 {"status":"rejected","reason":"invalid_record|unsupported_version|identity_conflict|invalid_order"}` with one actual reason. Malformed JSON uses `400 {"error":"invalid_request"}`. An unbound bearer returns `403 {"error":"executor_profile_required"}` without mutation. Workload OIDC returns `403 {"error":"physical_bearer_required"}`; generic OIDC/Amp-orb shadow ingestion awaits a separately reviewed execution-site design.
+
+The route uses the existing HTTPS, API-host, 1 MiB JSON, authentication-before-route-disclosure, no-store response, fixed error, and privacy-safe request logging boundaries. It does not add an uploader/outbox and does not change legacy ingestion, source ownership, summaries, aggregation, or dashboards.
 
 ## `PUT /v1/target-overrides/:date` and `DELETE /v1/target-overrides/:date`
 
