@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -32,7 +32,7 @@ afterEach(async () => {
 })
 
 function state(): string {
-	const root = mkdtempSync(join(tmpdir(), 'cukup-receiver-command-'))
+	const root = realpathSync(mkdtempSync(join(tmpdir(), 'cukup-receiver-command-')))
 	roots.push(root)
 	return join(root, 'state')
 }
