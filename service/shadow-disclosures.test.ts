@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ServiceStore } from './store.ts'
 import { CAPABILITIES, LOCAL_PROTOCOL, type Capability, type CoverageFact, type Evidence } from './harness-evidence-protocol.ts'
-import { projectShadowDisclosures, type ShadowSynchronizationRead } from './shadow-disclosures.ts'
+import { deliverShadowDisclosures, projectShadowDisclosures, type ShadowSynchronizationRead } from './shadow-disclosures.ts'
 import { summarizeShadow, summarizeShadowAfterCutover } from './shadow-aggregation.ts'
 import { summarizeWork } from './aggregation.ts'
 
@@ -282,4 +282,42 @@ test('conflicting status-only sites are order independent and cannot establish a
 		expect(projectShadowDisclosures(f.store.shadow.records(), f.store.shadow.coverageRecords(), bounds, reads)
 			.map((lane) => [lane.executionSiteId, lane.synchronization])).toEqual([[siteA, 'unknown']])
 	}
+})
+
+test('availability exposes current synchronization only for ready delivery without changing other disclosures or inputs', () => {
+	const f = fixture()
+	f.declare(1, 0, ['execution.segments'])
+	f.loss(2, 10, 30, ['engagement.approval'], 'operator_discard')
+	f.evidence(3, 'execution_start', 20)
+	const synchronization: ShadowSynchronizationRead[] = [{
+		collectorId: id(70), executionSiteId: id(60),
+		read: { state: 'fresh', snapshot: { collector_instance_id: id(70), state: 'blocked' } },
+	}]
+	const disclosures = projectShadowDisclosures(
+		f.store.shadow.records(), f.store.shadow.coverageRecords(), { startMs: t, endMs: t + 100 }, synchronization,
+	)
+	const original = structuredClone(disclosures)
+	function freeze(value: unknown) {
+		if (value && typeof value === 'object') { Object.freeze(value); for (const child of Object.values(value)) freeze(child) }
+	}
+	freeze(disclosures)
+
+	const ready = deliverShadowDisclosures('ready', disclosures)
+	const stale = deliverShadowDisclosures('stale', disclosures)
+	const unavailable = deliverShadowDisclosures('unavailable', disclosures)
+	expect(ready).toEqual({ availability: 'ready', disclosures: original })
+	expect(stale).toEqual({
+		availability: 'stale', disclosures: [{ ...original[0]!, synchronization: 'unknown' }],
+	})
+	expect(unavailable).toEqual({ availability: 'unavailable' })
+	if (ready.availability !== 'ready' || stale.availability !== 'stale') throw new Error('Expected delivered disclosures')
+	const { synchronization: readySynchronization, ...readyOther } = ready.disclosures[0]!
+	const { synchronization: staleSynchronization, ...staleOther } = stale.disclosures[0]!
+	expect([readySynchronization, staleSynchronization]).toEqual(['blocked', 'unknown'])
+	expect(staleOther).toEqual(readyOther)
+	expect(disclosures).toEqual(original)
+
+	const unknown = [{ ...original[0]!, synchronization: 'unknown' as const }]
+	expect(deliverShadowDisclosures('ready', unknown)).toEqual({ availability: 'ready', disclosures: unknown })
+	expect(deliverShadowDisclosures('stale', unknown)).toEqual({ availability: 'stale', disclosures: unknown })
 })
