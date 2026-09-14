@@ -5,6 +5,7 @@ import { dirname } from 'node:path'
 import { generateBearerToken, hashBearerToken, type IssuedToken } from './auth.ts'
 import { MAX_CLOCK_SKEW_MS, defaultServiceDatabasePath } from './config.ts'
 import { SHADOW_COVERAGE_SCHEMA, SHADOW_SCHEMA, ShadowEvidenceStore } from './shadow-evidence.ts'
+import { SHADOW_SYNCHRONIZATION_SCHEMA, ShadowSynchronizationStore, type SynchronizationClockSource } from './shadow-synchronization.ts'
 import type {
 	AttributedStoredWorkEvent,
 	ExecutorBindingOutcome,
@@ -15,7 +16,7 @@ import type {
 	WorkEvent,
 } from './types.ts'
 
-const DATABASE_VERSION = 7
+const DATABASE_VERSION = 8
 
 const EXECUTOR_LABEL_CHECK = `
 	CHECK (
@@ -92,8 +93,9 @@ type SourceOwnerRow = { ownerKind: 'bearer' | 'oidc'; ownerId: string | null }
 export class ServiceStore {
 	readonly #database: Database
 	readonly shadow: ShadowEvidenceStore
+	readonly synchronization: ShadowSynchronizationStore
 
-	constructor(path = defaultServiceDatabasePath()) {
+	constructor(path = defaultServiceDatabasePath(), synchronizationClock?: SynchronizationClockSource) {
 		const directory = dirname(path)
 		mkdirSync(directory, { recursive: true, mode: 0o700 })
 		chmodSync(directory, 0o700)
@@ -109,6 +111,7 @@ export class ServiceStore {
 			throw error
 		}
 		this.shadow = new ShadowEvidenceStore(this.#database)
+		this.synchronization = new ShadowSynchronizationStore(this.#database, synchronizationClock)
 	}
 
 	issueBearer(nowMs = Date.now(), issued = generateBearerToken()): IssuedToken {
@@ -538,6 +541,7 @@ export class ServiceStore {
 
 			if (version < 5) this.#database.exec(SHADOW_SCHEMA)
 			if (version < 7) this.#database.exec(SHADOW_COVERAGE_SCHEMA)
+			if (version < 8) this.#database.exec(SHADOW_SYNCHRONIZATION_SCHEMA)
 			if (version !== 0 && version < 6) {
 				const hasExecutionSite = this.#database
 					.query<{ value: number }, []>(

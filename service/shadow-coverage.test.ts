@@ -251,10 +251,10 @@ test('v6 migration preserves every existing schema object and row exactly; rollb
 	const records = store.shadow.records()
 	close(store)
 	const raw = new Database(path)
-	// Remove only v7 additions to reproduce the unchanged v6 schema and its accepted rows.
-	raw.exec('DROP TABLE shadow_coverage; PRAGMA user_version = 6')
+	// Remove v7/v8 additions to reproduce the unchanged v6 schema and its accepted rows.
+	raw.exec('DROP TABLE shadow_synchronization; DROP TABLE shadow_coverage; PRAGMA user_version = 6')
 	const snapshot = () => ({
-		schema: raw.query("SELECT type, name, tbl_name, sql FROM sqlite_schema WHERE tbl_name != 'shadow_coverage' ORDER BY name").all(),
+		schema: raw.query("SELECT type, name, tbl_name, sql FROM sqlite_schema WHERE tbl_name NOT IN ('shadow_coverage', 'shadow_synchronization') ORDER BY name").all(),
 		rows: ['auth_tokens', 'source_owners', 'events', 'target_overrides', 'shadow_collectors', 'shadow_evidence'].map((table) => raw.query(`SELECT * FROM ${table} ORDER BY rowid`).all()),
 	})
 	const before = snapshot()
@@ -282,9 +282,9 @@ test('v6 migration preserves every existing schema object and row exactly; rollb
 	expect(restarted.integrityCheck()).toBe('ok')
 	expect(raw.query('PRAGMA foreign_key_check').all()).toEqual([])
 	close(restarted)
-	raw.exec('PRAGMA user_version = 8')
+	raw.exec('PRAGMA user_version = 9')
 	expect(() => new ServiceStore(path)).toThrow('newer than supported')
-	expect(raw.query('PRAGMA user_version').get()).toEqual({ user_version: 8 })
+	expect(raw.query('PRAGMA user_version').get()).toEqual({ user_version: 9 })
 	expect(snapshot()).toEqual(before)
 	expect(raw.query('SELECT COUNT(*) AS count FROM shadow_coverage').get()).toEqual({ count: 2 })
 	raw.close()

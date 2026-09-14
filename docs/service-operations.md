@@ -139,3 +139,19 @@ bun run service:db integrity /var/lib/cukup/cukup.sqlite
 - Logs contain method, route template, status, duration, and redacted internal errors. They intentionally omit headers, bodies, target-override dates, event IDs, source/session IDs, JWT claims, and database details.
 - Treat unexpected conflict or clock-skew outcomes as visible client incidents. Never mutate accepted events to make a retry pass.
 - The unauthenticated health response is liveness only. Use authenticated checks and database integrity tooling for diagnosis.
+
+## Stage 5K local schema-8 boundary
+
+The [Stage 5K service slice](stage-5k-shadow-synchronization-service.md) supersedes earlier schema-version
+ceilings above: opening supported databases now transactionally upgrades to schema 8 (schema 7 adds
+coverage, schema 8 adds one latest synchronization row per existing collector, with no backfill).
+Use only a schema-8-aware binary after migration. Do not lower user_version or delete retained
+snapshots to force rollback; restoring an approved pre-migration backup loses later data and replay
+protection. Follow stopped-service, verified-backup and preservation rules above.
+
+Synchronization route logging is stricter than the general incident log description: only a fixed
+event/level and HTTP status, with no method, path, duration, identifiers or diagnostics. Startup clock
+trust is required and backward samples latch synchronization unhealthy; the default is untrusted.
+No production health provider, upload caller, report integration or deployment is added. Service-path
+changes trigger the existing main-push publication workflow; this local slice is not authorization
+to push, publish, migrate a shared database or deploy.
