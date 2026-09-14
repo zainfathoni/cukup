@@ -81,8 +81,12 @@ steps rather than promising autonomous eventual delivery.
 Stop the declared receiver with `amp orb service stop cukup-evidence-receiver`. A later
 `amp orb services ensure` starts it again while preserving receiver evidence, execution-site
 identity, and token. Removing activation requires stopping it and removing the declaration from
-repository configuration; neither action deletes durable receiver state or credentials. Broader
-repeatable installation/removal and macOS/Linux packaging remain outstanding.
+repository configuration; neither action deletes durable receiver state or credentials. The separate
+[experimental user-level installer](experimental-local-harness-evidence-protocol.md#stage-4b3e-experimental-user-level-installation-boundary)
+adds standalone installation/removal and session-only native service definitions. It does not activate
+this collector or share/migrate the Amp-orb receiver state. One-host native macOS LaunchAgent and
+Linux systemd-user lifecycle verification is complete. No OS or Harness support claim follows from
+packaging.
 
 With a local runtime already running, exercise the real discovery, spool, negotiation, receiver,
 wait segmentation, and disposal path using synthetic events and the runtime's provisioned local
