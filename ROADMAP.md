@@ -67,7 +67,8 @@ This ledger is the authoritative implementation sequence within top-level Stage 
 | 5N | Complete internal delivery slice | [Shadow availability delivery](docs/stage-5n-shadow-availability-delivery.md): ready delivery may expose current synchronization; stale delivery redacts it to unknown; unavailable carries no disclosures. Other dimensions remain independent and unchanged. No cache/report consumer, public schema, dashboard, or activation. |
 | 5O | Complete authenticated dashboard slice | [Shadow disclosures dashboard](docs/stage-5o-shadow-disclosures-dashboard.md): schema-2 independent report panel, privacy-safe labels, Stage 5M/5N ready/stale/unavailable delivery, and accessible capability/loss/pending/synchronization rendering without totals coupling. No collector scheduling, clock-trust activation, cutover, migration, deployment, or support claim. |
 | 5P | Complete design-contract slice; implementation externally blocked | [Workload OIDC execution-site contract](docs/stage-5p-oidc-execution-site-contract.md): required Amp-attested incarnation lifecycle, opaque service identity, immutable collector/replay ownership, and generic-only claim/privacy policy. Current documented tokens do not establish recreation-safe identity. Project attribution remains Unassigned and OIDC synchronization unsupported; legacy OIDC unchanged. No implementation or activation. |
-| Remaining Stage 5 work | Deferred to separate slices | Resolve Stage 5P's external attestation/durability blockers before proposing OIDC/Amp-orb ingestion; separately review approved evidence-time project mappings, OIDC synchronization, historical migration/backfill, authority selection, and cutover activation. |
+| 5Q | Complete design-contract slice | [Legacy history and reporting authority](docs/stage-5q-legacy-history-authority.md): rejects legacy-to-generic evidence backfill and heuristic cross-authority deduplication; preserves legacy semantics and separates authority at a future owner-approved account-wide Stage 5F boundary. Defines independent reconciliation vectors and approval/backup/privacy gates; an optional audit ledger is non-authoritative and deferred. No implementation or activation. |
+| Remaining Stage 5 work | Deferred to separate slices | Resolve Stage 5P's external attestation/durability blockers before proposing OIDC/Amp-orb ingestion; separately review approved evidence-time project mappings, OIDC synchronization, any Stage 5Q audit tooling, durable authority selection/restoration safeguards, report/target routing, and cutover activation. Legacy evidence backfill is rejected, not an implementation task. |
 
 Stages 5A and 5B change service persistence and are **not deployment-neutral**: an eventual main push may trigger service publication and requires explicit owner approval. Stage 5C is deployment-neutral because its experimental client is not imported by a runtime, installer, receiver, or service build entrypoint; activation still requires the already reviewed Stage 5B/schema-6 service. No deployment or production migration is authorized by this ledger. Support claims and top-level Stage 6 real-collector validation and owner-approved opt-in cutover remain separate gates.
 
@@ -104,6 +105,12 @@ Stage 5P is documentation-only and publication-neutral. It defines required futu
 not claims Amp currently attests or permission to enable generic OIDC ingestion. Existing physical
 routes and legacy `amp-orb` attribution remain unchanged. Prerequisite publication/schema constraints
 still apply; no clock, collector, API, dashboard, cutover, deployment, or support activation is authorized.
+
+Stage 5Q is documentation-only and publication-neutral. Legacy rows cannot supply the missing generic
+provenance or a deterministic cross-authority identity. Legacy remains target authority until a separate
+owner-approved activation; historical legacy totals retain their semantics, including late revisions.
+No migration, authority selection, database operation, publication, deployment, or support is activated.
+Cumulative prerequisite publication/schema and rollback constraints remain unchanged.
 
 ### First independently reviewable code slice
 
