@@ -1,0 +1,21 @@
+# Stage 5C: physical cloud shadow outbox
+
+Stage 5C adds one programmatic, inactive client boundary for a physical execution site. [`PhysicalShadowEvidenceOutbox`](../experimental/physical-shadow-evidence-outbox.ts) accepts one fact from the existing closed generic Harness evidence vocabulary, durably creates its own collector UUIDv4, assigns a strictly increasing cloud-shadow source sequence, and persists the complete normalized one-fact envelope before any network call. It does not activate the experimental Amp collector, install a receiver, or start a background loop. Its owner must call `enqueue` and `drainStep` explicitly.
+
+## Durable delivery boundary
+
+The outbox uses an owner-owned SQLite spool and sidecars in an owner-only canonical directory. A directory created for the spool is restricted to `0700`; an existing directory must already be owner-owned and exactly `0700`. Existing owner files are restricted before use; links and foreign-owned paths fail closed. An exclusive companion SQLite lock permits only one process to own a spool, and concurrent drain calls on that owner share one in-flight step. Queue count, encoded bytes, and individual encoded records are bounded. The collector identity and SQLite `AUTOINCREMENT` sequence belong only to this cloud-shadow spool; they do not read, reuse, advance, or migrate the legacy plugin v1/v2 source identity or sequence.
+
+Each drain step considers only the oldest record. It rereads the caller-supplied existing physical `TokenProvider`, sends exact `PUT /v1/executor-profile` with the configured physical hostname, requires the exact successful profile response, and then sends exact `{source_sequence,envelope}` to `POST /v1/shadow-evidence`. Redirects are never followed. The hostname and bearer are never written to the spool. A replacement bearer is picked up on the next explicit drain, while Stage 5B's bearer-lineage rotation preserves the server-side site/profile binding.
+
+Accepted and exact-duplicate outcomes remove the queued record. Network errors, timeout, response loss, authentication rejection, rate limiting, and server errors retain the exact record under persistent bounded backoff. A valid closed Stage 5B rejection (`invalid_record`, `unsupported_version`, `identity_conflict`, or `invalid_order`) becomes an immutable FIFO blocker. Profile conflicts, non-retryable transport failures, and syntactically valid but non-contract responses are also retained as blockers. A blocked oldest record prevents newer delivery rather than allowing source-order inversion.
+
+`status()` returns only fixed aggregate counts: queued/blocked records, encoded bytes, retrying records, and counts by fixed blocked-reason category. It exposes no collector/evidence/project identifiers, sequence, hostname, token, payload, timestamp, response body, or diagnostic. The client has no logging surface.
+
+## Limitations and deployment implications
+
+This slice is a reusable experimental client, not a runnable collector integration. No production lifecycle currently constructs it, supplies source facts, chooses a spool path, or schedules explicit drains. Credential provisioning/rotation, hostname configuration, spool backup/repair, operator handling of terminal blockers, and invocation cadence remain caller-owned. There is no autonomous retry while the owner is not invoking `drainStep`. Callers must await an in-flight drain before `close()`; premature close is rejected so spool ownership cannot transfer while an older request can still complete.
+
+OIDC and Amp-orb site design, aggregation/union, clipping, dashboard or coverage presentation, historical migration/backfill, and legacy v1/v2 changes remain excluded. The outbox accepts only physical bearer operation; Stage 5B continues to reject workload OIDC at the cloud route.
+
+Stage 5C itself is deployment-neutral: it changes no service route, schema, runtime entrypoint, plugin activation path, installer, receiver, service declaration, or production setting. It requires a Stage 5B/schema-6-capable service if a future owner activates it. Pushing, publishing, deployment, production access/migration, credential rollout, collector cutover, and official support claims are not part of this slice.
