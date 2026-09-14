@@ -82,6 +82,20 @@ export type ExecutionEnd = {
 
 export type Evidence = Engagement | ExecutionStart | ExecutionEnd
 
+export const LOSS_REASONS = [
+	'storage_exhaustion', 'source_without_replay', 'abrupt_termination',
+	'operator_discard', 'unspecified',
+] as const
+
+export type CoverageFact =
+	| { family: 'capability_declaration'; fact_id: string; effective_at: string }
+	| { family: 'irreversible_loss'; fact_id: string; start: string; end: string; reason: (typeof LOSS_REASONS)[number] }
+
+export type ParsedCoverageEnvelope =
+	| { collectorInstanceId: string; protocolVersion: 1; capabilities: Capability[]; fact: CoverageFact }
+	| { reason: EnvelopeReason | 'invalid_timing' }
+	| { unsupported: true }
+
 export type NegotiationOffer = {
 	protocol: typeof LOCAL_PROTOCOL
 	supported_versions: number[]
@@ -121,6 +135,11 @@ const ENVELOPE_FIELDS = new Set([
 	'capabilities',
 	'evidence',
 ])
+const COVERAGE_ENVELOPE_FIELDS = new Set([
+	'protocol', 'protocol_version', 'collector_instance_id', 'capabilities', 'fact',
+])
+const DECLARATION_FIELDS = new Set(['family', 'fact_id', 'effective_at'])
+const LOSS_FIELDS = new Set(['family', 'fact_id', 'start', 'end', 'reason'])
 const NEGOTIATION_FIELDS = new Set([
 	'protocol',
 	'supported_versions',
@@ -338,6 +357,57 @@ export function parseEvidenceEnvelope(
 	value: unknown,
 	receivedAtMs: number,
 ): ParsedEnvelope {
+	const header = parseEnvelopeHeader(value, ENVELOPE_FIELDS)
+	if ('reason' in header || 'unsupported' in header) return header
+	if (!Array.isArray(header.payload.evidence) || !isCapabilityDeclaration(header.capabilities)) {
+		return { reason: 'invalid_envelope' }
+	}
+	const capabilities = new Set(header.capabilities)
+	return {
+		collectorInstanceId: header.collectorInstanceId,
+		protocolVersion: header.protocolVersion,
+		capabilities: header.capabilities,
+		evidence: header.payload.evidence.map((evidence) => parseEvidence(evidence, capabilities, receivedAtMs)),
+	}
+}
+
+/** Internal single-fact protocol only; the execution site is never a payload field. */
+export function parseCoverageEnvelope(value: unknown, receivedAtMs: number): ParsedCoverageEnvelope {
+	const header = parseEnvelopeHeader(value, COVERAGE_ENVELOPE_FIELDS)
+	if ('reason' in header || 'unsupported' in header) return header
+	const fact = header.payload.fact
+	if (!isRecord(fact)) return { reason: 'invalid_envelope' }
+	const fields = fact.family === 'capability_declaration' ? DECLARATION_FIELDS
+		: fact.family === 'irreversible_loss' ? LOSS_FIELDS : undefined
+	if (!fields) return { reason: 'invalid_envelope' }
+	if (unknownKeys(fact, fields).length > 0) {
+		return { reason: hasProhibitedKey(fact, fields) ? 'prohibited_field' : 'unknown_field' }
+	}
+	if (typeof fact.fact_id !== 'string' || !isUuidV4(fact.fact_id) ||
+		!isCapabilitySet(header.capabilities) ||
+		(fact.family === 'capability_declaration' && !isCapabilityDeclaration(header.capabilities))) {
+		return { reason: 'invalid_envelope' }
+	}
+	const times = fact.family === 'capability_declaration' ? [fact.effective_at] : [fact.start, fact.end]
+	if (!Number.isSafeInteger(receivedAtMs) || !Number.isFinite(new Date(receivedAtMs).getTime()) ||
+		times.some((time) => typeof time !== 'string' || parseTime(time) === undefined ||
+			Date.parse(time) > receivedAtMs + LOCAL_CLOCK_SKEW_MS) ||
+		(fact.family === 'irreversible_loss' && Date.parse(fact.start as string) >= Date.parse(fact.end as string))) {
+		return { reason: 'invalid_timing' }
+	}
+	if (fact.family === 'irreversible_loss' && !LOSS_REASONS.includes(fact.reason as (typeof LOSS_REASONS)[number])) {
+		return { reason: 'invalid_envelope' }
+	}
+	return {
+		collectorInstanceId: header.collectorInstanceId, protocolVersion: header.protocolVersion,
+		capabilities: [...header.capabilities], fact: { ...fact } as CoverageFact,
+	}
+}
+
+function parseEnvelopeHeader(value: unknown, fields: ReadonlySet<string>):
+	| { collectorInstanceId: string; protocolVersion: 1; capabilities: unknown; payload: Record<string, unknown> }
+	| { reason: EnvelopeReason }
+	| { unsupported: true } {
 	if (
 		isRecord(value) &&
 		Number.isSafeInteger(value.protocol_version) &&
@@ -346,39 +416,37 @@ export function parseEvidenceEnvelope(
 		return { unsupported: true }
 	}
 	if (!isRecord(value)) return { reason: 'invalid_envelope' }
-	if (unknownKeys(value, ENVELOPE_FIELDS).length > 0) {
+	if (unknownKeys(value, fields).length > 0) {
 		return {
-			reason: hasProhibitedKey(value, ENVELOPE_FIELDS) ? 'prohibited_field' : 'unknown_field',
+			reason: hasProhibitedKey(value, fields) ? 'prohibited_field' : 'unknown_field',
 		}
 	}
 	if (
 		value.protocol !== LOCAL_PROTOCOL ||
 		value.protocol_version !== LOCAL_PROTOCOL_VERSION ||
 		typeof value.collector_instance_id !== 'string' ||
-		!UUID_V4.test(value.collector_instance_id) ||
-		!Array.isArray(value.evidence) ||
-		!isCapabilityDeclaration(value.capabilities)
+		!UUID_V4.test(value.collector_instance_id)
 	) {
 		return { reason: 'invalid_envelope' }
 	}
-	const capabilities = new Set(value.capabilities as Capability[])
 	return {
 		collectorInstanceId: value.collector_instance_id,
 		protocolVersion: value.protocol_version,
-		capabilities: value.capabilities as Capability[],
-		evidence: value.evidence.map((evidence) =>
-			parseEvidence(evidence, capabilities, receivedAtMs),
-		),
+		capabilities: value.capabilities,
+		payload: value,
 	}
 }
 
 function isCapabilityDeclaration(value: unknown): value is Capability[] {
+	return isCapabilitySet(value) && !hasRecoveryWithoutBaseCapability(value)
+}
+
+function isCapabilitySet(value: unknown): value is Capability[] {
 	return (
 		Array.isArray(value) &&
 		value.length > 0 &&
 		value.every((capability) => typeof capability === 'string' && CAPABILITY_SET.has(capability)) &&
-		new Set(value).size === value.length &&
-		!hasRecoveryWithoutBaseCapability(value)
+		new Set(value).size === value.length
 	)
 }
 
@@ -569,8 +637,8 @@ function stableStringify(value: unknown): string {
 	return JSON.stringify(value)
 }
 
-/** Canonicalizes an already parsed evidence fact for durable immutable comparison. */
-export function canonicalizeEvidence(value: Evidence): string {
+/** Canonicalizes an already parsed evidence or coverage fact for immutable comparison. */
+export function canonicalizeEvidence(value: Evidence | CoverageFact): string {
 	return stableStringify(value)
 }
 
