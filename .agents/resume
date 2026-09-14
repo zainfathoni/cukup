@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Cukup has no services or authentication that need repair when an orb wakes.
+# Cukup's declared service is supervisor-owned; no authentication or service repair belongs here.
 printf '[resume] ready\n'

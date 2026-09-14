@@ -96,6 +96,25 @@ function fakeRuntime(overrides: Partial<LocalHarnessEvidenceRuntime> = {}): Loca
 }
 
 describe('foreground receiver lifecycle', () => {
+	test('passes an exact caller-assigned port to the runtime', async () => {
+		const signals = signalHooks()
+		let received: Readonly<{ stateDirectory: string; port?: number }> | undefined
+		const stateDirectory = state()
+		const command = runLocalHarnessEvidenceReceiverCommand(
+			['--state-directory', stateDirectory, '--port', '49152'],
+			{
+				onSignal: signals.onSignal,
+				startRuntime: (directory, port) => {
+					received = { stateDirectory: directory, port }
+					return fakeRuntime()
+				},
+			},
+		)
+		signals.handlers.get('SIGTERM')!()
+		expect(await command).toBe(0)
+		expect(received).toEqual({ stateDirectory, port: 49152 })
+	})
+
 	test('serializes termination requested during startup and stops exactly once', async () => {
 		const signals = signalHooks()
 		let stops = 0
@@ -292,6 +311,30 @@ describe('foreground receiver subprocess', () => {
 		expect(() => statSync(join(stateDirectory, 'endpoint.json'))).toThrow()
 	})
 
+	test('binds only the requested IPv4-loopback port', async () => {
+		const reservation = Bun.listen({
+			hostname: '127.0.0.1',
+			port: 0,
+			socket: { data: () => undefined },
+		})
+		const port = reservation.port
+		reservation.stop(true)
+		const stateDirectory = state()
+		const subprocess = spawnCommand([
+			'--state-directory',
+			stateDirectory,
+			'--port',
+			String(port),
+		])
+		const endpoint = await eventually(
+			() => discoverLocalHarnessEvidenceEndpoint(stateDirectory),
+			() => true,
+		)
+		expect(endpoint.origin).toBe(`http://127.0.0.1:${port}`)
+		subprocess.kill('SIGTERM')
+		expect(await boundedExit(subprocess)).toBe(0)
+	})
+
 	test('refuses second ownership and reports no path or raw diagnostic', async () => {
 		const stateDirectory = state()
 		const first = spawnCommand(['--state-directory', stateDirectory])
@@ -326,6 +369,12 @@ describe('foreground receiver subprocess', () => {
 			['--state-directory', `/tmp/${privateValue}/../state`],
 			['/tmp/state', '--state-directory'],
 			['--state-directory', '/tmp/state', privateValue],
+			['--state-directory', '/tmp/state', '--port'],
+			['--state-directory', '/tmp/state', '--port', '0'],
+			['--state-directory', '/tmp/state', '--port', '06535'],
+			['--state-directory', '/tmp/state', '--port', '65536'],
+			['--state-directory', '/tmp/state', '--port', privateValue],
+			['--state-directory', '/tmp/state', privateValue, '49152'],
 		]) {
 			const subprocess = spawnCommand(args)
 			expect(await boundedExit(subprocess)).toBe(2)
