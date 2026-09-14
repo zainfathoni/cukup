@@ -71,6 +71,7 @@ This ledger is the authoritative implementation sequence within top-level Stage 
 | 5R | Complete design-contract slice | [Durable authority activation](docs/stage-5r-authority-activation-contract.md): one owner-approved account-wide Monday 00:00 Asia/Jakarta boundary, durable approval and atomic activation, trusted-time and restoration fences, separate report/API/target routing, unavailable behavior and explicit coverage/readiness gates. No implementation, selected date, or activation. |
 | 5S | Complete design-contract slice | [Authority control storage and recovery checkpoint](docs/stage-5s-authority-control-storage.md): closed account-owned decision/approval/idempotency records, serializable external journal and checkpoint-before-acknowledgment protocol, verified SQLite materialization, accepted-write restore frontier, retention and compatibility floors, and disposable-storage acceptance vectors. No persistence code, owner HTTP/auth or clock implementation, selected date, or activation. |
 | 5T | Complete default-off delivery slice | [Physical coverage-fact delivery](docs/stage-5t-physical-coverage-delivery.md): strict physical-bearer Stage 5H route; one migrated evidence/coverage FIFO; exact retry, site/order, bounded failure and persist-before-ack semantics; and one truthful restart-idempotent prospective declaration from the existing opt-in Amp owner. No synthesized loss, OIDC, authority, report, dashboard, target, cutover, publication, deployment, or activation. |
+| 5U | Complete default-off invocation slice | [Explicit physical synchronization](docs/stage-5u-explicit-physical-synchronization.md): one distinct command action invokes the existing Stage 5L singleton step and reports only its fixed result plus aggregate spool status. No startup/background/post-drain invocation, retry policy, FIFO coupling, clock/authority activation, service change, publication, deployment, or activation. |
 | Remaining Stage 5 work | Deferred to separate slices | Resolve Stage 5P's external attestation/durability blockers before proposing OIDC/Amp-orb ingestion; separately review approved evidence-time project mappings, OIDC synchronization, any Stage 5Q audit tooling, and implementations of Stage 5R/5S control/recovery state and external journal, owner controls, trusted time, report/API/client/target routing and activation gates. Legacy evidence backfill is rejected, not an implementation task. |
 
 Stages 5A and 5B change service persistence and are **not deployment-neutral**: an eventual main push may trigger service publication and requires explicit owner approval. Stage 5C is deployment-neutral because its experimental client is not imported by a runtime, installer, receiver, or service build entrypoint; activation still requires the already reviewed Stage 5B/schema-6 service. No deployment or production migration is authorized by this ledger. Support claims and top-level Stage 6 real-collector validation and owner-approved opt-in cutover remain separate gates.
@@ -89,7 +90,7 @@ Stage 5J is documentation-only and publication-neutral. It narrows Stage 5G's ob
 
 Stages 5K and 5M change `service/**` paths covered by the main-push service-publication workflow and
 are not publication-neutral. Stage 5K's default clock remains untrusted, and Stage 5M has no production
-caller. Stage 5L remains inactive and is not imported by Stage 5D. None authorizes client scheduling,
+caller. Stage 5L had no caller before Stage 5U's explicit default-off action. None authorizes client scheduling,
 clock-trust activation, publication, migration of a shared database, deployment, or production access.
 
 Stage 5N is also pure and internal but changes `service/**`, so it is not publication-neutral. It has
@@ -133,6 +134,11 @@ The service schema remains 8, while the private physical spool advances additive
 preserves queued evidence plus AUTOINCREMENT high water. The owner remains exact-opt-in/default-off;
 no production activation, publication, deployment, OIDC support, loss inference, or Stage 5R authority
 decision is included. Rollback must retain a schema-3-aware spool owner and schema-8-aware service.
+
+Stage 5U changes plugin/tests/docs only and is neutral under the service publication workflow, but it is a
+plugin-build change: publishing it exposes the action only behind the existing exact physical/local opt-in.
+It does not activate that opt-in, schedule synchronization, trust the service clock, mutate shared state,
+or authorize a push, plugin publication, deployment, production access, or authority/cutover decision.
 
 ### First independently reviewable code slice
 

@@ -84,15 +84,21 @@ function fixture() {
 	const directory = join(root, 'amp-work-hours', 'experimental-physical-amp-shadow')
 	const spool = join(directory, 'spool.sqlite')
 	let now = NOW
+	let monotonic = 0
 	const options = {
 		serviceURL: 'https://cukup.invalid',
 		tokenProvider: createFileTokenProvider(tokenFile),
 		executorProfile: { kind: 'local' as const, hostname: HOST },
 		env: { CUKUP_EXPERIMENTAL_PHYSICAL_AMP_SHADOW: '1', XDG_STATE_HOME: root },
 		now: () => now,
+		monotonicNow: () => monotonic,
 		fetch: async (_url: string, _init: RequestInit): Promise<Response> => { throw new Error('private-outage-sentinel') },
 	}
-	return { root, tokenFile, directory, spool, options, advance: (ms: number) => { now += ms } }
+	return {
+		root, tokenFile, directory, spool, options,
+		advance: (ms: number) => { now += ms },
+		advanceMonotonic: (ms: number) => { monotonic += ms },
+	}
 }
 
 function start(h: ReturnType<typeof harness>, f: ReturnType<typeof fixture>) {
@@ -105,8 +111,9 @@ function start(h: ReturnType<typeof harness>, f: ReturnType<typeof fixture>) {
 function rows(path: string) {
 	const db = new Database(path, { readonly: true })
 	try {
-		return db.query<{ sequence: number; envelope: string }, []>(
-			'SELECT source_sequence AS sequence, envelope_json AS envelope FROM physical_shadow_outbox ORDER BY source_sequence',
+		return db.query<{ sequence: number; kind: 'evidence' | 'coverage'; envelope: string }, []>(
+			`SELECT source_sequence AS sequence, record_kind AS kind, envelope_json AS envelope
+			 FROM physical_shadow_outbox ORDER BY source_sequence`,
 		).all()
 	} finally { db.close() }
 }
@@ -192,6 +199,8 @@ test('exact physical opt-in only; default, near matches, remote/OIDC/orb and unk
 	const h = harness()
 	expect(startExperimentalPhysicalAmpShadow(h.amp, { ...f.options, serviceURL: 'http://cukup.invalid' })).toBeUndefined()
 	expect(h.subscriptions()).toBe(0)
+	expect(h.commands.size).toBe(0)
+	expect(readdirSync(f.root)).toEqual(['private-token-path'])
 	expect(h.logs).toEqual([EXPERIMENTAL_AMP_SHADOW_WARNING])
 })
 
@@ -361,6 +370,125 @@ test('blocked shadow FIFO does not break actual legacy hook recording or sync', 
 	expect(notifications.map((message) => JSON.parse(message))).toMatchObject([
 		{ drain: 'blocked', spool: { blocked: 1, queued: 2 } },
 	])
+})
+
+test('explicit status synchronization preserves cadence, single flight, privacy and the evidence/coverage FIFO', async () => {
+	const f = fixture()
+	const h = harness()
+	let synchronizationRequests = 0
+	let synchronizationResponse: () => Response | Promise<Response> = () => Response.json({
+		error: 'private-error-sentinel',
+		body: 'private-body-sentinel',
+		collector: 'private-id-sentinel',
+	}, { status: 401 })
+	let deliver = false
+	f.options.fetch = async (url) => {
+		if (url.endsWith('/v1/shadow-synchronization')) {
+			synchronizationRequests++
+			return synchronizationResponse()
+		}
+		if (url.endsWith('/v1/executor-profile')) return Response.json({ executor_label: HOST })
+		return deliver ? Response.json({ status: 'accepted' }) : Response.json({}, { status: 503 })
+	}
+	const value = start(h, f)
+	h.emit('agent.start'); h.state('running'); f.advance(1_000); h.emit('agent.end')
+	await settle()
+	const retained = rows(f.spool)
+	expect(retained.map((row) => row.kind)).toEqual(['coverage', 'evidence', 'evidence'])
+	const notifications: string[] = []
+	const dialogs: unknown[] = []
+	const invoke = (choice: 'Synchronize status' | 'Drain one record') =>
+		h.commands.get('experimental-physical-shadow')!({ ui: {
+			select: async (dialog: unknown) => { dialogs.push(dialog); return choice },
+			notify: async (message: string) => { notifications.push(message) },
+		} })
+
+	await invoke('Synchronize status')
+	expect((dialogs[0] as { options: string[] }).options).toEqual([
+		'Drain one record', 'Synchronize status', 'Close',
+	])
+	expect(JSON.parse(notifications.at(-1)!)).toMatchObject({ synchronization: 'waiting' })
+	expect(synchronizationRequests).toBe(0)
+	f.advanceMonotonic(60_000)
+	await invoke('Synchronize status')
+	expect(JSON.parse(notifications.at(-1)!)).toMatchObject({
+		synchronization: 'retryable', spool: { queued: 3, blocked: 0 },
+	})
+	expect(synchronizationRequests).toBe(1)
+	f.advanceMonotonic(59_999)
+	await invoke('Synchronize status')
+	expect(JSON.parse(notifications.at(-1)!)).toMatchObject({ synchronization: 'waiting' })
+	expect(synchronizationRequests).toBe(1)
+
+	let release!: (response: Response) => void
+	let entered!: () => void
+	const ready = new Promise<void>((resolve) => { entered = resolve })
+	synchronizationResponse = () => {
+		entered()
+		return new Promise<Response>((resolve) => { release = resolve })
+	}
+	f.advanceMonotonic(1)
+	const first = invoke('Synchronize status')
+	const second = invoke('Synchronize status')
+	await ready
+	expect(synchronizationRequests).toBe(2)
+	release(Response.json({ status: 'accepted' }))
+	await Promise.all([first, second])
+	expect(notifications.slice(-2).map((message) => JSON.parse(message).synchronization)).toEqual([
+		'accepted', 'accepted',
+	])
+	expect(rows(f.spool)).toEqual(retained)
+
+	deliver = true
+	f.advance(5_000)
+	await invoke('Drain one record')
+	expect(JSON.parse(notifications.at(-1)!)).toMatchObject({ drain: 'delivered' })
+	expect(rows(f.spool).map((row) => row.kind)).toEqual(['evidence', 'evidence'])
+	const output = JSON.stringify([dialogs, notifications, h.logs])
+	for (const privateValue of [TOKEN, HOST, f.root, f.tokenFile, 'private-error-sentinel',
+		'private-body-sentinel', 'private-id-sentinel']) {
+		expect(output).not.toContain(privateValue)
+	}
+	expect(h.logs.every((line) => line === EXPERIMENTAL_AMP_SHADOW_WARNING)).toBeTrue()
+})
+
+test('disposal during a stalled synchronization retains ownership until the shared step settles', async () => {
+	const f = fixture()
+	const h = harness()
+	let release!: (response: Response) => void
+	let entered!: () => void
+	const ready = new Promise<void>((resolve) => { entered = resolve })
+	f.options.fetch = async (url) => {
+		if (url.endsWith('/v1/shadow-synchronization')) {
+			entered()
+			return new Promise<Response>((resolve) => { release = resolve })
+		}
+		return url.endsWith('/v1/executor-profile')
+			? Response.json({ executor_label: HOST })
+			: Response.json({ status: 'accepted' })
+	}
+	const value = start(h, f)
+	await settle()
+	f.advanceMonotonic(60_000)
+	const notifications: string[] = []
+	const command = h.commands.get('experimental-physical-shadow')!({ ui: {
+		select: async () => 'Synchronize status',
+		notify: async (message: string) => { notifications.push(message) },
+	} })
+	await ready
+	const disposal = value.dispose()
+	expect(h.commands.size).toBe(0)
+	expect(value.dispose()).toBe(disposal)
+	const refused = harness()
+	expect(startExperimentalPhysicalAmpShadow(refused.amp, f.options)).toBeUndefined()
+	expect(refused.commands.size).toBe(0)
+	release(Response.json({ status: 'accepted' }))
+	await command
+	await disposal
+	expect(notifications.map((message) => JSON.parse(message).synchronization)).toEqual(['accepted'])
+	expect(h.logs.every((line) => line === EXPERIMENTAL_AMP_SHADOW_WARNING)).toBeTrue()
+	const replacement = start(harness(), f)
+	await replacement.dispose()
 })
 
 test('disposal flushes local endpoints without synthesizing a lost end; startup drains only one old fact', async () => {

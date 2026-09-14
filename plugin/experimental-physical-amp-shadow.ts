@@ -24,6 +24,7 @@ export function startExperimentalPhysicalAmpShadow(
 		env?: NodeJS.ProcessEnv
 		fetch?: (input: string, init: RequestInit) => Promise<Response>
 		now?: () => number
+		monotonicNow?: () => number
 	},
 ) {
 	const env = options.env ?? process.env
@@ -41,12 +42,14 @@ export function startExperimentalPhysicalAmpShadow(
 	let outbox: PhysicalShadowEvidenceOutbox
 	let collector: ExperimentalAmpShadowCollector | undefined
 	let pendingDrain: ReturnType<PhysicalShadowEvidenceOutbox['drainStep']> | undefined
+	let pendingSynchronization: ReturnType<PhysicalShadowEvidenceOutbox['synchronizationStep']> | undefined
 	const requestDrain = () => (pendingDrain = outbox.drainStep())
+	const requestSynchronization = () => (pendingSynchronization = outbox.synchronizationStep())
 	const cleanup = async () => {
-		await collector?.dispose()
 		try {
-			await pendingDrain
+			await collector?.dispose()
 		} finally {
+			await Promise.allSettled([pendingDrain, pendingSynchronization])
 			outbox.close()
 		}
 	}
@@ -61,6 +64,7 @@ export function startExperimentalPhysicalAmpShadow(
 			spoolPath: join(directory, 'spool.sqlite'),
 			fetch: options.fetch,
 			now: options.now,
+			monotonicNow: options.monotonicNow,
 			requestTimeoutMs: 1_000,
 		})
 		const declaration = outbox.enqueueCapabilityDeclaration()
@@ -102,22 +106,32 @@ export function startExperimentalPhysicalAmpShadow(
 			if (stopped) return { status: 'unavailable' as const }
 			return bounded(requestDrain(), warn)
 		}
+		const synchronizationStep = async () => {
+			if (stopped) return { status: 'unavailable' as const }
+			return bounded(requestSynchronization(), warn)
+		}
 		const command = amp.registerCommand(
 			'experimental-physical-shadow',
 			{
 				title: 'Experimental physical shadow',
 				category: 'cukup',
-				description: 'Inspect aggregate shadow spool status or explicitly drain one record.',
+				description: 'Inspect aggregate shadow spool status, drain one record, or synchronize status.',
 			},
 			async (ctx) => {
 				const choice = await ctx.ui.select({
 					title: 'Experimental physical Amp shadow',
 					message: JSON.stringify(status()),
-					options: ['Drain one record', 'Close'],
+					options: ['Drain one record', 'Synchronize status', 'Close'],
 				})
 				if (choice === 'Drain one record') {
 					const result = await drainStep()
 					await ctx.ui.notify(JSON.stringify({ drain: result.status, spool: status() }))
+				} else if (choice === 'Synchronize status') {
+					const result = await synchronizationStep()
+					await ctx.ui.notify(JSON.stringify({
+						synchronization: typeof result === 'string' ? result : result.status,
+						spool: status(),
+					}))
 				}
 			},
 		)
@@ -129,7 +143,7 @@ export function startExperimentalPhysicalAmpShadow(
 				stopped = true
 				command.unsubscribe()
 				// Collector unsubscribes first, flushes pending local observations, then awaits its
-				// drain before close. Explicit drains must also settle before releasing ownership.
+				// drain before close. Explicit transport steps must also settle before releasing ownership.
 				disposal = bounded(cleanup(), warn).then(() => {})
 				return disposal
 			},
