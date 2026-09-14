@@ -151,6 +151,7 @@ test('v4 upgrade retains exact legacy schema, rows, ownership, credentials, and 
 	close(store)
 	const raw = new Database(path)
 	raw.exec(`
+		DROP TABLE shadow_coverage;
 		DROP INDEX auth_tokens_active_execution_site_id;
 		ALTER TABLE auth_tokens DROP COLUMN execution_site_id;
 		DROP TABLE shadow_evidence;
@@ -186,6 +187,7 @@ test('failed v4 migration rolls back DDL and version and can restart after repai
 	close(store)
 	const raw = new Database(path)
 	raw.exec(`
+		DROP TABLE shadow_coverage;
 		DROP INDEX auth_tokens_active_execution_site_id;
 		ALTER TABLE auth_tokens DROP COLUMN execution_site_id;
 		DROP TABLE shadow_evidence;
@@ -199,7 +201,7 @@ test('failed v4 migration rolls back DDL and version and can restart after repai
 	raw.exec('DROP TABLE shadow_evidence')
 	const repaired = open(path).store
 	expect(repaired.shadow.records()).toEqual([])
-	expect(raw.query('PRAGMA user_version').get()).toEqual({ user_version: 6 })
+	expect(raw.query('PRAGMA user_version').get()).toEqual({ user_version: 7 })
 	raw.close()
 })
 

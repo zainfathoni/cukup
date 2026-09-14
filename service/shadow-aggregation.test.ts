@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { CAPABILITIES, LOCAL_PROTOCOL, type Evidence, type ProjectAttribution } from './harness-evidence-protocol.ts'
-import { SHADOW_SCHEMA, ShadowEvidenceStore } from './shadow-evidence.ts'
+import { SHADOW_COVERAGE_SCHEMA, SHADOW_SCHEMA, ShadowEvidenceStore } from './shadow-evidence.ts'
 import { buildShadowIntervals, summarizeShadow, summarizeShadowAfterCutover } from './shadow-aggregation.ts'
 import { summarizeWork } from './aggregation.ts'
 import { ServiceStore } from './store.ts'
@@ -22,6 +22,7 @@ function fixture(store?: ShadowEvidenceStore) {
 		const db = new Database(':memory:')
 		databases.push(db)
 		db.exec(SHADOW_SCHEMA)
+		db.exec(SHADOW_COVERAGE_SCHEMA)
 		store = new ShadowEvidenceStore(db)
 	}
 	const shadow = store

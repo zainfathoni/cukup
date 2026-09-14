@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { generateBearerToken, hashBearerToken, type IssuedToken } from './auth.ts'
 import { MAX_CLOCK_SKEW_MS, defaultServiceDatabasePath } from './config.ts'
-import { SHADOW_SCHEMA, ShadowEvidenceStore } from './shadow-evidence.ts'
+import { SHADOW_COVERAGE_SCHEMA, SHADOW_SCHEMA, ShadowEvidenceStore } from './shadow-evidence.ts'
 import type {
 	AttributedStoredWorkEvent,
 	ExecutorBindingOutcome,
@@ -15,7 +15,7 @@ import type {
 	WorkEvent,
 } from './types.ts'
 
-const DATABASE_VERSION = 6
+const DATABASE_VERSION = 7
 
 const EXECUTOR_LABEL_CHECK = `
 	CHECK (
@@ -537,7 +537,8 @@ export class ServiceStore {
 			}
 
 			if (version < 5) this.#database.exec(SHADOW_SCHEMA)
-			if (version !== 0) {
+			if (version < 7) this.#database.exec(SHADOW_COVERAGE_SCHEMA)
+			if (version !== 0 && version < 6) {
 				const hasExecutionSite = this.#database
 					.query<{ value: number }, []>(
 						`SELECT COUNT(*) AS value FROM pragma_table_info('auth_tokens')
