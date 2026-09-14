@@ -17,6 +17,7 @@ import {
 	EXPERIMENTAL_AMP_SHADOW_WARNING,
 	type ExperimentalAmpShadowCollector,
 } from './experimental-amp-shadow-collector.ts'
+import { startExperimentalPhysicalAmpShadow } from './experimental-physical-amp-shadow.ts'
 import { createLegacyAmpAdapter } from './legacy-amp-adapter.ts'
 import { CukupServiceClient, isTargetOverrideDate, ServiceRequestError } from './protocol.ts'
 import { formatStatusDisplay } from './status.ts'
@@ -43,16 +44,20 @@ export default function (amp: PluginAPI) {
 	const serviceURL = process.env.CUKUP_SERVICE_URL?.trim() || 'https://api.cukup.dev'
 	const client = createClient(serviceURL, now)
 	const tokenProvider = selectTokenProvider(amp)
+	const executorProfile = executorProfileFor(amp.system.executor.kind)
 	const sync = new SyncEngine({
 		store,
 		client,
 		tokenProvider,
 		now,
-		executorProfile: executorProfileFor(amp.system.executor.kind),
+		executorProfile,
 	})
 	const legacyAmpAdapter = createLegacyAmpAdapter({ amp, store, sync, now })
 	const { resolveProjectAttribution } = legacyAmpAdapter
 	const experimentalAmpShadowCollector = startExperimentalAmpShadowCollector(amp)
+	const physicalShadow = startExperimentalPhysicalAmpShadow(amp, {
+		serviceURL, tokenProvider, executorProfile, now,
+	})
 
 	amp.registerCommand(
 		'work-hours-status',
@@ -234,12 +239,13 @@ export default function (amp: PluginAPI) {
 	sync.start()
 	amp.onDispose(async () => {
 		const shadowDisposal = experimentalAmpShadowCollector?.dispose()
+		const physicalDisposal = physicalShadow?.dispose()
 		const legacyDisposal = (async () => {
 			await legacyAmpAdapter.dispose()
 			await sync.dispose()
 			store.close()
 		})()
-		const [legacyResult] = await Promise.allSettled([legacyDisposal, shadowDisposal])
+		const [legacyResult] = await Promise.allSettled([legacyDisposal, shadowDisposal, physicalDisposal])
 		if (legacyResult.status === 'rejected') throw legacyResult.reason
 	})
 }

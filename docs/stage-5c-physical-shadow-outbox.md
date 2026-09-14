@@ -14,7 +14,7 @@ Accepted and exact-duplicate outcomes remove the queued record. Network errors, 
 
 ## Limitations and deployment implications
 
-This slice is a reusable experimental client, not a runnable collector integration. No production lifecycle currently constructs it, supplies source facts, chooses a spool path, or schedules explicit drains. Credential provisioning/rotation, hostname configuration, spool backup/repair, operator handling of terminal blockers, and invocation cadence remain caller-owned. There is no autonomous retry while the owner is not invoking `drainStep`. Callers must await an in-flight drain before `close()`; premature close is rejected so spool ownership cannot transfer while an older request can still complete.
+This slice is a reusable experimental client, not itself a runnable collector integration. The separately reviewed [Stage 5D](stage-5d-physical-amp-shadow.md) supplies a default-off physical Amp hook owner, isolated spool location, and bounded lifecycle/explicit drains. Credential provisioning/rotation, hostname configuration, spool backup/repair, operator handling of terminal blockers, and invocation cadence remain caller-owned. There is no autonomous retry while the owner is not invoking `drainStep`. Callers must await an in-flight drain before `close()`; premature close is rejected so spool ownership cannot transfer while an older request can still complete.
 
 OIDC and Amp-orb site design, aggregation/union, clipping, dashboard or coverage presentation, historical migration/backfill, and legacy v1/v2 changes remain excluded. The outbox accepts only physical bearer operation; Stage 5B continues to reject workload OIDC at the cloud route.
 
