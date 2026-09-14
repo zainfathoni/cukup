@@ -96,14 +96,16 @@ reviewed synchronization protocol may report only collector/site identity, obser
 closed synchronization value, bounded aggregate record/byte counts, and a bounded oldest-queued
 occurrence time. It must not report payloads, IDs of evidence/projects, hostnames, paths, tokens,
 response bodies, arbitrary errors, or infer a collection watermark. A newer observation supersedes
-an older one for current status; historical observations remain immutable. Expiry policy and wire
-framing remain deferred.
+an older one for current status. [Stage 5J](stage-5j-shadow-synchronization-contract.md) settles the
+future physical wire contract and expiry, narrowing historical retention to one revision-safe latest
+snapshot per already bound collector; no observation history is required. Upload remains unimplemented.
 
 ### Cloud persistence
 
 The cloud owns authentication-derived execution-site binding and immutable append-only persistence
-of accepted evidence, declarations, loss intervals, and any later reviewed spool observations. It
-may retain occurrence and receipt time separately. It rejects identity/site conflicts and never
+of accepted evidence, declarations, and loss intervals. Future spool observations instead use Stage
+5J's atomic latest-snapshot replacement contract. It may retain occurrence and receipt time separately.
+It rejects identity/site conflicts and never
 fills sequence gaps, closes pending segments, extends declarations backward, fabricates loss, or
 converts a recent receipt into completeness.
 
@@ -187,7 +189,7 @@ expectations:
 ## Deferred implementation decisions
 
 Future independently reviewed slices must choose protocol version/framing, DDL and migration,
-authentication and route shape, bounded numeric limits, synchronization-observation expiry,
+authentication and route shape, and bounded numeric limits where not settled by Stage 5H/5J,
 correction policy for an erroneous declaration, report/API payloads, detailed dashboard layout, and
 cutover activation. OIDC/Amp-orb execution-site design, collectors beyond the existing experiment,
 historical migration/backfill, support claims, target comparison, production settings/access,
