@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { generateBearerToken, hashBearerToken, type IssuedToken } from './auth.ts'
 import { MAX_CLOCK_SKEW_MS, defaultServiceDatabasePath } from './config.ts'
+import { SHADOW_SCHEMA, ShadowEvidenceStore } from './shadow-evidence.ts'
 import type {
 	AttributedStoredWorkEvent,
 	ExecutorBindingOutcome,
@@ -13,7 +14,7 @@ import type {
 	WorkEvent,
 } from './types.ts'
 
-const DATABASE_VERSION = 4
+const DATABASE_VERSION = 5
 
 const EXECUTOR_LABEL_CHECK = `
 	CHECK (
@@ -89,6 +90,7 @@ type SourceOwnerRow = { ownerKind: 'bearer' | 'oidc'; ownerId: string | null }
 
 export class ServiceStore {
 	readonly #database: Database
+	readonly shadow: ShadowEvidenceStore
 
 	constructor(path = defaultServiceDatabasePath()) {
 		const directory = dirname(path)
@@ -105,6 +107,7 @@ export class ServiceStore {
 			this.#database.close()
 			throw error
 		}
+		this.shadow = new ShadowEvidenceStore(this.#database)
 	}
 
 	issueBearer(nowMs = Date.now(), issued = generateBearerToken()): IssuedToken {
@@ -506,10 +509,11 @@ export class ServiceStore {
 					SELECT date, target_minutes, created_at, updated_at FROM target_overrides_v3;
 					DROP TABLE target_overrides_v3;
 				`)
-			} else {
+			} else if (version < 3) {
 				this.#database.exec(`${TARGET_OVERRIDES_V4_TABLE};`)
 			}
 
+			this.#database.exec(SHADOW_SCHEMA)
 			this.#database.exec(`
 				CREATE UNIQUE INDEX IF NOT EXISTS auth_tokens_active_executor_label
 					ON auth_tokens(executor_label)
