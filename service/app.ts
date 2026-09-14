@@ -13,6 +13,7 @@ import {
 	type BatchResult,
 } from './protocol.ts'
 import { ServiceStore } from './store.ts'
+import { synchronizationBody } from './shadow-synchronization.ts'
 import type { Principal } from './types.ts'
 
 type OidcVerification = Pick<OidcVerifier, 'verify'>
@@ -45,10 +46,13 @@ export function createApp(options: AppOptions): { fetch(request: Request): Promi
 		async fetch(request: Request): Promise<Response> {
 			const startedAt = performance.now()
 			const url = new URL(request.url)
+			const synchronizationRoute = url.pathname.startsWith('/v1/shadow-synchronization')
 			let response: Response
 			try {
 				const hostname = originalHostname(request, url)
-				if (url.pathname === '/up') {
+				if (synchronizationRoute && hostname !== apiHostname) {
+					response = json({ error: 'not_found' }, 404)
+				} else if (url.pathname === '/up') {
 					response =
 						request.method === 'GET'
 							? json({ ok: true })
@@ -66,7 +70,7 @@ export function createApp(options: AppOptions): { fetch(request: Request): Promi
 							? json({ ok: true })
 							: json({ error: 'method_not_allowed' }, 405, { allow: 'GET' })
 				} else if (url.pathname.startsWith('/v1/')) {
-					if (requireHttps && !isSecureRequest(request, trustTlsProxy)) {
+					if ((requireHttps || synchronizationRoute) && !isSecureRequest(request, trustTlsProxy)) {
 						response = json({ error: 'secure_transport_required' }, 400)
 					} else {
 						const principal = await authenticate(request, options.store, options.oidcVerifier)
@@ -90,14 +94,15 @@ export function createApp(options: AppOptions): { fetch(request: Request): Promi
 					response = json({ error: 'not_found' }, 404)
 				}
 			} catch (error) {
-				logger.error('request_failed', {
+				if (!synchronizationRoute) logger.error('request_failed', {
 					method: request.method,
 					path: logPath(url.pathname),
 					error: error instanceof Error ? error.name : 'unknown',
 				})
 				response = json({ error: 'internal_error' }, 500)
 			}
-			logger.info('request', {
+			if (synchronizationRoute) logger.info('shadow_synchronization', { status: response.status })
+			else logger.info('request', {
 				method: request.method,
 				path: logPath(url.pathname),
 				status: response.status,
@@ -198,6 +203,28 @@ async function authenticatedResponse(
 			sourceSequence: body.value.source_sequence,
 			envelope: body.value.envelope,
 		}, now()))
+	}
+	if (url.pathname === '/v1/shadow-synchronization') {
+		if (request.method !== 'POST') return json({ error: 'method_not_allowed' }, 405, { allow: 'POST' })
+		if (principal.kind !== 'bearer') return json({ error: 'physical_bearer_required' }, 403)
+		const authorization = store.synchronization.authorize(principal.tokenId)
+		if ('error' in authorization) {
+			return authorization.error === 'unauthorized'
+				? json(authorization, 401, { 'www-authenticate': 'Bearer' }) : json(authorization, 403)
+		}
+		if (url.search !== '') return json({ error: 'invalid_request' }, 400)
+		if (request.headers.has('content-encoding') ||
+			!/^application\/json(?:\s*;\s*charset\s*=\s*(?:utf-8|"utf-8"))?\s*$/i.test(
+				request.headers.get('content-type') ?? '',
+			)) return json({ error: 'unsupported_media_type' }, 415)
+		const body = await synchronizationBody(request)
+		if ('error' in body) return json(body, body.error === 'payload_too_large' ? 413 : 400)
+		const outcome = store.synchronization.observe(principal.tokenId, body.value)
+		if ('error' in outcome) {
+			if (outcome.error === 'unauthorized') return json(outcome, 401, { 'www-authenticate': 'Bearer' })
+			return json(outcome, outcome.error === 'executor_profile_required' ? 403 : 503)
+		}
+		return json(outcome)
 	}
 	if (url.pathname === '/v1/events:batch') {
 		if (request.method !== 'POST') {

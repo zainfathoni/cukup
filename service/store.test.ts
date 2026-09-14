@@ -106,6 +106,7 @@ function createVersion2Database(path: string): void {
 	current.close()
 	const database = new Database(path, { strict: true })
 	database.exec(`
+		DROP TABLE shadow_synchronization;
 		DROP TABLE shadow_coverage;
 		DROP INDEX auth_tokens_active_execution_site_id;
 		ALTER TABLE auth_tokens DROP COLUMN execution_site_id;
@@ -124,6 +125,7 @@ function createVersion3Database(path: string): void {
 	current.close()
 	const database = new Database(path, { strict: true })
 	database.exec(`
+		DROP TABLE shadow_synchronization;
 		DROP TABLE shadow_coverage;
 		DROP INDEX auth_tokens_active_execution_site_id;
 		ALTER TABLE auth_tokens DROP COLUMN execution_site_id;
@@ -166,7 +168,7 @@ describe('SQLite schema migration', () => {
 			store.close()
 			const inspected = new Database(path, { readonly: true, strict: true })
 			expect(inspected.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
-				user_version: 7,
+				user_version: 8,
 			})
 			expect(
 				inspected
@@ -195,7 +197,7 @@ describe('SQLite schema migration', () => {
 			store.close()
 			const inspected = new Database(path, { readonly: true, strict: true })
 			expect(inspected.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
-				user_version: 7,
+				user_version: 8,
 			})
 			inspected.close()
 		}
@@ -216,7 +218,7 @@ describe('SQLite schema migration', () => {
 			store.close()
 			const inspected = new Database(path, { readonly: true, strict: true })
 			expect(inspected.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
-				user_version: 7,
+				user_version: 8,
 			})
 			expect(
 				inspected
@@ -234,7 +236,7 @@ describe('SQLite schema migration', () => {
 		}
 	})
 
-	test('creates v7 directly with the exact target constraint and remains stable across restart', () => {
+	test('creates v8 directly with the exact target constraint and remains stable across restart', () => {
 		const path = databasePath()
 		const store = new ServiceStore(path)
 		store.putTargetOverride('2026-09-01', 240, now)
@@ -242,7 +244,7 @@ describe('SQLite schema migration', () => {
 
 		const database = new Database(path, { strict: true })
 		expect(database.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
-			user_version: 7,
+			user_version: 8,
 		})
 		database
 			.query('INSERT INTO target_overrides VALUES (?, ?, ?, ?)')
@@ -278,6 +280,7 @@ describe('SQLite schema migration', () => {
 
 		const versionFive = new Database(path, { strict: true })
 		versionFive.exec(`
+			DROP TABLE shadow_synchronization;
 			DROP TABLE shadow_coverage;
 			DROP INDEX auth_tokens_active_execution_site_id;
 			ALTER TABLE auth_tokens DROP COLUMN execution_site_id;
@@ -309,6 +312,7 @@ describe('SQLite schema migration', () => {
 		current.close()
 		const versionFive = new Database(path, { strict: true })
 		versionFive.exec(`
+			DROP TABLE shadow_synchronization;
 			DROP TABLE shadow_coverage;
 			DROP INDEX auth_tokens_active_execution_site_id;
 			ALTER TABLE auth_tokens DROP COLUMN execution_site_id;
@@ -338,12 +342,12 @@ describe('SQLite schema migration', () => {
 		const store = new ServiceStore(path)
 		store.close()
 		const future = new Database(path, { strict: true })
-		future.exec('PRAGMA user_version = 8')
+		future.exec('PRAGMA user_version = 9')
 		future.close()
 		expect(() => new ServiceStore(path)).toThrow('newer than supported')
 		const inspected = new Database(path, { readonly: true, strict: true })
 		expect(inspected.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
-			user_version: 8,
+			user_version: 9,
 		})
 		inspected.close()
 	})

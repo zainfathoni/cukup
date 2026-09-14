@@ -214,3 +214,15 @@ Amp can resume work after a provider error or wake a thread from another thread 
 ## Other errors
 
 Malformed roots use `400 invalid_request`, oversized payloads use `413 payload_too_large`, unsupported media types use `415 unsupported_media_type`, and wrong methods use `405 method_not_allowed`. Unexpected failures use only `500 {"error":"internal_error"}`. No error response contains request bodies, credentials, identity claims, database details, or stack traces.
+
+## Shadow synchronization (Stage 5K, local only)
+
+`POST /v1/shadow-synchronization` implements the separate closed
+[Stage 5J contract](stage-5j-shadow-synchronization-contract.md), not the generic malformed-root
+classification above: invalid JSON/UTF-8/duplicate keys use `400 invalid_json`; parsed malformed
+records use `200 rejected/invalid_record`. It requires HTTPS, physical bearer and existing Executor
+Profile, exactly eight fields and at most 1024 raw bytes. Observations never register collectors.
+There is no public read endpoint or client uploader. See the [Stage 5K implementation and clock
+trust boundary](stage-5k-shadow-synchronization-service.md); the default production clock source is
+untrusted, so new observations fail closed with 503 until a separately reviewed host trust provider
+exists. Legacy summary and Stage 5I disclosures remain unchanged.
