@@ -62,6 +62,14 @@ _Avoid_: Project Working Time, allocated time
 The display classification for where work evidence originated: a Machine Label for physical hardware or `amp-orb` for an Amp-managed orb.
 _Avoid_: Host, source identity, device ID
 
+**Execution Site**:
+The authenticated execution environment where generic evidence originates. Its identity survives restart of that environment but not replacement by a different environment; a shared display label does not establish continuity.
+_Avoid_: Executor Label, thread identity, project identity, credential
+
+**Collector Instance**:
+One durable evidence-collection lane at one Execution Site. Restart can continue the same lane, but a new instance cannot inherit another instance's evidence identity or close its unfinished execution.
+_Avoid_: Process, token, Harness, Execution Site
+
 **Executor Activity**:
 The targetless union of Working Time intervals carrying one Executor Label. Executor Activity is intentionally non-additive across labels when concurrent Executors overlap. Agent Runtime by Executor is a separate view.
 _Avoid_: Machine Working Time, per-device allocation
