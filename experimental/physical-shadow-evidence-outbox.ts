@@ -22,9 +22,26 @@ import {
 	type Capability,
 } from './local-harness-evidence.ts'
 
-const DATABASE_VERSION = 1
+const DATABASE_VERSION = 2
 const RESPONSE_MAX_BYTES = 16 * 1024
 const RETRY_DELAYS_MS = [1_000, 5_000, 30_000, 5 * 60_000] as const
+const SYNCHRONIZATION_INTERVAL_MS = 60_000
+const MAX_TIME = 253402300799999
+
+type SynchronizationCandidate = {
+	protocol_version: 1
+	collector_instance_id: string
+	observation_sequence: number
+	observed_at_ms: number
+	state: 'clear' | 'queued' | 'retrying' | 'blocked'
+	records: number
+	bytes: number
+	oldest_queued_at_ms: number | null
+}
+export type PhysicalShadowSynchronizationResult =
+	| 'waiting' | 'disabled' | 'suspended' | 'unavailable'
+	| 'accepted' | 'duplicate' | 'retryable' | 'registration_required' | 'clock_repair_required'
+type SynchronizationRow = { sequence: number; pending: string | null; stale: number }
 
 export const PHYSICAL_SHADOW_DEFAULT_MAX_QUEUED_RECORDS = 10_000
 export const PHYSICAL_SHADOW_DEFAULT_MAX_QUEUED_BYTES = 8 * 1024 * 1024
@@ -41,6 +58,7 @@ export type PhysicalShadowEvidenceOutboxOptions = Readonly<{
 	spoolPath: string
 	fetch?: Fetch
 	now?: () => number
+	monotonicNow?: () => number
 	randomId?: () => string
 	maxQueuedRecords?: number
 	maxQueuedBytes?: number
@@ -118,6 +136,13 @@ export class PhysicalShadowEvidenceOutbox {
 	readonly #requestTimeoutMs: number
 	readonly #collectorId: string
 	#draining: Promise<PhysicalShadowDrainResult> | undefined
+	readonly #monotonicNow: () => number
+	#lastSynchronization: number
+	#lastSynchronizationReading: number
+	#synchronizing: Promise<PhysicalShadowSynchronizationResult> | undefined
+	#synchronizationSuspended = false
+	#staleUnpersisted = false
+	#synchronizationDisabled = false
 
 	constructor(options: PhysicalShadowEvidenceOutboxOptions) {
 		this.#serviceOrigin = validateServiceURL(options.serviceURL).origin
@@ -125,6 +150,10 @@ export class PhysicalShadowEvidenceOutbox {
 		this.#executorHostname = validateHostname(options.executorHostname)
 		this.#fetch = options.fetch ?? fetch
 		this.#now = options.now ?? Date.now
+		this.#monotonicNow = options.monotonicNow ?? (() => performance.now())
+		try { this.#lastSynchronization = this.#monotonicNow() }
+		catch { this.#lastSynchronization = NaN }
+		this.#lastSynchronizationReading = this.#lastSynchronization
 		this.#maxQueuedRecords = positiveInteger(
 			options.maxQueuedRecords,
 			PHYSICAL_SHADOW_DEFAULT_MAX_QUEUED_RECORDS,
@@ -251,6 +280,168 @@ export class PhysicalShadowEvidenceOutbox {
 		return this.#draining
 	}
 
+	/** Explicit, inactive status lane. Default replaces pending with a fresh higher revision.
+	 * Exact retry is useful after acknowledgement loss; it cannot renew freshness.
+	 */
+	synchronizationStep(mode: 'fresh' | 'retry' = 'fresh'): Promise<PhysicalShadowSynchronizationResult> {
+		if (this.#synchronizing !== undefined) return this.#synchronizing
+		this.#synchronizing = this.#synchronize(mode).finally(() => {
+			this.#synchronizing = undefined
+		})
+		return this.#synchronizing
+	}
+
+	async #synchronize(mode: 'fresh' | 'retry'): Promise<PhysicalShadowSynchronizationResult> {
+		if (this.#synchronizationDisabled) return 'disabled'
+		if (this.#synchronizationSuspended) {
+			try { this.#persistStaleSuspension() } catch { return 'unavailable' }
+			return 'suspended'
+		}
+		let candidate: string
+		try {
+			const elapsed = this.#monotonicNow()
+			if (!Number.isFinite(elapsed) || !Number.isFinite(this.#lastSynchronizationReading) || elapsed < this.#lastSynchronizationReading) {
+				this.#synchronizationDisabled = true
+				return 'disabled'
+			}
+			this.#lastSynchronizationReading = elapsed
+			if (elapsed - this.#lastSynchronization < SYNCHRONIZATION_INTERVAL_MS) return 'waiting'
+			this.#lastSynchronization = elapsed
+			const sampled = this.#database.transaction(() => {
+				const row = this.#database.query<SynchronizationRow, []>(
+					'SELECT sequence, pending, stale FROM physical_shadow_synchronization WHERE singleton = 1',
+				).get()
+				if (!row || !integer(row.sequence, 0, Number.MAX_SAFE_INTEGER) ||
+					(row.stale !== 0 && row.stale !== 1) ||
+					(row.pending !== null && !validPending(row.pending, row.sequence, this.#collectorId))) {
+					this.#synchronizationDisabled = true
+					return undefined
+				}
+				if (row.stale === 1) {
+					this.#synchronizationSuspended = true
+					return undefined
+				}
+				if (row.sequence === Number.MAX_SAFE_INTEGER) {
+					this.#synchronizationDisabled = true
+					return undefined
+				}
+				if (mode === 'retry' && row.pending !== null) return row.pending
+				const body = this.#sampleSynchronization(row.sequence + 1)
+				const pending = JSON.stringify(body)
+				this.#database.query(`UPDATE physical_shadow_synchronization
+					SET sequence = ?, pending = ? WHERE singleton = 1`).run(body.observation_sequence, pending)
+				return pending
+			}).immediate()
+			if (sampled === undefined) return this.#synchronizationDisabled ? 'disabled' : 'suspended'
+			candidate = sampled
+		} catch {
+			// Missing tables and unreadable/corrupt spools never imply an empty snapshot.
+			return 'unavailable'
+		}
+		const outcome = await this.#requestSynchronization(candidate)
+		try {
+			if (outcome === 'accepted' || outcome === 'duplicate') {
+				this.#database.query(`UPDATE physical_shadow_synchronization SET pending = NULL
+					WHERE singleton = 1 AND pending = ?`).run(candidate)
+			} else if (outcome === 'stale') {
+				this.#synchronizationSuspended = true
+				this.#staleUnpersisted = true
+				this.#persistStaleSuspension()
+			} else if (outcome === 'suspended') this.#synchronizationSuspended = true
+		} catch { return 'unavailable' }
+		return outcome === 'stale' ? 'suspended' : outcome
+	}
+
+	#persistStaleSuspension(): void {
+		if (!this.#staleUnpersisted) return
+		const change = this.#database.query('UPDATE physical_shadow_synchronization SET stale = 1 WHERE singleton = 1').run()
+		if (change.changes !== 1) throw new Error('Synchronization unavailable')
+		this.#staleUnpersisted = false
+	}
+
+	#sampleSynchronization(sequence: number): SynchronizationCandidate {
+		const observed = this.#now()
+		if (!integer(observed, 0, MAX_TIME)) throw new Error('Synchronization unavailable')
+		let records = 0, bytes = 0, blocked = false, retrying = false
+		let oldest: number | null = null
+		const rows = this.#database.query<QueueRow, []>(`SELECT source_sequence AS sourceSequence,
+			evidence_id AS evidenceId, envelope_json AS envelopeJson, payload_bytes AS payloadBytes,
+			state, blocked_reason AS blockedReason, retry_attempt AS retryAttempt, retry_at_ms AS retryAtMs
+			FROM physical_shadow_outbox`).iterate()
+		for (const row of rows) {
+			const parsed = parseEvidenceEnvelope(JSON.parse(row.envelopeJson), observed)
+			if ('reason' in parsed || 'unsupported' in parsed || parsed.collectorInstanceId !== this.#collectorId ||
+				parsed.evidence.length !== 1 || 'reason' in parsed.evidence[0]!) throw new Error('Synchronization unavailable')
+			const evidence = parsed.evidence[0].value
+			// Only these current evidence families define participation; no future fact/time fallback.
+			if (!['engagement', 'execution_start', 'execution_end'].includes(evidence.family) ||
+				evidence.evidence_id !== row.evidenceId || !integer(row.sourceSequence, 1, Number.MAX_SAFE_INTEGER) ||
+				!integer(row.payloadBytes, 1, Number.MAX_SAFE_INTEGER) ||
+				!integer(row.retryAttempt, 0, 4) || !integer(row.retryAtMs, 0, Number.MAX_SAFE_INTEGER) ||
+				!['queued', 'blocked'].includes(row.state) ||
+				(row.state === 'queued' ? row.blockedReason !== null : ![
+					'invalid_record', 'unsupported_version', 'identity_conflict', 'invalid_order',
+					'profile', 'transport', 'invalid_response',
+				].includes(row.blockedReason!))) throw new Error('Synchronization unavailable')
+			const occurrence = Date.parse(evidence.timing.wall_time)
+			if (!integer(occurrence, 0, MAX_TIME) || occurrence > observed + 600000) throw new Error('Synchronization unavailable')
+			records = Math.min(10000, records + 1)
+			bytes = Math.min(8388608, bytes + row.payloadBytes)
+			oldest = oldest === null ? occurrence : Math.min(oldest, occurrence)
+			blocked ||= row.state === 'blocked'
+			retrying ||= row.state === 'queued' && (row.retryAtMs > 0 || row.retryAttempt > 0)
+		}
+		return {
+			protocol_version: 1, collector_instance_id: this.#collectorId, observation_sequence: sequence,
+			observed_at_ms: observed, state: records === 0 ? 'clear' : blocked ? 'blocked' : retrying ? 'retrying' : 'queued',
+			records, bytes, oldest_queued_at_ms: oldest,
+		}
+	}
+
+	async #requestSynchronization(candidate: string): Promise<SynchronizationTransportOutcome> {
+		const controller = new AbortController()
+		let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+		let timer: ReturnType<typeof setTimeout> | undefined
+		const request = async (): Promise<SynchronizationTransportOutcome> => {
+			try {
+				const token = await this.#tokenProvider.getToken()
+				if (controller.signal.aborted || token.length < 32 || token.length > 16 * 1024 || /\s/.test(token)) return 'retryable'
+				const response = await this.#fetch(`${this.#serviceOrigin}/v1/shadow-synchronization`, {
+					method: 'POST', redirect: 'manual', signal: controller.signal,
+					headers: { accept: 'application/json', 'content-type': 'application/json', authorization: `Bearer ${token}` },
+					body: candidate,
+				})
+				if (controller.signal.aborted || !response.body ||
+					!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(response.headers.get('content-type') ?? '') ||
+					response.headers.has('content-encoding')) {
+					void response.body?.cancel().catch(() => {})
+					return 'retryable'
+				}
+				reader = response.body.getReader()
+				const bytes = new Uint8Array(1024)
+				let length = 0
+				for (;;) {
+					const chunk = await reader.read()
+					if (chunk.done) break
+					if (length + chunk.value.byteLength > bytes.length) return 'retryable'
+					bytes.set(chunk.value, length)
+					length += chunk.value.byteLength
+				}
+				const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes.subarray(0, length))
+				return classifySynchronization(response.status, text)
+			} catch { return 'retryable' }
+		}
+		try {
+			return await Promise.race([request(), new Promise<SynchronizationTransportOutcome>((resolve) => {
+				timer = setTimeout(() => resolve('retryable'), 5000)
+			})])
+		} finally {
+			clearTimeout(timer)
+			controller.abort()
+			void reader?.cancel().catch(() => {})
+		}
+	}
+
 	async #drain(): Promise<PhysicalShadowDrainResult> {
 		let row: QueueRow | null
 		try {
@@ -372,6 +563,11 @@ export class PhysicalShadowEvidenceOutbox {
 		if (this.#draining !== undefined) {
 			throw new Error('Physical shadow drain must finish before close')
 		}
+		if (this.#synchronizing !== undefined) {
+			throw new Error('Physical shadow synchronization must finish before close')
+		}
+		try { this.#persistStaleSuspension() }
+		catch { throw new Error('Physical shadow synchronization suspension must persist before close') }
 		this.#database.close()
 		this.#ownership.close()
 	}
@@ -462,7 +658,20 @@ export class PhysicalShadowEvidenceOutbox {
 		if (version > DATABASE_VERSION) {
 			throw new Error(`Physical shadow spool schema version ${version} is newer than supported version ${DATABASE_VERSION}`)
 		}
+		if (version === DATABASE_VERSION) return // Never recreate initialized synchronization state.
 		this.#database.transaction(() => {
+			if (version === 1) {
+				const identity = this.#database.query<{ value: string }, []>(
+					"SELECT value FROM physical_shadow_settings WHERE key = 'collector_id'",
+				).get()
+				const columns = this.#database.query<{ name: string }, []>('PRAGMA table_info(physical_shadow_outbox)').all()
+				if (!identity || !isUuidV4(identity.value) || columns.map((column) => column.name).join(',') !==
+					'source_sequence,evidence_id,envelope_json,payload_bytes,state,blocked_reason,retry_attempt,retry_at_ms') {
+					throw new Error('Physical shadow spool migration unavailable')
+				}
+			} else if (version !== 0 || this.#database.query('SELECT name FROM sqlite_master WHERE type = \'table\'').get()) {
+				throw new Error('Physical shadow spool migration unavailable')
+			}
 			this.#database.exec(`
 				CREATE TABLE IF NOT EXISTS physical_shadow_settings (
 					key TEXT PRIMARY KEY,
@@ -483,6 +692,13 @@ export class PhysicalShadowEvidenceOutbox {
 					CHECK ((state = 'queued' AND blocked_reason IS NULL) OR
 						(state = 'blocked' AND blocked_reason IS NOT NULL))
 				) STRICT;
+				CREATE TABLE physical_shadow_synchronization (
+					singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+					sequence INTEGER NOT NULL CHECK (sequence BETWEEN 0 AND 9007199254740991),
+					pending TEXT,
+					stale INTEGER NOT NULL CHECK (stale IN (0, 1))
+				) STRICT;
+				INSERT INTO physical_shadow_synchronization VALUES (1, 0, NULL, 0);
 				PRAGMA user_version = ${DATABASE_VERSION};
 			`)
 		}).immediate()
@@ -507,6 +723,56 @@ export class PhysicalShadowEvidenceOutbox {
 			return created
 		}).immediate()
 	}
+}
+
+function integer(value: unknown, min: number, max: number): value is number {
+	return typeof value === 'number' && Number.isSafeInteger(value) && value >= min && value <= max
+}
+
+function validPending(text: string, sequence: number, collector: string): boolean {
+	try {
+		if (Buffer.byteLength(text) > 1024) return false
+		const value: unknown = JSON.parse(text)
+		if (!exactObject(value, ['protocol_version', 'collector_instance_id', 'observation_sequence',
+			'observed_at_ms', 'state', 'records', 'bytes', 'oldest_queued_at_ms']) ||
+			JSON.stringify(value) !== text || value.protocol_version !== 1 || value.collector_instance_id !== collector ||
+			value.observation_sequence !== sequence || !integer(sequence, 1, Number.MAX_SAFE_INTEGER) ||
+			!integer(value.observed_at_ms, 0, MAX_TIME) || !integer(value.records, 0, 10000) ||
+			!integer(value.bytes, 0, 8388608)) return false
+		return value.records === 0
+			? value.state === 'clear' && value.bytes === 0 && value.oldest_queued_at_ms === null
+			: ['queued', 'retrying', 'blocked'].includes(value.state as string) && value.bytes > 0 &&
+				integer(value.oldest_queued_at_ms, 0, MAX_TIME) && value.oldest_queued_at_ms <= value.observed_at_ms + 600000
+	} catch { return false }
+}
+
+type SynchronizationTransportOutcome = Exclude<PhysicalShadowSynchronizationResult,
+	'waiting' | 'disabled' | 'unavailable'> | 'stale'
+
+function classifySynchronization(http: number, text: string): SynchronizationTransportOutcome {
+	const value: unknown = JSON.parse(text)
+	if (!isRecord(value) || !Object.values(value).every((item) => typeof item === 'string')) return 'retryable'
+	// Closed responses are flat string-only objects. Count lexical strings to reject duplicate keys,
+	// including escaped equivalents, without accepting JSON.parse's last-key-wins behavior.
+	if ((text.match(/"(?:[^"\\]|\\.)*"/g) ?? []).length !== Object.keys(value).length * 2) return 'retryable'
+	if (http === 200) {
+		if (exactObject(value, ['status']) && (value.status === 'accepted' || value.status === 'duplicate')) return value.status
+		if (!exactObject(value, ['status', 'reason']) || value.status !== 'rejected') return 'retryable'
+		switch (value.reason) {
+			case 'collector_not_registered': return 'registration_required'
+			case 'invalid_observation_time': return 'clock_repair_required'
+			case 'stale_observation': return 'stale'
+			case 'invalid_record': case 'unsupported_version': case 'identity_conflict': return 'suspended'
+			default: return 'retryable'
+		}
+	}
+	const errors: Record<number, readonly string[]> = {
+		400: ['secure_transport_required', 'invalid_request', 'invalid_json'],
+		403: ['physical_bearer_required', 'executor_profile_required'],
+		404: ['not_found'], 405: ['method_not_allowed'], 413: ['payload_too_large'],
+		415: ['unsupported_media_type'],
+	}
+	return exactObject(value, ['error']) && errors[http]?.includes(value.error as string) ? 'suspended' : 'retryable'
 }
 
 type ShadowOutcome =
