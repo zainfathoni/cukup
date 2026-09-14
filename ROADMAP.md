@@ -65,7 +65,8 @@ This ledger is the authoritative implementation sequence within top-level Stage 
 | 5L | Complete inactive physical-client slice | [Synchronization client](docs/stage-5l-shadow-synchronization-client.md): bounded spool snapshot, independent durable observation revision, and explicit one-step transport. Nothing schedules or invokes it automatically. |
 | 5M | Complete internal projection slice | [Synchronization disclosures](docs/stage-5m-shadow-synchronization-projection.md): Stage 5K read hardening plus a pure classified-result input, registered status-only lanes, exact collector/site isolation, and current fresh state projection without totals, history, or project attribution. No production caller or activation. |
 | 5N | Complete internal delivery slice | [Shadow availability delivery](docs/stage-5n-shadow-availability-delivery.md): ready delivery may expose current synchronization; stale delivery redacts it to unknown; unavailable carries no disclosures. Other dimensions remain independent and unchanged. No cache/report consumer, public schema, dashboard, or activation. |
-| Remaining Stage 5 work | Deferred to separate slices | Implement dashboard presentation; execution-site design for OIDC/Amp-orb ingestion; and historical migration/backfill. |
+| 5O | Complete authenticated dashboard slice | [Shadow disclosures dashboard](docs/stage-5o-shadow-disclosures-dashboard.md): schema-2 independent report panel, privacy-safe labels, Stage 5M/5N ready/stale/unavailable delivery, and accessible capability/loss/pending/synchronization rendering without totals coupling. No collector scheduling, clock-trust activation, cutover, migration, deployment, or support claim. |
+| Remaining Stage 5 work | Deferred to separate slices | Design execution sites for OIDC/Amp-orb ingestion and separately review historical migration/backfill, authority selection, and cutover activation. |
 
 Stages 5A and 5B change service persistence and are **not deployment-neutral**: an eventual main push may trigger service publication and requires explicit owner approval. Stage 5C is deployment-neutral because its experimental client is not imported by a runtime, installer, receiver, or service build entrypoint; activation still requires the already reviewed Stage 5B/schema-6 service. No deployment or production migration is authorized by this ledger. Support claims and top-level Stage 6 real-collector validation and owner-approved opt-in cutover remain separate gates.
 
@@ -91,6 +92,12 @@ no production importer or cache/report consumer. Availability cannot strengthen 
 dimension, stale delivery cannot retain current synchronization, and unavailable delivery carries no
 usable disclosure result. No public schema, dashboard, activation, push, publication, or deployment
 is authorized.
+
+Stage 5O imports the Stage 5M projection and Stage 5N delivery boundary into the authenticated
+dashboard's existing service runtime path, so it is not publication-neutral. Dashboard report schema
+2 is an application response change, not a SQLite migration or authority switch. The default
+production synchronization clock remains untrusted; no push, publication, deployment, shared-setting
+change, production activation, or support claim is authorized.
 
 ### First independently reviewable code slice
 

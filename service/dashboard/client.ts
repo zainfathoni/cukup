@@ -1,8 +1,13 @@
 import { DashboardController, type DashboardView } from './controller.ts'
 import { renderDashboardContent } from './render.ts'
-import type { DashboardReport, DashboardSelection, DashboardTransport } from './report.ts'
+import {
+	normalizeDashboardReport,
+	type DashboardReport,
+	type DashboardSelection,
+	type DashboardTransport,
+} from './report.ts'
 
-type InitialData = { report: DashboardReport; selection: DashboardSelection }
+type InitialData = { report: unknown; selection: DashboardSelection }
 
 export class HttpDashboardTransport implements DashboardTransport {
 	constructor(private readonly endpoint = '/dashboard/report') {}
@@ -15,7 +20,7 @@ export class HttpDashboardTransport implements DashboardTransport {
 			body: JSON.stringify(selection),
 		})
 		if (!response.ok) throw new Error('Dashboard report request failed')
-		return (await response.json()) as DashboardReport
+		return normalizeDashboardReport(await response.json())
 	}
 }
 
@@ -61,7 +66,7 @@ export function startDashboard(
 ): DashboardController {
 	const view = new DomDashboardView(root)
 	const controller = new DashboardController(
-		initial.report,
+		normalizeDashboardReport(initial.report),
 		initial.selection,
 		transport,
 		view,

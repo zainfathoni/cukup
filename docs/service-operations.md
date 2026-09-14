@@ -155,3 +155,13 @@ trust is required and backward samples latch synchronization unhealthy; the defa
 No production health provider, upload caller, report integration or deployment is added. Service-path
 changes trigger the existing main-push publication workflow; this local slice is not authorization
 to push, publish, migrate a shared database or deploy.
+
+## Stage 5O dashboard publication boundary
+
+Stage 5O adds dashboard report schema 2 and imports shadow projection/delivery into the existing
+authenticated runtime path. It does not change SQLite schema 8 or any legacy API response. The
+default production synchronization clock remains untrusted, so a future deployment would show
+synchronization as unknown unless a separately reviewed clock provider is activated. The service-path
+changes match the existing main-push image-publication trigger. Do not push, publish, deploy, change
+shared settings, or access production without separate explicit approval and the dashboard-affecting
+release checks above.

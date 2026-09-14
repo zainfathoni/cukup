@@ -12,7 +12,7 @@ The deployed service at `api.cukup.dev` is the cross-source authority for curren
 
 Summary amounts are whole minutes. All timestamps are UTC RFC 3339 strings with exactly three fractional digits, such as `2026-08-31T05:00:00.000Z`. Responses use `application/json` and `Cache-Control: no-store`.
 
-This document specifies the implemented legacy v1/v2 API and the isolated, non-authoritative shadow-ingestion route. Under the historical semantics, Amp turn intervals plus grace are called Working Time. The accepted future direction in [ADR 0007](adr/0007-generic-harness-evidence-boundary.md) separates Engagement Window-based Working Time from Agent Runtime prospectively. Shadow evidence does not enter summaries or dashboards, and existing v1/v2 evidence is never reinterpreted.
+This document specifies the implemented legacy v1/v2 API and the isolated, non-authoritative shadow-ingestion route. Under the historical semantics, Amp turn intervals plus grace are called Working Time. The accepted future direction in [ADR 0007](adr/0007-generic-harness-evidence-boundary.md) separates Engagement Window-based Working Time from Agent Runtime prospectively. Shadow evidence never enters legacy summaries or totals; Stage 5O adds a disclosure-only authenticated dashboard panel without reinterpreting existing v1/v2 evidence.
 
 ## Transport and authentication
 
@@ -107,7 +107,7 @@ Changing the value preserves `created_at` and advances `updated_at`; an exact re
 
 Malformed dates or bodies use the generic `400 {"error":"invalid_request"}` response. Normal authenticated-route transport, media-type, size, method, and unexpected-failure errors apply without echoing the date or body. Logs collapse every dynamic path to `/v1/target-overrides/:date` and never include submitted dates or target bodies.
 
-An override changes only target calculation. Existing work-time evidence and worked minutes are unchanged. If the date is today, the daily target is the selected 0 or 240 minutes; if it is in the current Monday–Sunday week, that value replaces the date's default target. One weekday half-day therefore changes a standard 2,400-minute week to 2,160 minutes. Worked minutes below, equal to, or above the selected target remain `UNDER`, `COMPLETE`, or `OVER`. Clearing restores the default target immediately. `/v1/summary` and the dashboard Overall Working Time panel apply the same override map while retaining their schema-1 response shapes. The dashboard remains read-only.
+An override changes only target calculation. Existing work-time evidence and worked minutes are unchanged. If the date is today, the daily target is the selected 0 or 240 minutes; if it is in the current Monday–Sunday week, that value replaces the date's default target. One weekday half-day therefore changes a standard 2,400-minute week to 2,160 minutes. Worked minutes below, equal to, or above the selected target remain `UNDER`, `COMPLETE`, or `OVER`. Clearing restores the default target immediately. `/v1/summary` retains schema 1, and the schema-2 dashboard Overall Working Time panel preserves the same fields while applying the same override map. The dashboard remains read-only.
 
 ## `POST /v1/events:batch`
 

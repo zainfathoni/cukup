@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 import { DashboardController, preserveReportAsStale, type DashboardClock, type DashboardView, type DashboardVisibility } from './controller.ts'
 import { MockDashboardTransport, mockDashboardReport } from './fixture.ts'
-import type { DashboardReport, DashboardSelection, DashboardTransport } from './report.ts'
+import {
+	normalizeDashboardReport,
+	type DashboardReport,
+	type DashboardSelection,
+	type DashboardTransport,
+} from './report.ts'
 
 const selection: DashboardSelection = { projects: [], executors: [], range: { preset: 7 } }
 
@@ -141,12 +146,43 @@ describe('dashboard interactions', () => {
 		expect(latest?.report.timeline.state).toBe('stale')
 		expect(latest?.report.executors.state).toBe('stale')
 		expect(latest?.report.overall.state === 'stale' && latest.report.overall.data.today.worked_minutes).toBe(380)
+		expect(latest?.report.shadow_disclosures.state).toBe('stale')
+		if (latest?.report.shadow_disclosures.state !== 'stale') throw new Error('Expected stale disclosures')
+		expect(latest.report.shadow_disclosures.data.lanes.map((lane) => lane.synchronization)).toEqual([
+			'unknown',
+			'unknown',
+		])
+		expect(latest.report.shadow_disclosures.data.lanes[0]!.known_losses).toEqual(
+			mockDashboardReport.shadow_disclosures.state === 'ready'
+				? mockDashboardReport.shadow_disclosures.data.lanes[0]!.known_losses
+				: [],
+		)
+		expect(latest.report.shadow_disclosures.data.lanes[0]!.pending_execution.status).toBe('pending')
 		expect(view.announcements).toEqual(['Dashboard refresh failed; last successful values remain visible'])
 	})
 
 	test('does not convert a panel that was already unavailable into a zero or stale value', () => {
 		const report = structuredClone(mockDashboardReport)
 		report.timeline = { state: 'unavailable', message: 'No timeline response' }
+		report.shadow_disclosures = { state: 'unavailable', message: 'No disclosure response' }
 		expect(preserveReportAsStale(report).timeline).toEqual({ state: 'unavailable', message: 'No timeline response' })
+		expect(preserveReportAsStale(report).shadow_disclosures).toEqual({
+			state: 'unavailable',
+			message: 'No disclosure response',
+		})
+	})
+
+	test('normalizes schema-1 initial and refresh reports to a payload-free unavailable shadow panel', async () => {
+		const { shadow_disclosures: _shadow, ...legacy } = structuredClone(mockDashboardReport)
+		const schemaOne = { ...legacy, schema_version: 1 as const }
+		const normalized = normalizeDashboardReport(schemaOne)
+		expect(normalized.shadow_disclosures).toEqual({
+			state: 'unavailable',
+			message: 'Shadow disclosures require the current dashboard report version.',
+		})
+		const { controller, view } = setup({ load: async () => normalizeDashboardReport(schemaOne) })
+		await controller.refresh()
+		expect(view.renders.at(-1)?.report.shadow_disclosures).toEqual(normalized.shadow_disclosures)
+		expect(() => normalizeDashboardReport({ ...schemaOne, schema_version: 3 })).toThrow()
 	})
 })

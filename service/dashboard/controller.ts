@@ -1,4 +1,5 @@
 import type { DashboardReport, DashboardSelection, DashboardTransport, Panel } from './report.ts'
+import { deliverShadowDisclosures } from '../shadow-disclosures.ts'
 
 export interface DashboardView {
 	render(report: DashboardReport, selection: DashboardSelection, refreshing: boolean): void
@@ -27,6 +28,21 @@ function stalePanel<T>(panel: Panel<T>, lastSuccessfulAt: string): Panel<T> {
 	}
 }
 
+function staleShadowDisclosures(
+	panel: DashboardReport['shadow_disclosures'],
+	lastSuccessfulAt: string,
+): DashboardReport['shadow_disclosures'] {
+	if (panel.state === 'unavailable') return panel
+	const delivery = deliverShadowDisclosures('stale', panel.data.lanes)
+	if (delivery.availability !== 'stale') throw new Error('Expected stale disclosure delivery')
+	return {
+		state: 'stale',
+		data: { ...panel.data, lanes: delivery.disclosures },
+		last_successful_at: panel.state === 'stale' ? panel.last_successful_at : lastSuccessfulAt,
+		message: 'Refresh failed. Retained disclosure context is shown with synchronization unknown.',
+	}
+}
+
 export function preserveReportAsStale(report: DashboardReport): DashboardReport {
 	return {
 		...report,
@@ -34,6 +50,7 @@ export function preserveReportAsStale(report: DashboardReport): DashboardReport 
 		timeline: stalePanel(report.timeline, report.as_of),
 		trend: stalePanel(report.trend, report.as_of),
 		executors: stalePanel(report.executors, report.as_of),
+		shadow_disclosures: staleShadowDisclosures(report.shadow_disclosures, report.as_of),
 	}
 }
 
