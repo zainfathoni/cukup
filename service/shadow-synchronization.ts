@@ -164,13 +164,23 @@ export class ShadowSynchronizationStore {
 		try {
 			const now = this.clock.sample()
 			if (now === undefined) return { state: 'unknown' }
-			const snapshot = this.database.query<Snapshot, [string, string]>(
+			const stored = this.database.query<Snapshot, [string, string]>(
 				`SELECT s.* FROM shadow_synchronization s JOIN shadow_collectors c
 				 ON c.collector_id = s.collector_instance_id
 				 WHERE c.collector_id = ? AND c.execution_site_id = ?`,
 			).get(collector, site)
-			return snapshot && snapshot.received_at_ms <= now && now < snapshot.expires_at_ms
-				? { state: 'fresh', snapshot } : { state: 'unknown' }
+			if (!stored) return { state: 'unknown' }
+			const { received_at_ms, expires_at_ms, ...candidate } = stored
+			const observation = parseSynchronization(candidate)
+			if (!observation || observation.protocol_version !== 1 ||
+				!integer(received_at_ms, 0, MAX_TIME) || !Number.isSafeInteger(expires_at_ms) ||
+				observation.observed_at_ms < received_at_ms - 60000 ||
+				observation.observed_at_ms > received_at_ms + 10000 ||
+				expires_at_ms !== Math.min(received_at_ms + 120000, observation.observed_at_ms + 120000)) {
+				return { state: 'unknown' }
+			}
+			const snapshot = { ...observation, received_at_ms, expires_at_ms }
+			return received_at_ms <= now && now < expires_at_ms ? { state: 'fresh', snapshot } : { state: 'unknown' }
 		} catch { return { state: 'unknown' } }
 	}
 }

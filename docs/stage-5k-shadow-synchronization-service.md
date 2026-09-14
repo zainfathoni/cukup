@@ -1,8 +1,9 @@
 # Stage 5K: service synchronization snapshots
 
 Local-only implementation of the server-owned [Stage 5J contract](stage-5j-shadow-synchronization-contract.md).
-No client, scheduling, upload activation, Stage 5I integration, dashboard, or production clock provider
-is added. Stage 5I still returns synchronization `unknown` unconditionally. No deployment is authorized.
+This slice itself added no client, scheduling, upload activation, Stage 5I integration, dashboard, or
+production clock provider. Stage 5M later consumes its classified internal reads through a pure value
+boundary; no deployment is authorized.
 
 ## API and persistence
 
@@ -34,8 +35,9 @@ and backups may retain superseded bytes under the existing backup policy.
 
 `ServiceStore.synchronization.read(collector, site)` is internal only. It returns `{state:'fresh',
 snapshot}` exactly when a trusted sample N satisfies R ≤ N < expiry at the requested site. Missing,
-expired, backward/invalid clock, wrong site and failed reads yield only `{state:'unknown'}`. There is
-no fallback to evidence receipts, source order, previous reads, availability caches, or report panels.
+expired, malformed retained content or receipt/expiry invariants, backward/invalid clock, wrong site
+and failed reads yield only `{state:'unknown'}`. There is no fallback to evidence receipts, source
+order, previous reads, availability caches, or report panels.
 
 ## Explicit clock trust, not a guessed UTC repair
 

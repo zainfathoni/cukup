@@ -99,6 +99,24 @@ test('inclusive client time edges and read half-open expiry, including delayed d
 	}
 })
 
+test('read validates retained content and exact expiry before classifying a snapshot fresh', async () => {
+	for (const mutation of [
+		"UPDATE shadow_synchronization SET state = 'clear', records = 3",
+		'UPDATE shadow_synchronization SET expires_at_ms = expires_at_ms + 1',
+		'UPDATE shadow_synchronization SET protocol_version = 2',
+	]) {
+		const f = fixture()
+		expect(await (await f.send()).json()).toEqual({ status: 'accepted' })
+		expect(f.read().state).toBe('fresh')
+		f.raw.exec(`PRAGMA ignore_check_constraints = ON; ${mutation}`)
+		const read = f.read()
+		expect(read).toEqual({ state: 'unknown' })
+		expect(projectShadowDisclosures([], [], { startMs: 0, endMs: 1 }, [{
+			collectorId: id(1), executionSiteId: f.site, read,
+		}])[0]!.synchronization).toBe('unknown')
+	}
+})
+
 test('startup trust, invalid clocks and backward jumps latch closed until explicit host revalidation', async () => {
 	const f = fixture(true, false)
 	expect((await f.send()).status).toBe(503)
