@@ -64,7 +64,8 @@ This ledger is the authoritative implementation sequence within top-level Stage 
 | 5K | Complete service-only slice | [Synchronization service](docs/stage-5k-shadow-synchronization-service.md): physical-bearer route, schema-8 latest snapshot, revision ordering, explicit trusted clock, and fresh/unknown internal reads. Default production clock remains untrusted; no client or dashboard activation. |
 | 5L | Complete inactive physical-client slice | [Synchronization client](docs/stage-5l-shadow-synchronization-client.md): bounded spool snapshot, independent durable observation revision, and explicit one-step transport. Nothing schedules or invokes it automatically. |
 | 5M | Complete internal projection slice | [Synchronization disclosures](docs/stage-5m-shadow-synchronization-projection.md): Stage 5K read hardening plus a pure classified-result input, registered status-only lanes, exact collector/site isolation, and current fresh state projection without totals, history, or project attribution. No production caller or activation. |
-| Remaining Stage 5 work | Deferred to separate slices | Implement availability delivery and dashboard presentation; execution-site design for OIDC/Amp-orb ingestion; and historical migration/backfill. |
+| 5N | Complete internal delivery slice | [Shadow availability delivery](docs/stage-5n-shadow-availability-delivery.md): ready delivery may expose current synchronization; stale delivery redacts it to unknown; unavailable carries no disclosures. Other dimensions remain independent and unchanged. No cache/report consumer, public schema, dashboard, or activation. |
+| Remaining Stage 5 work | Deferred to separate slices | Implement dashboard presentation; execution-site design for OIDC/Amp-orb ingestion; and historical migration/backfill. |
 
 Stages 5A and 5B change service persistence and are **not deployment-neutral**: an eventual main push may trigger service publication and requires explicit owner approval. Stage 5C is deployment-neutral because its experimental client is not imported by a runtime, installer, receiver, or service build entrypoint; activation still requires the already reviewed Stage 5B/schema-6 service. No deployment or production migration is authorized by this ledger. Support claims and top-level Stage 6 real-collector validation and owner-approved opt-in cutover remain separate gates.
 
@@ -84,6 +85,12 @@ Stages 5K and 5M change `service/**` paths covered by the main-push service-publ
 are not publication-neutral. Stage 5K's default clock remains untrusted, and Stage 5M has no production
 caller. Stage 5L remains inactive and is not imported by Stage 5D. None authorizes client scheduling,
 clock-trust activation, publication, migration of a shared database, deployment, or production access.
+
+Stage 5N is also pure and internal but changes `service/**`, so it is not publication-neutral. It has
+no production importer or cache/report consumer. Availability cannot strengthen any coverage
+dimension, stale delivery cannot retain current synchronization, and unavailable delivery carries no
+usable disclosure result. No public schema, dashboard, activation, push, publication, or deployment
+is authorized.
 
 ### First independently reviewable code slice
 
