@@ -70,7 +70,7 @@ export default function (amp: PluginAPI) {
 				message = formatStatusDisplay({
 					cache,
 					authoritative: result.authoritativeSummary,
-					trackingIncomplete: sync.trackingIncomplete(),
+					trackingGap: sync.trackingGap(),
 					counts: store.outboxCounts(),
 					syncState: store.syncState(),
 					nowMs,
@@ -78,7 +78,7 @@ export default function (amp: PluginAPI) {
 					transientErrorKind: result.errorKind,
 				})
 			} catch {
-				sync.markTrackingIncomplete()
+				sync.markTrackingIncomplete('status-local-state')
 				message = 'UNKNOWN · TRACKING INCOMPLETE · Cukup local state is unavailable.'
 			}
 			await ctx.ui.select({
@@ -86,6 +86,33 @@ export default function (amp: PluginAPI) {
 				message,
 				options: ['Close'],
 			})
+		},
+	)
+
+	amp.registerCommand(
+		'tracking-gap-acknowledge',
+		{
+			title: 'Acknowledge tracking gap',
+			category: 'cukup',
+			description: 'Dismiss the historical tracking-gap warning without changing recorded evidence.',
+		},
+		async (ctx) => {
+			if (!sync.trackingGap()) {
+				await ctx.ui.notify('Cukup has no historical tracking gap to acknowledge.')
+				return
+			}
+			const confirmed = await ctx.ui.confirm({
+				title: 'Acknowledge historical tracking gap?',
+				message: 'This dismisses the warning only. Missing evidence will not be recovered or added to your totals.',
+				confirmButtonText: 'Acknowledge gap',
+			})
+			if (!confirmed) return
+			try {
+				sync.acknowledgeTrackingGap()
+				await ctx.ui.notify('Historical tracking-gap warning acknowledged. Recorded evidence is unchanged.')
+			} catch {
+				await ctx.ui.notify('Cukup could not acknowledge the tracking gap because local state is unavailable.')
+			}
 		},
 	)
 
