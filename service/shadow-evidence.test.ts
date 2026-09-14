@@ -150,16 +150,28 @@ test('v4 upgrade retains exact legacy schema, rows, ownership, credentials, and 
 	const events = store.attributedEvents()
 	close(store)
 	const raw = new Database(path)
-	raw.exec('DROP TABLE shadow_evidence; DROP TABLE shadow_collectors; PRAGMA user_version = 4')
+	raw.exec(`
+		DROP INDEX auth_tokens_active_execution_site_id;
+		ALTER TABLE auth_tokens DROP COLUMN execution_site_id;
+		DROP TABLE shadow_evidence;
+		DROP TABLE shadow_collectors;
+		PRAGMA user_version = 4;
+	`)
 	const snapshot = () => ({
-		schema: raw.query(`SELECT type, name, tbl_name, sql FROM sqlite_schema WHERE tbl_name NOT LIKE 'shadow_%' ORDER BY name`).all(),
-		rows: ['events', 'source_owners', 'auth_tokens', 'target_overrides'].map((table) => raw.query(`SELECT * FROM ${table}`).all()),
+		schema: raw.query(`SELECT type, name, tbl_name, sql FROM sqlite_schema
+			WHERE tbl_name NOT LIKE 'shadow_%' AND tbl_name != 'auth_tokens' ORDER BY name`).all(),
+		rows: ['events', 'source_owners', 'target_overrides'].map((table) => raw.query(`SELECT * FROM ${table}`).all()),
+		auth: raw.query(`SELECT token_id, token_hash, created_at, revoked_at, replaced_by, executor_label
+			FROM auth_tokens`).all(),
 	})
 	const before = snapshot()
 	const migrated = open(path).store
 	expect(snapshot()).toEqual(before)
 	expect(migrated.shadow.append(input(), now).status).toBe('accepted')
 	expect(snapshot()).toEqual(before)
+	expect(migrated.shadowExecutionSite(credential.tokenId)).toMatch(
+		/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+	)
 	expect(migrated.attributedEvents()).toEqual(events)
 	expect(migrated.authenticateBearer(credential.token)).toEqual(principal)
 	expect(migrated.ingest(principal, legacy, now + 1).outcome).toBe('duplicate')
@@ -173,14 +185,21 @@ test('failed v4 migration rolls back DDL and version and can restart after repai
 	const { store, path } = open()
 	close(store)
 	const raw = new Database(path)
-	raw.exec('DROP TABLE shadow_evidence; DROP TABLE shadow_collectors; PRAGMA user_version = 4; CREATE TABLE shadow_evidence (sentinel TEXT)')
+	raw.exec(`
+		DROP INDEX auth_tokens_active_execution_site_id;
+		ALTER TABLE auth_tokens DROP COLUMN execution_site_id;
+		DROP TABLE shadow_evidence;
+		DROP TABLE shadow_collectors;
+		PRAGMA user_version = 4;
+		CREATE TABLE shadow_evidence (sentinel TEXT);
+	`)
 	expect(() => new ServiceStore(path)).toThrow()
 	expect(raw.query('PRAGMA user_version').get()).toEqual({ user_version: 4 })
 	expect(raw.query("SELECT name FROM sqlite_schema WHERE name = 'shadow_collectors'").all()).toEqual([])
 	raw.exec('DROP TABLE shadow_evidence')
 	const repaired = open(path).store
 	expect(repaired.shadow.records()).toEqual([])
-	expect(raw.query('PRAGMA user_version').get()).toEqual({ user_version: 5 })
+	expect(raw.query('PRAGMA user_version').get()).toEqual({ user_version: 6 })
 	raw.close()
 })
 

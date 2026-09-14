@@ -52,9 +52,10 @@ This ledger is the authoritative implementation sequence within top-level Stage 
 | Substage | Status | Independently reviewable deliverable |
 | --- | --- | --- |
 | 5A | Complete internal foundation | [Service-side shadow persistence](docs/stage-5a-shadow-persistence.md): closed generic evidence validation, append-only isolated schema 5 tables, immutable collector/site and evidence identity, source ordering, and durable pending/closed endpoints. No cloud route, collector connection, or measurement totals. |
-| Remaining Stage 5 work | Deferred to separate slices | Cloud authentication/API, collector upload, aggregation/union, cutover clipping, dashboard/coverage presentation, and historical migration/backfill. |
+| 5B | Complete service-only slice | [Authenticated cloud shadow ingestion](docs/stage-5b-shadow-ingestion-api.md): physical bearer-only HTTPS route, required immutable executor profile, server-derived random execution site retained through rotation, closed outcomes, and no legacy mutation. No uploader or OIDC/Amp-orb ingestion. |
+| Remaining Stage 5 work | Deferred to separate slices | Collector upload/outbox, execution-site design for OIDC/Amp-orb ingestion, aggregation/union, cutover clipping, dashboard/coverage presentation, and historical migration/backfill. |
 
-Stage 5A changes service persistence and is **not deployment-neutral**: an eventual main push may trigger service publication and requires explicit owner approval. No deployment or production migration is authorized by this ledger. Support claims and top-level Stage 6 real-collector validation and owner-approved opt-in cutover remain separate gates.
+Stages 5A and 5B change service persistence and are **not deployment-neutral**: an eventual main push may trigger service publication and requires explicit owner approval. No deployment or production migration is authorized by this ledger. Support claims and top-level Stage 6 real-collector validation and owner-approved opt-in cutover remain separate gates.
 
 ### First independently reviewable code slice
 

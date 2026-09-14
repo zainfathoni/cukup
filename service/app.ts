@@ -176,6 +176,29 @@ async function authenticatedResponse(
 			? json({ executor_label: result.executorLabel })
 			: json({ error: 'executor_profile_conflict' }, 409)
 	}
+	if (url.pathname === '/v1/shadow-evidence') {
+		if (request.method !== 'POST') {
+			return json({ error: 'method_not_allowed' }, 405, { allow: 'POST' })
+		}
+		if (principal.kind !== 'bearer') {
+			return json({ error: 'physical_bearer_required' }, 403)
+		}
+		const executionSiteId = store.shadowExecutionSite(principal.tokenId)
+		if (!executionSiteId) return json({ error: 'executor_profile_required' }, 403)
+		if (url.search !== '') return json({ error: 'invalid_request' }, 400)
+		if (!isJsonRequest(request)) return json({ error: 'unsupported_media_type' }, 415)
+		const body = await requestBody(request)
+		if (body.outcome === 'too_large') return json({ error: 'payload_too_large' }, 413)
+		if (body.outcome === 'invalid') return json({ error: 'invalid_request' }, 400)
+		if (!isShadowRequest(body.value)) {
+			return json({ status: 'rejected', reason: 'invalid_record' })
+		}
+		return json(store.shadow.append({
+			executionSiteId,
+			sourceSequence: body.value.source_sequence,
+			envelope: body.value.envelope,
+		}, now()))
+	}
 	if (url.pathname === '/v1/events:batch') {
 		if (request.method !== 'POST') {
 			return json({ error: 'method_not_allowed' }, 405, { allow: 'POST' })
@@ -236,6 +259,7 @@ function logPath(pathname: string): string {
 		pathname === '/v1/time' ||
 		pathname === '/v1/capabilities' ||
 		pathname === '/v1/executor-profile' ||
+		pathname === '/v1/shadow-evidence' ||
 		pathname === '/v1/events:batch' ||
 		pathname === '/v1/summary' ||
 		pathname === '/' ||
@@ -256,6 +280,19 @@ function isJsonRequest(request: Request): boolean {
 	return (
 		request.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase() ===
 		'application/json'
+	)
+}
+
+function isShadowRequest(
+	value: unknown,
+): value is { source_sequence: unknown; envelope: unknown } {
+	return (
+		typeof value === 'object' &&
+		value !== null &&
+		!Array.isArray(value) &&
+		Object.keys(value).length === 2 &&
+		Object.hasOwn(value, 'source_sequence') &&
+		Object.hasOwn(value, 'envelope')
 	)
 }
 

@@ -106,6 +106,8 @@ function createVersion2Database(path: string): void {
 	current.close()
 	const database = new Database(path, { strict: true })
 	database.exec(`
+		DROP INDEX auth_tokens_active_execution_site_id;
+		ALTER TABLE auth_tokens DROP COLUMN execution_site_id;
 		DROP TABLE shadow_evidence;
 		DROP TABLE shadow_collectors;
 		DROP TABLE target_overrides;
@@ -121,6 +123,8 @@ function createVersion3Database(path: string): void {
 	current.close()
 	const database = new Database(path, { strict: true })
 	database.exec(`
+		DROP INDEX auth_tokens_active_execution_site_id;
+		ALTER TABLE auth_tokens DROP COLUMN execution_site_id;
 		DROP TABLE shadow_evidence;
 		DROP TABLE shadow_collectors;
 		ALTER TABLE target_overrides RENAME TO target_overrides_v4;
@@ -160,7 +164,7 @@ describe('SQLite schema migration', () => {
 			store.close()
 			const inspected = new Database(path, { readonly: true, strict: true })
 			expect(inspected.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
-				user_version: 5,
+				user_version: 6,
 			})
 			expect(
 				inspected
@@ -189,7 +193,7 @@ describe('SQLite schema migration', () => {
 			store.close()
 			const inspected = new Database(path, { readonly: true, strict: true })
 			expect(inspected.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
-				user_version: 5,
+				user_version: 6,
 			})
 			inspected.close()
 		}
@@ -210,7 +214,7 @@ describe('SQLite schema migration', () => {
 			store.close()
 			const inspected = new Database(path, { readonly: true, strict: true })
 			expect(inspected.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
-				user_version: 5,
+				user_version: 6,
 			})
 			expect(
 				inspected
@@ -228,7 +232,7 @@ describe('SQLite schema migration', () => {
 		}
 	})
 
-	test('creates v5 directly with the exact target constraint and remains stable across restart', () => {
+	test('creates v6 directly with the exact target constraint and remains stable across restart', () => {
 		const path = databasePath()
 		const store = new ServiceStore(path)
 		store.putTargetOverride('2026-09-01', 240, now)
@@ -236,7 +240,7 @@ describe('SQLite schema migration', () => {
 
 		const database = new Database(path, { strict: true })
 		expect(database.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
-			user_version: 5,
+			user_version: 6,
 		})
 		database
 			.query('INSERT INTO target_overrides VALUES (?, ?, ?, ?)')
@@ -258,17 +262,84 @@ describe('SQLite schema migration', () => {
 		reopened.close()
 	})
 
+	test('adds an opaque site to an existing bound v5 bearer and carries it through rotation', () => {
+		const path = databasePath()
+		const before = new ServiceStore(path)
+		const credential = before.issueBearer(now)
+		const unbound = before.issueBearer(now + 1)
+		const revoked = before.issueBearer(now + 2)
+		before.bindExecutorLabel(credential.tokenId, 'workstation-a')
+		before.bindExecutorLabel(revoked.tokenId, 'retired-machine')
+		before.revokeBearer(revoked.tokenId, now + 3)
+		before.ingest(before.authenticateBearer(credential.token)!, workEvent(), now)
+		before.close()
+
+		const versionFive = new Database(path, { strict: true })
+		versionFive.exec(`
+			DROP INDEX auth_tokens_active_execution_site_id;
+			ALTER TABLE auth_tokens DROP COLUMN execution_site_id;
+			PRAGMA user_version = 5;
+		`)
+		versionFive.close()
+		const migrated = new ServiceStore(path)
+		const site = migrated.shadowExecutionSite(credential.tokenId)
+		expect(site).toMatch(
+			/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+		)
+		expect(migrated.shadowExecutionSite(unbound.tokenId)).toBeUndefined()
+		expect(migrated.shadowExecutionSite(revoked.tokenId)).toBeUndefined()
+		expect(migrated.events()).toEqual([expect.objectContaining({ eventId: workEvent().eventId })])
+		const replacement = migrated.rotateBearer(credential.tokenId, now + 1)
+		expect(migrated.shadowExecutionSite(replacement.tokenId)).toBe(site)
+		migrated.close()
+		const reopened = new ServiceStore(path)
+		expect(reopened.shadowExecutionSite(replacement.tokenId)).toBe(site)
+		expect(reopened.events()).toHaveLength(1)
+		reopened.close()
+	})
+
+	test('rolls back schema-6 column, site initialization, and version on migration failure', () => {
+		const path = databasePath()
+		const current = new ServiceStore(path)
+		const credential = current.issueBearer(now)
+		current.bindExecutorLabel(credential.tokenId, 'workstation-a')
+		current.close()
+		const versionFive = new Database(path, { strict: true })
+		versionFive.exec(`
+			DROP INDEX auth_tokens_active_execution_site_id;
+			ALTER TABLE auth_tokens DROP COLUMN execution_site_id;
+			CREATE TRIGGER fail_site BEFORE UPDATE ON auth_tokens
+				WHEN NEW.executor_label IS NOT NULL
+				BEGIN SELECT RAISE(ABORT, 'injected site migration failure'); END;
+			PRAGMA user_version = 5;
+		`)
+		expect(() => new ServiceStore(path)).toThrow('injected site migration failure')
+		expect(versionFive.query('PRAGMA user_version').get()).toEqual({ user_version: 5 })
+		expect(
+			versionFive.query(
+				`SELECT name FROM pragma_table_info('auth_tokens') WHERE name = 'execution_site_id'`,
+			).all(),
+		).toEqual([])
+		versionFive.exec('DROP TRIGGER fail_site')
+		versionFive.close()
+		const repaired = new ServiceStore(path)
+		expect(repaired.shadowExecutionSite(credential.tokenId)).toMatch(
+			/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+		)
+		repaired.close()
+	})
+
 	test('refuses a future schema without resetting its migration version', () => {
 		const path = databasePath()
 		const store = new ServiceStore(path)
 		store.close()
 		const future = new Database(path, { strict: true })
-		future.exec('PRAGMA user_version = 6')
+		future.exec('PRAGMA user_version = 7')
 		future.close()
 		expect(() => new ServiceStore(path)).toThrow('newer than supported')
 		const inspected = new Database(path, { readonly: true, strict: true })
 		expect(inspected.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
-			user_version: 6,
+			user_version: 7,
 		})
 		inspected.close()
 	})
@@ -557,9 +628,11 @@ describe('authentication and source ownership', () => {
 		expect(store.bindExecutorLabel(second.tokenId, 'workstation-a').outcome).toBe('conflict')
 		expect(store.attributedEvents()[0]?.executorLabel).toBe('workstation-a')
 
+		const site = store.shadowExecutionSite(first.tokenId)
 		expect(() => store.rotateBearer(first.tokenId, now + 2, second)).toThrow()
 		expect(store.authenticateBearer(first.token)).toEqual({ kind: 'bearer', tokenId: first.tokenId })
 		expect(store.attributedEvents()[0]?.executorLabel).toBe('workstation-a')
+		expect(store.shadowExecutionSite(first.tokenId)).toBe(site)
 
 		const replacement = store.rotateBearer(first.tokenId, now + 3)
 		expect(store.authenticateBearer(first.token)).toBeUndefined()

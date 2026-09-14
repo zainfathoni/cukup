@@ -42,6 +42,8 @@ function createVersion3Database(path: string): void {
 	store.close()
 	const database = new Database(path, { strict: true })
 	database.exec(`
+		DROP INDEX auth_tokens_active_execution_site_id;
+		ALTER TABLE auth_tokens DROP COLUMN execution_site_id;
 		DROP TABLE shadow_evidence;
 		DROP TABLE shadow_collectors;
 		ALTER TABLE target_overrides RENAME TO target_overrides_v4;
@@ -80,7 +82,7 @@ test('creates a verified online SQLite snapshot and restores an independently re
 		backup_id: 'snapshot',
 		created_at: '2026-08-31T05:00:00.000Z',
 		integrity_check: 'ok',
-		sqlite_user_version: 5,
+		sqlite_user_version: 6,
 	})
 	expect(verifyBackup(backup.databasePath, backup.metadataPath)).toEqual(backup.metadata)
 
@@ -100,7 +102,7 @@ test('creates a verified online SQLite snapshot and restores an independently re
 	copyFileSync(backup.metadataPath, retrievedMetadata)
 	const restoredPath = join(directory, 'clean-restore', 'service.sqlite')
 	restoreDatabase(retrievedDatabase, restoredPath, { metadataPath: retrievedMetadata })
-	expect(inspectDatabase(restoredPath)).toEqual({ integrity: 'ok', userVersion: 5 })
+	expect(inspectDatabase(restoredPath)).toEqual({ integrity: 'ok', userVersion: 6 })
 
 	const restored = new ServiceStore(restoredPath)
 	expect(restored.authenticateBearer(issued.token)).toEqual({
@@ -176,13 +178,15 @@ test('restores v1, v2, v3, and v4 backups into clean restartable databases', () 
 	expect(upgraded.events()).toHaveLength(1)
 	expect(upgraded.attributedEvents()[0]?.executorLabel).toBe('amp-orb')
 	upgraded.close()
-	expect(inspectDatabase(upgradedPath).userVersion).toBe(5)
+	expect(inspectDatabase(upgradedPath).userVersion).toBe(6)
 
 	const versionTwoPath = join(directory, 'version-two.sqlite')
 	const current = new ServiceStore(versionTwoPath)
 	current.close()
 	const versionTwo = new Database(versionTwoPath, { strict: true })
 	versionTwo.exec(`
+		DROP INDEX auth_tokens_active_execution_site_id;
+		ALTER TABLE auth_tokens DROP COLUMN execution_site_id;
 		DROP TABLE shadow_evidence;
 		DROP TABLE shadow_collectors;
 		DROP TABLE target_overrides;
@@ -201,7 +205,7 @@ test('restores v1, v2, v3, and v4 backups into clean restartable databases', () 
 	const versionTwoRestored = new ServiceStore(versionTwoRestoredPath)
 	expect(versionTwoRestored.targetOverrides()).toEqual(new Map())
 	versionTwoRestored.close()
-	expect(inspectDatabase(versionTwoRestoredPath).userVersion).toBe(5)
+	expect(inspectDatabase(versionTwoRestoredPath).userVersion).toBe(6)
 
 	const versionThreePath = join(directory, 'version-three.sqlite')
 	createVersion3Database(versionThreePath)
@@ -218,14 +222,20 @@ test('restores v1, v2, v3, and v4 backups into clean restartable databases', () 
 	const versionThreeRestored = new ServiceStore(versionThreeRestoredPath)
 	expect(versionThreeRestored.targetOverrides()).toEqual(new Map([['2026-08-31', 0]]))
 	versionThreeRestored.close()
-	expect(inspectDatabase(versionThreeRestoredPath).userVersion).toBe(5)
+	expect(inspectDatabase(versionThreeRestoredPath).userVersion).toBe(6)
 
 	const versionFourPath = join(directory, 'version-four.sqlite')
 	const versionFour = new ServiceStore(versionFourPath)
 	versionFour.putTargetOverride('2026-08-31', 240, now)
 	versionFour.close()
 	const versionFourRaw = new Database(versionFourPath, { strict: true })
-	versionFourRaw.exec('DROP TABLE shadow_evidence; DROP TABLE shadow_collectors; PRAGMA user_version = 4')
+	versionFourRaw.exec(`
+		DROP INDEX auth_tokens_active_execution_site_id;
+		ALTER TABLE auth_tokens DROP COLUMN execution_site_id;
+		DROP TABLE shadow_evidence;
+		DROP TABLE shadow_collectors;
+		PRAGMA user_version = 4;
+	`)
 	versionFourRaw.close()
 	const versionFourBackup = backupDatabase(versionFourPath, join(directory, 'v4-backups'), {
 		nowMs: now + 2,
@@ -240,7 +250,7 @@ test('restores v1, v2, v3, and v4 backups into clean restartable databases', () 
 	const versionFourRestored = new ServiceStore(versionFourRestoredPath)
 	expect(versionFourRestored.targetOverrides()).toEqual(new Map([['2026-08-31', 240]]))
 	versionFourRestored.close()
-	expect(inspectDatabase(versionFourRestoredPath).userVersion).toBe(5)
+	expect(inspectDatabase(versionFourRestoredPath).userVersion).toBe(6)
 })
 
 test('fails closed on checksum damage and requires an explicit stopped-service replacement', () => {
