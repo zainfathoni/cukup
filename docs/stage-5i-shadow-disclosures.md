@@ -45,7 +45,8 @@ neither metric. Unknown assessment does not invent a missing-capability set.
   bound are not moved to it. Any accepted end clears its collector/segment, including late receipt
   or an occurrence beyond the report end. An end cannot close another collector's same segment UUID.
   `none_pending` means only no matching pending starts; pending contributes no runtime and is not loss.
-- `synchronization` is always exactly `unknown`. No reviewed server-visible spool observation exists.
+- `synchronization` is exactly `unknown` in this Stage 5I slice. Stage 5M later adds a separate pure
+  input for Stage 5K classified current reads without changing Stage 5I's evidence/coverage behavior.
 - Availability (`ready`/`stale`/`unavailable`) remains entirely a consumer wrapper. Successful pure
   projection supplies none of those states. Empty arrays mean only no accepted matching disclosure
   facts, not completeness, no work, actual attention, or an empty spool.
@@ -66,3 +67,7 @@ This slice adds no migration, but its `service/**` paths match the existing main
 publication workflow: it is **not publication-neutral**. Prerequisite Stage 5H schema-7 migration and
 rollback constraints still apply separately. No push, publication, deployment, production access,
 shared database operation, or cutover activation is authorized or performed.
+
+Stage 5M supersedes only this slice's unconditional synchronization result. See
+[the synchronization projection contract](stage-5m-shadow-synchronization-projection.md); all other
+Stage 5I boundaries remain unchanged.

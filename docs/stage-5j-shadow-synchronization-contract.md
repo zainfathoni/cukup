@@ -1,8 +1,9 @@
 # Stage 5J: bounded current synchronization observations
 
-This is a documentation-only contract for a future physical-bearer route. It implements and enables
-nothing. [Stage 5G](stage-5g-shadow-coverage-contract.md) supplies the closed synchronization vocabulary;
-[Stage 5I](stage-5i-shadow-disclosures.md) still returns `unknown` unconditionally today.
+This contract was documentation-only when introduced. [Stage 5G](stage-5g-shadow-coverage-contract.md)
+supplies the closed synchronization vocabulary; Stages 5K and 5L subsequently implement the inactive
+service and client boundaries, and Stage 5M adds pure internal disclosure projection. None activates
+client invocation, a dashboard, cutover, publication, or deployment.
 
 ## One latest snapshot, no observation history
 

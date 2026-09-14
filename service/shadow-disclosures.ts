@@ -1,6 +1,7 @@
 import type { Interval } from './aggregation.ts'
 import type { Capability, CoverageFact } from './harness-evidence-protocol.ts'
 import type { ShadowCoverageRecord, ShadowRecord } from './shadow-evidence.ts'
+import type { SynchronizationObservation } from './shadow-synchronization.ts'
 
 const working: readonly Capability[] = [
 	'engagement.composition', 'engagement.submission', 'engagement.follow_up',
@@ -39,7 +40,15 @@ export type ShadowDisclosureLane = Interval & {
 		status: 'none_pending' | 'pending'
 		starts: { evidenceId: string; segmentId: string; startMs: number }[]
 	}
-	synchronization: 'unknown'
+	synchronization: 'unknown' | SynchronizationObservation['state']
+}
+export type ShadowSynchronizationRead = {
+	collectorId: string
+	executionSiteId: string
+	read: { state: 'unknown' } | {
+		state: 'fresh'
+		snapshot: Pick<SynchronizationObservation, 'collector_instance_id' | 'state'>
+	}
 }
 
 function assess(capabilities: readonly Capability[] | undefined, required: readonly Capability[], recovery: readonly Capability[]): Assessment {
@@ -51,22 +60,47 @@ function assess(capabilities: readonly Capability[] | undefined, required: reado
 		: { status: 'declared_for_scope', missingRecoveryCapabilities }
 }
 
+function projectSynchronization(
+	reads: readonly ShadowSynchronizationRead[], collectorId: string, executionSiteId: string,
+): ShadowDisclosureLane['synchronization'] {
+	const collectorReads = reads.filter((entry) => entry.collectorId === collectorId)
+	if (collectorReads.some((entry) => entry.executionSiteId !== executionSiteId)) return 'unknown'
+	const matching = collectorReads.filter((entry) => entry.executionSiteId === executionSiteId)
+	if (matching.length !== 1) return 'unknown'
+	const read = matching[0]!.read
+	if (!read || read.state !== 'fresh' || !read.snapshot ||
+		read.snapshot.collector_instance_id !== collectorId ||
+		!['clear', 'queued', 'retrying', 'blocked'].includes(read.snapshot.state)) return 'unknown'
+	return read.snapshot.state
+}
+
 /** Pure current reconstruction from complete accepted snapshots, not wire input or a receipt-time audit.
  * Bounds are occurrence instants, already civil/as-of bounded by the caller. An optional caller-approved
  * Stage 5F cutover only clips the lower bound; this function does not select or activate a cutover.
  * Empty lanes/starts/losses mean no accepted matching disclosure facts, never completeness or no work.
- * Availability belongs to the consumer. No durations, project attribution, or synchronization inference.
+ * Synchronization reads are separately classified by Stage 5K using its trusted current-time owner;
+ * this function never infers freshness. Availability belongs to the consumer. No durations or project attribution.
  */
 export function projectShadowDisclosures(
 	records: readonly ShadowRecord[],
 	coverage: readonly ShadowCoverageRecord[],
 	report: Interval & { cutoverMs?: number },
+	synchronization: readonly ShadowSynchronizationRead[] = [],
 ): ShadowDisclosureLane[] {
 	const startMs = Math.max(report.startMs, report.cutoverMs ?? Number.NEGATIVE_INFINITY)
 	const endMs = report.endMs
 	if (startMs >= endMs) return []
 	const sources = new Map<string, string>()
 	for (const row of [...records, ...coverage]) sources.set(row.collectorId, row.executionSiteId)
+	const synchronizationSites = new Map<string, Set<string>>()
+	for (const row of synchronization) {
+		const sites = synchronizationSites.get(row.collectorId) ?? new Set<string>()
+		sites.add(row.executionSiteId)
+		synchronizationSites.set(row.collectorId, sites)
+	}
+	for (const [collectorId, sites] of synchronizationSites) {
+		if (!sources.has(collectorId) && sites.size === 1) sources.set(collectorId, [...sites][0]!)
+	}
 	return [...sources].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([collectorId, executionSiteId]) => {
 		const facts = coverage.filter((row) => row.collectorId === collectorId)
 		// Equal-effective declarations have equal capability sets by the accepted-store contract.
@@ -113,7 +147,7 @@ export function projectShadowDisclosures(
 			collectorId, executionSiteId, startMs, endMs, capabilityIntervals,
 			collectionIntegrity: { otherwise: 'unknown', losses },
 			executionClosure: { status: starts.length ? 'pending' : 'none_pending', starts },
-			synchronization: 'unknown',
+			synchronization: projectSynchronization(synchronization, collectorId, executionSiteId),
 		}
 	})
 }

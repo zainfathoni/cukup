@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ServiceStore } from './store.ts'
 import { CAPABILITIES, LOCAL_PROTOCOL, type Capability, type CoverageFact, type Evidence } from './harness-evidence-protocol.ts'
-import { projectShadowDisclosures } from './shadow-disclosures.ts'
+import { projectShadowDisclosures, type ShadowSynchronizationRead } from './shadow-disclosures.ts'
 import { summarizeShadow, summarizeShadowAfterCutover } from './shadow-aggregation.ts'
 import { summarizeWork } from './aggregation.ts'
 
@@ -178,4 +178,108 @@ test('receipt changes and input order do not change projection; frozen snapshots
 	expect(f.store.attributedEvents()).toEqual(legacy)
 	expect(summarizeWork(f.store.attributedEvents(), t + 540_000)).toEqual(summary)
 	expect(projectShadowDisclosures([], [], bounds)).toEqual([])
+})
+
+test('fresh Stage 5K states project for registered status-only lanes without occurrence or totals coupling', () => {
+	const directory = mkdtempSync(join(tmpdir(), 'cukup-disclosure-sync-'))
+	directories.push(directory)
+	const time = { now: t, trusted: true }
+	const store = new ServiceStore(join(directory, 'service.sqlite'), {
+		now: () => time.now, trusted: () => time.trusted,
+	})
+	stores.push(store)
+	const credential = store.issueBearer(t)
+	store.bindExecutorLabel(credential.tokenId, 'sync-machine')
+	const site = store.shadowExecutionSite(credential.tokenId)!
+	const states = ['clear', 'queued', 'retrying', 'blocked'] as const
+	for (const [index, state] of states.entries()) {
+		const collector = id(200 + index)
+		expect(store.shadow.appendCoverage({ executionSiteId: site, sourceSequence: 1, envelope: {
+			protocol: LOCAL_PROTOCOL, protocol_version: 1, collector_instance_id: collector,
+			capabilities: ['execution.segments'], fact: {
+				family: 'capability_declaration', fact_id: id(300 + index), effective_at: at(0),
+			},
+		} }, t)).toEqual({ status: 'accepted' })
+		expect(store.synchronization.observe(credential.tokenId, {
+			protocol_version: 1, collector_instance_id: collector, observation_sequence: 1,
+			observed_at_ms: t, state, records: state === 'clear' ? 0 : index + 1,
+			bytes: state === 'clear' ? 0 : 100 + index, oldest_queued_at_ms: state === 'clear' ? null : t - 50,
+		})).toEqual({ status: 'accepted' })
+	}
+	const reads: ShadowSynchronizationRead[] = states.map((_, index) => {
+		const collectorId = id(200 + index)
+		return { collectorId, executionSiteId: site, read: store.synchronization.read(collectorId, site) }
+	})
+	const originalReads = structuredClone(reads)
+	for (const entry of reads) {
+		if (entry.read.state === 'fresh') Object.freeze(entry.read.snapshot)
+		Object.freeze(entry.read)
+		Object.freeze(entry)
+	}
+	Object.freeze(reads)
+	const historical = projectShadowDisclosures([], [], { startMs: t - 1_000_000, endMs: t - 900_000 }, reads)
+	expect(historical.map((lane) => [lane.collectorId, lane.executionSiteId, lane.synchronization])).toEqual(
+		states.map((state, index) => [id(200 + index), site, state]),
+	)
+	expect(historical.every((lane) => lane.capabilityIntervals[0]!.workingTimeV1.status === 'unknown' &&
+		lane.collectionIntegrity.losses.length === 0 && lane.executionClosure.status === 'none_pending')).toBeTrue()
+	expect(reads).toEqual(originalReads)
+
+	const report = { date: { year: 2026, month: 9, day: 14 }, period: 'day' as const, timezone: 'Asia/Jakarta', asOfMs: t + 60_000 }
+	expect(summarizeShadow(store.shadow.records(), report).global).toEqual({ workingTimeEstimatedMs: 0, agentRuntimeMs: 0 })
+	expect(projectShadowDisclosures([], [], { startMs: t, endMs: t + 1 }, reads).map((lane) => lane.synchronization))
+		.toEqual([...states])
+	expect(summarizeShadow(store.shadow.records(), report).global).toEqual({ workingTimeEstimatedMs: 0, agentRuntimeMs: 0 })
+	time.now = t + 120_000
+	const expired = states.map((_, index): ShadowSynchronizationRead => {
+		const collectorId = id(200 + index)
+		return { collectorId, executionSiteId: site, read: store.synchronization.read(collectorId, site) }
+	})
+	expect(projectShadowDisclosures([], [], { startMs: t, endMs: t + 1 }, expired)
+		.map((lane) => lane.synchronization)).toEqual(states.map(() => 'unknown'))
+})
+
+test('expired, unavailable, malformed, duplicate, and wrong-site synchronization reads project unknown in isolation', () => {
+	const collector = id(400), otherCollector = id(401), site = id(500), wrongSite = id(501)
+	const fresh = (collectorId: string, state: 'clear' | 'queued' = 'queued'): ShadowSynchronizationRead => ({
+		collectorId, executionSiteId: site,
+		read: { state: 'fresh', snapshot: { collector_instance_id: collectorId, state } },
+	})
+	const bounds = { startMs: t, endMs: t + 100 }
+	const rows = [{
+		collectorId: collector, executionSiteId: site, read: { state: 'unknown' as const },
+	}, fresh(otherCollector)]
+	expect(projectShadowDisclosures([], [], bounds, rows).map((lane) => [lane.collectorId, lane.synchronization]))
+		.toEqual([[collector, 'unknown'], [otherCollector, 'queued']])
+	expect(projectShadowDisclosures([], [], bounds, [fresh(collector), fresh(collector, 'clear')])[0]!.synchronization).toBe('unknown')
+	expect(projectShadowDisclosures([], [], bounds, [{ ...fresh(collector), read: {
+		state: 'fresh', snapshot: { collector_instance_id: otherCollector, state: 'blocked' },
+	} }])[0]!.synchronization).toBe('unknown')
+	expect(projectShadowDisclosures([], [], bounds, [{ ...fresh(collector), read: {
+		state: 'fresh', snapshot: { collector_instance_id: collector, state: 'invalid' },
+	} } as unknown as ShadowSynchronizationRead])[0]!.synchronization).toBe('unknown')
+
+	const f = fixture()
+	f.declare(410, 0, ['execution.segments'], 400, 500)
+	expect(projectShadowDisclosures(f.store.shadow.records(), f.store.shadow.coverageRecords(), bounds, [
+		{ collectorId: collector, executionSiteId: wrongSite, read: fresh(collector).read },
+	])[0]!.synchronization).toBe('unknown')
+})
+
+test('conflicting status-only sites are order independent and cannot establish a fresh lane', () => {
+	const collector = id(600), siteA = id(601), siteB = id(602)
+	const entries: ShadowSynchronizationRead[] = [
+		{ collectorId: collector, executionSiteId: siteA,
+			read: { state: 'fresh', snapshot: { collector_instance_id: collector, state: 'clear' } } },
+		{ collectorId: collector, executionSiteId: siteB,
+			read: { state: 'fresh', snapshot: { collector_instance_id: collector, state: 'blocked' } } },
+	]
+	const bounds = { startMs: t, endMs: t + 100 }
+	for (const reads of [entries, [...entries].reverse()]) {
+		expect(projectShadowDisclosures([], [], bounds, reads)).toEqual([])
+		const f = fixture()
+		f.declare(610, 0, ['execution.segments'], 600, 601)
+		expect(projectShadowDisclosures(f.store.shadow.records(), f.store.shadow.coverageRecords(), bounds, reads)
+			.map((lane) => [lane.executionSiteId, lane.synchronization])).toEqual([[siteA, 'unknown']])
+	}
 })
