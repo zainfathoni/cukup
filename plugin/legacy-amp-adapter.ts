@@ -98,7 +98,7 @@ export function createLegacyAmpAdapter(options: LegacyAmpAdapterOptions) {
 				await recordStart(threadId, messageId, observation.atMs, observation.monotonicAt)
 			} catch {
 				if (activeTurns.get(threadId)?.messageId === messageId) activeTurns.delete(threadId)
-				sync.markTrackingIncomplete()
+				sync.markTrackingIncomplete('event-recording')
 			}
 			return
 		}
@@ -112,7 +112,7 @@ export function createLegacyAmpAdapter(options: LegacyAmpAdapterOptions) {
 				observation.monotonicAt,
 			)
 		} catch {
-			sync.markTrackingIncomplete()
+			sync.markTrackingIncomplete('event-recording')
 		} finally {
 			if (activeTurns.get(threadId) === active) activeTurns.delete(threadId)
 		}
@@ -149,9 +149,9 @@ export function createLegacyAmpAdapter(options: LegacyAmpAdapterOptions) {
 						runStateTask(threadId, { state: value, atMs: now(), monotonicAt: monotonicNow() })
 					}
 				})
-				.catch(() => sync.markTrackingIncomplete())
+				.catch(() => sync.markTrackingIncomplete('thread-state-observation'))
 		} catch {
-			sync.markTrackingIncomplete()
+			sync.markTrackingIncomplete('thread-state-observation')
 		}
 	}
 
@@ -181,7 +181,7 @@ export function createLegacyAmpAdapter(options: LegacyAmpAdapterOptions) {
 					monotonicStartedAt,
 				)
 			} catch {
-				sync.markTrackingIncomplete()
+				sync.markTrackingIncomplete('event-recording')
 			}
 		}
 		activeTurns.set(threadId, { messageId, recovered: false })
@@ -196,7 +196,7 @@ export function createLegacyAmpAdapter(options: LegacyAmpAdapterOptions) {
 			}
 		} catch {
 			if (activeTurns.get(threadId)?.messageId === messageId) activeTurns.delete(threadId)
-			sync.markTrackingIncomplete()
+			sync.markTrackingIncomplete('event-recording')
 			void ctx.ui
 				.notify('UNKNOWN · TRACKING INCOMPLETE · Cukup could not record agent.start locally.')
 				.catch(() => {})
@@ -220,7 +220,7 @@ export function createLegacyAmpAdapter(options: LegacyAmpAdapterOptions) {
 				monotonicEndedAt,
 			)
 		} catch {
-			sync.markTrackingIncomplete()
+			sync.markTrackingIncomplete('event-recording')
 			void ctx.ui
 				.notify('UNKNOWN · TRACKING INCOMPLETE · Cukup could not record agent.end locally.')
 				.catch(() => {})

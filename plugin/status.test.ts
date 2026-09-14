@@ -34,7 +34,6 @@ describe('status display', () => {
 				const text = formatStatusDisplay({
 					cache: { summary: summary(status), fetchedAtMs: nowMs },
 					authoritative,
-					trackingIncomplete: false,
 					counts,
 					syncState,
 					nowMs,
@@ -51,7 +50,6 @@ describe('status display', () => {
 		const text = formatStatusDisplay({
 			cache: { summary: summary('UNDER'), fetchedAtMs: nowMs - 60_000 },
 			authoritative: false,
-			trackingIncomplete: false,
 			counts: { pending: 3, conflict: 1, rejected: 2 },
 			syncState: { ...syncState, lastErrorKind: 'network' },
 			nowMs,
@@ -60,17 +58,41 @@ describe('status display', () => {
 		expect(text).toContain('pending 3 · CONFLICTS 1 · REJECTIONS 2 · sync OFFLINE')
 	})
 
-	test('marks failed local tracking unknown even when a cached summary exists', () => {
+	test('separates a historical evidence gap from a healthy authoritative sync', () => {
 		const text = formatStatusDisplay({
 			cache: { summary: summary('COMPLETE'), fetchedAtMs: nowMs },
 			authoritative: true,
-			trackingIncomplete: true,
+			trackingGap: {
+				firstObservedAtMs: null,
+				lastObservedAtMs: null,
+				reasons: ['legacy-unknown'],
+			},
 			counts,
 			syncState,
 			nowMs,
 		})
-		expect(text).toStartWith('UNKNOWN · TRACKING INCOMPLETE')
+		expect(text).toStartWith('AUTHORITATIVE · HISTORICAL TRACKING GAP')
 		expect(text).toContain(`as_of ${asOf}`)
+		expect(text).toContain('reason unknown legacy cause')
+		expect(text).toContain('missing evidence will not be recovered')
+	})
+
+	test('keeps a current local-state failure unknown', () => {
+		const text = formatStatusDisplay({
+			cache: { summary: summary('COMPLETE'), fetchedAtMs: nowMs },
+			authoritative: false,
+			trackingGap: {
+				firstObservedAtMs: nowMs,
+				lastObservedAtMs: nowMs,
+				reasons: ['sync-local-state'],
+			},
+			counts,
+			syncState,
+			nowMs,
+			transientErrorKind: 'local-state',
+		})
+		expect(text).toStartWith('UNKNOWN · TRACKING INCOMPLETE')
+		expect(text).toContain(new Date(nowMs).toISOString())
 	})
 
 	test('makes missing and unsafe physical credentials actionable without exposing a token', () => {
@@ -80,7 +102,6 @@ describe('status display', () => {
 		] as const) {
 			const text = formatStatusDisplay({
 				authoritative: false,
-				trackingIncomplete: false,
 				counts,
 				syncState,
 				nowMs,

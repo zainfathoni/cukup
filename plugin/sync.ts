@@ -10,6 +10,8 @@ import {
 import {
 	UNASSIGNED_V1_ATTRIBUTION,
 	type EventAttribution,
+	type TrackingGap,
+	type TrackingGapReason,
 	type WorkHoursStore,
 } from './store.ts'
 
@@ -54,7 +56,7 @@ export class SyncEngine {
 	#running: Promise<SyncCycleResult> | undefined
 	#deferredDelayMs: number | undefined
 	#disposed = false
-	#trackingIncomplete: boolean
+	#trackingGap: TrackingGap | undefined
 	#preferredNewEventSchemaVersion: 1 | 2 = EVENT_SCHEMA_VERSION_V1
 	#attributionConfigured = false
 	#attributionReady: Promise<void> | undefined
@@ -69,7 +71,7 @@ export class SyncEngine {
 		this.#setTimer = options.setTimer ?? setTimeout
 		this.#clearTimer = options.clearTimer ?? clearTimeout
 		this.#executorProfile = options.executorProfile
-		this.#trackingIncomplete = this.#store.trackingIncomplete()
+		this.#trackingGap = this.#store.trackingGap()
 	}
 
 	start(): void {
@@ -84,17 +86,23 @@ export class SyncEngine {
 		this.#schedule(0)
 	}
 
-	markTrackingIncomplete(): void {
-		this.#trackingIncomplete = true
+	markTrackingIncomplete(reason: TrackingGapReason): void {
+		const atMs = this.#now()
 		try {
-			this.#store.markTrackingIncomplete()
+			this.#store.markTrackingIncomplete(reason, atMs)
+			this.#trackingGap = this.#store.trackingGap()
 		} catch {
-			// The in-memory warning remains visible when SQLite cannot persist it.
+			this.#trackingGap = mergeTrackingGap(this.#trackingGap, reason, atMs)
 		}
 	}
 
-	trackingIncomplete(): boolean {
-		return this.#trackingIncomplete
+	trackingGap(): TrackingGap | undefined {
+		return this.#trackingGap
+	}
+
+	acknowledgeTrackingGap(): void {
+		this.#store.acknowledgeTrackingGap()
+		this.#trackingGap = undefined
 	}
 
 	async prepareNewTurn(): Promise<void> {
@@ -188,7 +196,7 @@ export class SyncEngine {
 			}
 			const kind =
 				error instanceof TokenProviderError ? `authentication-${error.kind}` : 'local-state'
-			if (kind === 'local-state') this.markTrackingIncomplete()
+			if (kind === 'local-state') this.markTrackingIncomplete('sync-local-state')
 			this.#recordFailure(kind, kind !== 'local-state')
 			return { authoritativeSummary: false, errorKind: kind }
 		} finally {
@@ -232,12 +240,7 @@ export class SyncEngine {
 			this.#store.recordSyncFailure(kind, attempt, nextAttemptAtMs, nowMs)
 			if (nextAttemptAtMs !== null) this.#schedule(nextAttemptAtMs - nowMs)
 		} catch {
-			this.#trackingIncomplete = true
-			try {
-				this.#store.markTrackingIncomplete()
-			} catch {
-				// The in-memory warning remains visible when SQLite cannot persist it.
-			}
+			this.markTrackingIncomplete('sync-state-persistence')
 		}
 	}
 
@@ -252,6 +255,21 @@ export class SyncEngine {
 			void this.runNow()
 		}, Math.max(0, delayMs))
 		this.#timer.unref?.()
+	}
+}
+
+function mergeTrackingGap(
+	existing: TrackingGap | undefined,
+	reason: TrackingGapReason,
+	atMs: number,
+): TrackingGap {
+	return {
+		firstObservedAtMs:
+			existing?.firstObservedAtMs === null
+				? null
+				: Math.min(existing?.firstObservedAtMs ?? atMs, atMs),
+		lastObservedAtMs: Math.max(existing?.lastObservedAtMs ?? atMs, atMs),
+		reasons: [...new Set([...(existing?.reasons ?? []), reason])],
 	}
 }
 

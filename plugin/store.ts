@@ -21,6 +21,21 @@ const sourceSetting = 'source-instance-id'
 const migrationNamespaceSetting = 'legacy-migration-namespace'
 const nextSequenceSetting = 'next-source-sequence'
 const trackingIncompleteSetting = 'tracking-incomplete'
+const trackingGapMetadataSetting = 'tracking-gap-metadata'
+
+export type TrackingGapReason =
+	| 'event-recording'
+	| 'thread-state-observation'
+	| 'sync-local-state'
+	| 'sync-state-persistence'
+	| 'status-local-state'
+	| 'legacy-unknown'
+
+export type TrackingGap = {
+	firstObservedAtMs: number | null
+	lastObservedAtMs: number | null
+	reasons: TrackingGapReason[]
+}
 
 export type OutboxCounts = {
 	pending: number
@@ -166,7 +181,7 @@ export class WorkHoursStore {
 			return write.immediate()
 		} catch (error) {
 			try {
-				this.markTrackingIncomplete()
+				this.markTrackingIncomplete('event-recording', Date.now())
 			} catch {
 				// Keep the original local write failure when the warning marker also cannot be written.
 			}
@@ -354,8 +369,44 @@ export class WorkHoursStore {
 		return this.#setting(trackingIncompleteSetting) === 'true'
 	}
 
-	markTrackingIncomplete(): void {
-		this.#setSetting(trackingIncompleteSetting, 'true')
+	trackingGap(): TrackingGap | undefined {
+		if (!this.trackingIncomplete()) return undefined
+		const metadata = this.#setting(trackingGapMetadataSetting)
+		if (metadata) {
+			try {
+				const parsed = parseTrackingGap(JSON.parse(metadata))
+				if (parsed) return parsed
+			} catch {
+				// Treat invalid or pre-metadata state as a legacy gap.
+			}
+		}
+		return { firstObservedAtMs: null, lastObservedAtMs: null, reasons: ['legacy-unknown'] }
+	}
+
+	markTrackingIncomplete(reason: TrackingGapReason, atMs: number): void {
+		if (!Number.isSafeInteger(atMs) || atMs < 0) throw new Error('Tracking-gap time is invalid.')
+		const write = this.#database.transaction(() => {
+			const existing = this.trackingGap()
+			const gap: TrackingGap = {
+				firstObservedAtMs:
+					existing?.firstObservedAtMs === null
+						? null
+						: Math.min(existing?.firstObservedAtMs ?? atMs, atMs),
+				lastObservedAtMs: Math.max(existing?.lastObservedAtMs ?? atMs, atMs),
+				reasons: [...new Set([...(existing?.reasons ?? []), reason])],
+			}
+			this.#setSetting(trackingIncompleteSetting, 'true')
+			this.#setSetting(trackingGapMetadataSetting, JSON.stringify(gap))
+		})
+		write.immediate()
+	}
+
+	acknowledgeTrackingGap(): void {
+		const write = this.#database.transaction(() => {
+			this.#setSetting(trackingIncompleteSetting, 'false')
+			this.#setSetting(trackingGapMetadataSetting, '')
+		})
+		write.immediate()
 	}
 
 	weekdayTargetMinutes(): number {
@@ -694,6 +745,35 @@ function validateAttribution(attribution: EventAttribution): void {
 	) {
 		throw new Error('Project Slug must be lowercase kebab-case and at most 64 characters.')
 	}
+}
+
+function parseTrackingGap(value: unknown): TrackingGap | undefined {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+	const candidate = value as Record<string, unknown>
+	const firstObservedAtMs = parseOptionalTrackingGapTime(candidate.firstObservedAtMs)
+	const lastObservedAtMs = parseOptionalTrackingGapTime(candidate.lastObservedAtMs)
+	if (firstObservedAtMs === undefined || lastObservedAtMs === undefined) return undefined
+	if (!Array.isArray(candidate.reasons) || candidate.reasons.length === 0) return undefined
+	const reasons = candidate.reasons.filter(isTrackingGapReason)
+	if (reasons.length !== candidate.reasons.length) return undefined
+	return { firstObservedAtMs, lastObservedAtMs, reasons: [...new Set(reasons)] }
+}
+
+function parseOptionalTrackingGapTime(value: unknown): number | null | undefined {
+	return value === null || (Number.isSafeInteger(value) && Number(value) >= 0)
+		? (value as number | null)
+		: undefined
+}
+
+function isTrackingGapReason(value: unknown): value is TrackingGapReason {
+	return (
+		value === 'event-recording' ||
+		value === 'thread-state-observation' ||
+		value === 'sync-local-state' ||
+		value === 'sync-state-persistence' ||
+		value === 'status-local-state' ||
+		value === 'legacy-unknown'
+	)
 }
 
 function legacyEventKey(event: WorkEvent): string {

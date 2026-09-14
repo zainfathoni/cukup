@@ -131,11 +131,13 @@ describe('work-hours plugin', () => {
 			])
 			expect([...commands.keys()]).toEqual([
 				'work-hours-status',
+				'tracking-gap-acknowledge',
 				'project-slug-set',
 				'day-off-set',
 				'work-hours-set-target',
 			])
-			expect([...commandCategories.values()]).toEqual(['cukup', 'cukup', 'cukup', 'cukup'])
+			expect([...commandCategories.values()]).toEqual(['cukup', 'cukup', 'cukup', 'cukup', 'cukup'])
+			expect(commandTitles.get('tracking-gap-acknowledge')).toBe('Acknowledge tracking gap')
 			expect(commandTitles.get('day-off-set')).toBe('Set day off or half day')
 			expect(commandTitles.get('project-slug-set')).toBe('Project attribution')
 			expect(commandAvailability.get('project-slug-set')).toBeUndefined()
@@ -749,6 +751,7 @@ describe('work-hours plugin', () => {
 		const previousStateHome = process.env.XDG_STATE_HOME
 		process.env.XDG_STATE_HOME = stateHome
 		const handlers = new Map<string, (event: any, context: any) => unknown>()
+		const commands = new Map<string, (context: any) => unknown>()
 		const disposers: Array<() => unknown> = []
 		const notifications: string[] = []
 		const amp = {
@@ -756,7 +759,8 @@ describe('work-hours plugin', () => {
 				handlers.set(name, handler)
 				return { unsubscribe() {} }
 			},
-			registerCommand() {
+			registerCommand(id: string, _options: unknown, handler: (context: any) => unknown) {
+				commands.set(id, handler)
 				return { unsubscribe() {}, setAvailability() {} }
 			},
 			onDispose(callback: () => unknown) {
@@ -772,7 +776,12 @@ describe('work-hours plugin', () => {
 			system: { executor: { kind: 'local' }, user: { workspace: {} } },
 			$: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
 		}
-		const context = { ui: { notify: async (message: string) => { notifications.push(message) } } }
+		const context = {
+			ui: {
+				notify: async (message: string) => { notifications.push(message) },
+				confirm: async () => true,
+			},
+		}
 
 		try {
 			workHoursPlugin(amp as never)
@@ -788,6 +797,17 @@ describe('work-hours plugin', () => {
 			expect(notifications.at(-1)).toBe(
 				'UNKNOWN · TRACKING INCOMPLETE · Cukup could not record agent.start locally.',
 			)
+			await commands.get('tracking-gap-acknowledge')?.(context)
+			expect(notifications.at(-1)).toBe(
+				'Historical tracking-gap warning acknowledged. Recorded evidence is unchanged.',
+			)
+			expect(
+				database
+					.query<{ value: string }, []>(
+						"SELECT value FROM settings WHERE key = 'tracking-incomplete'",
+					)
+					.get()?.value,
+			).toBe('false')
 			database.close()
 		} finally {
 			await Promise.all(disposers.map((dispose) => dispose()))

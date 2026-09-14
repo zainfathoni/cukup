@@ -1,11 +1,11 @@
 import { MAX_CLIENT_CLOCK_SKEW_MS, type SummaryPeriod } from './protocol.ts'
-import type { CachedSummary, OutboxCounts, PersistedSyncState } from './store.ts'
+import type { CachedSummary, OutboxCounts, PersistedSyncState, TrackingGap } from './store.ts'
 import { formatMinutes } from './tracker.ts'
 
 export type StatusDisplayInput = {
 	cache?: CachedSummary
 	authoritative: boolean
-	trackingIncomplete: boolean
+	trackingGap?: TrackingGap
 	counts: OutboxCounts
 	syncState: PersistedSyncState
 	nowMs: number
@@ -15,9 +15,13 @@ export type StatusDisplayInput = {
 
 export function formatStatusDisplay(input: StatusDisplayInput): string {
 	const diagnostics = formatDiagnostics(input.counts, input.syncState, input.transientErrorKind)
-	if (input.trackingIncomplete) {
+	if (input.trackingGap) {
+		const currentFailure = input.transientErrorKind === 'local-state'
+		const freshness = input.cache ? (input.authoritative ? 'AUTHORITATIVE' : 'STALE') : 'UNKNOWN'
+		const classification = currentFailure ? 'TRACKING INCOMPLETE' : 'HISTORICAL TRACKING GAP'
 		return [
-			`UNKNOWN · TRACKING INCOMPLETE · ${summaryMetadata(input.cache, input.nowMs)} · ${diagnostics}`,
+			`${currentFailure ? 'UNKNOWN' : freshness} · ${classification} · ${summaryMetadata(input.cache, input.nowMs)} · ${diagnostics}`,
+			formatTrackingGap(input.trackingGap),
 			...(input.cache ? formatPeriods(input.cache) : []),
 			...(input.localFallback ? [`Local fallback (non-authoritative): ${input.localFallback}`] : []),
 		].join('\n')
@@ -35,6 +39,26 @@ export function formatStatusDisplay(input: StatusDisplayInput): string {
 		`${freshness} · ${summaryMetadata(input.cache, input.nowMs)} · ${diagnostics}`,
 		...formatPeriods(input.cache),
 	].join('\n')
+}
+
+function formatTrackingGap(gap: TrackingGap): string {
+	const firstObserved =
+		gap.firstObservedAtMs === null
+			? 'before diagnostic metadata was available'
+			: new Date(gap.firstObservedAtMs).toISOString()
+	const reasons = gap.reasons.map(trackingGapReasonLabel).join(', ')
+	return `Tracking gap first observed ${firstObserved} · reason ${reasons} · use “Acknowledge tracking gap” to dismiss this warning; missing evidence will not be recovered.`
+}
+
+function trackingGapReasonLabel(reason: TrackingGap['reasons'][number]): string {
+	switch (reason) {
+		case 'event-recording': return 'event recording'
+		case 'thread-state-observation': return 'thread state observation'
+		case 'sync-local-state': return 'local synchronization state'
+		case 'sync-state-persistence': return 'sync state persistence'
+		case 'status-local-state': return 'status local state'
+		case 'legacy-unknown': return 'unknown legacy cause'
+	}
 }
 
 function formatPeriods(cache: CachedSummary): string[] {

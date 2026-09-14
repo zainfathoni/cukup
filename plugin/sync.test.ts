@@ -387,6 +387,36 @@ describe('SyncEngine', () => {
 		reopened.close()
 	})
 
+	test('retains a historical tracking gap across restart and a healthy authoritative sync', async () => {
+		const path = databasePath()
+		const first = new WorkHoursStore(path)
+		first.markTrackingIncomplete('event-recording', nowMs - 60_000)
+		first.close()
+
+		const reopened = new WorkHoursStore(path)
+		const fetcher: Fetcher = async (url) => {
+			if (url.endsWith('/v1/time')) {
+				return Response.json({ server_time: new Date(nowMs).toISOString() })
+			}
+			return Response.json(summary())
+		}
+		const restarted = new SyncEngine({
+			store: reopened,
+			client: client(fetcher),
+			tokenProvider: provider(),
+			now: () => nowMs,
+		})
+		expect(restarted.trackingGap()).toMatchObject({ reasons: ['event-recording'] })
+		expect(await restarted.runNow()).toEqual({ authoritativeSummary: true })
+		expect(restarted.trackingGap()).toMatchObject({ reasons: ['event-recording'] })
+		expect(reopened.syncState().lastErrorKind).toBeNull()
+		restarted.acknowledgeTrackingGap()
+		expect(restarted.trackingGap()).toBeUndefined()
+		expect(reopened.trackingGap()).toBeUndefined()
+		await restarted.dispose()
+		reopened.close()
+	})
+
 	test('converges offline outbox rows exactly once after the network returns', async () => {
 		const store = new WorkHoursStore(databasePath())
 		const events = [record(store, 1), record(store, 2)]

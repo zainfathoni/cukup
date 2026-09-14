@@ -78,11 +78,38 @@ describe('WorkHoursStore', () => {
 		expect(store.events()).toEqual([])
 		expect(store.outboxCounts()).toEqual({ pending: 0, conflict: 0, rejected: 0 })
 		expect(store.trackingIncomplete()).toBeTrue()
+		expect(store.trackingGap()).toMatchObject({ reasons: ['event-recording'] })
 		database.close()
 		store.close()
 		const reopened = new WorkHoursStore(path)
 		expect(reopened.trackingIncomplete()).toBeTrue()
+		expect(reopened.trackingGap()).toMatchObject({ reasons: ['event-recording'] })
+		reopened.acknowledgeTrackingGap()
+		expect(reopened.trackingGap()).toBeUndefined()
 		reopened.close()
+	})
+
+	test('reads and safely acknowledges a legacy boolean-only tracking gap', () => {
+		const path = databasePath()
+		const store = new WorkHoursStore(path)
+		const database = new Database(path)
+		database.query("INSERT INTO settings (key, value) VALUES ('tracking-incomplete', 'true')").run()
+		expect(store.trackingGap()).toEqual({
+			firstObservedAtMs: null,
+			lastObservedAtMs: null,
+			reasons: ['legacy-unknown'],
+		})
+		store.markTrackingIncomplete('thread-state-observation', 1_000)
+		expect(store.trackingGap()).toEqual({
+			firstObservedAtMs: null,
+			lastObservedAtMs: 1_000,
+			reasons: ['legacy-unknown', 'thread-state-observation'],
+		})
+		store.acknowledgeTrackingGap()
+		expect(store.trackingIncomplete()).toBeFalse()
+		expect(store.trackingGap()).toBeUndefined()
+		database.close()
+		store.close()
 	})
 
 	test('uses persistent random source identity, per-turn sessions, and monotonic source order', () => {
