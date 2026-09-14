@@ -60,17 +60,19 @@ uses at most two requests (profile then shadow ingestion), each with a 1-second 
 There is no timer-driven retry, poller, daemon, or promise to empty a backlog automatically.
 
 The opt-in-only **Cukup → Experimental physical shadow** command displays fixed aggregate spool
-counts and offers **Drain one record**. Merely opening status sends nothing. An explicit drain
-honors persistent backoff and terminal FIFO blockers and reports only its fixed outcome plus
-aggregate status. Neither operation changes legacy status, totals, recording, or synchronization.
-Operators must investigate blockers separately; this slice offers no destructive skip/repair button.
+counts and offers **Drain one record** and **Synchronize status**. Merely opening status sends nothing.
+An explicit drain honors persistent backoff and terminal FIFO blockers. The distinct explicit
+synchronization action invokes one Stage 5L synchronization step and cannot bypass its restart/cadence
+wait, suspension, or fixed outcomes. Each action reports only its fixed outcome plus aggregate status.
+Neither operation changes legacy status, totals, recording, or the other transport lane. Operators must
+investigate blockers separately; this slice offers no destructive skip/repair button.
 
 Disposal unsubscribes the command and hooks first, flushes already queued local observations, waits
 for existing hook/command drains, and closes the outbox only afterward. It does not invent an end
 for an open segment or start a final backlog drain. A missing end remains pending after restart.
-Command drain waits and disposal return within a 2.5-second wait budget if a broken transport ignores abort;
-the original cleanup continues and retains ownership until that request settles. A replacement
-owner is refused in the meantime. Abrupt process death can lose observations still in memory,
+Command transport waits and disposal return within a 2.5-second wait budget if a broken transport ignores
+its bounded protocol; the original cleanup continues and retains ownership until each active request
+settles. A replacement owner is refused in the meantime. Abrupt process death can lose observations still in memory,
 but not evidence already committed to the spool. No hard real-time guarantee is made for a blocked
 event loop or filesystem.
 
