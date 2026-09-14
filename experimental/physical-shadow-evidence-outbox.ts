@@ -18,11 +18,13 @@ import {
 	LOCAL_PROTOCOL_VERSION,
 	canonicalizeEvidence,
 	isUuidV4,
+	parseCoverageEnvelope,
 	parseEvidenceEnvelope,
 	type Capability,
+	type CoverageFact,
 } from './local-harness-evidence.ts'
 
-const DATABASE_VERSION = 2
+const DATABASE_VERSION = 3
 const RESPONSE_MAX_BYTES = 16 * 1024
 const RETRY_DELAYS_MS = [1_000, 5_000, 30_000, 5 * 60_000] as const
 const SYNCHRONIZATION_INTERVAL_MS = 60_000
@@ -105,6 +107,7 @@ type BlockedReason =
 type QueueRow = {
 	sourceSequence: number
 	evidenceId: string
+	recordKind: 'evidence' | 'coverage'
 	envelopeJson: string
 	payloadBytes: number
 	state: 'queued' | 'blocked'
@@ -135,6 +138,7 @@ export class PhysicalShadowEvidenceOutbox {
 	readonly #maxRecordBytes: number
 	readonly #requestTimeoutMs: number
 	readonly #collectorId: string
+	readonly #randomId: () => string
 	#draining: Promise<PhysicalShadowDrainResult> | undefined
 	readonly #monotonicNow: () => number
 	#lastSynchronization: number
@@ -171,6 +175,7 @@ export class PhysicalShadowEvidenceOutbox {
 			PHYSICAL_SHADOW_DEFAULT_REQUEST_TIMEOUT_MS,
 		)
 		this.#capabilities = validateCapabilities(options.capabilities)
+		this.#randomId = options.randomId ?? randomUUID
 
 		prepareSpoolDirectory(options.spoolPath)
 		this.#ownership = acquireOwnership(`${options.spoolPath}.owner`)
@@ -188,7 +193,7 @@ export class PhysicalShadowEvidenceOutbox {
 		try {
 			this.#database.exec('PRAGMA busy_timeout = 100')
 			this.#migrate()
-			this.#collectorId = this.#initializeCollector(options.randomId ?? randomUUID)
+			this.#collectorId = this.#initializeCollector(this.#randomId)
 			this.#database.exec('PRAGMA journal_mode = WAL')
 			prepareExistingFile(`${options.spoolPath}-wal`)
 			prepareExistingFile(`${options.spoolPath}-shm`)
@@ -229,15 +234,78 @@ export class PhysicalShadowEvidenceOutbox {
 			return { status: 'rejected', reason: 'record_too_large' }
 		}
 
+		return this.#enqueueRecord(evidence.evidence_id, 'evidence', envelopeJson, payloadBytes)
+	}
+
+	/** Explicit Stage 5H fact boundary. Callers own the truth of loss facts. */
+	enqueueCoverage(value: unknown, capabilities: readonly Capability[] = this.#capabilities): PhysicalShadowEnqueueResult {
+		const candidate = {
+			protocol: LOCAL_PROTOCOL,
+			protocol_version: LOCAL_PROTOCOL_VERSION,
+			collector_instance_id: this.#collectorId,
+			capabilities,
+			fact: value,
+		}
+		const parsed = parseCoverageEnvelope(candidate, this.#now())
+		if ('reason' in parsed || 'unsupported' in parsed) {
+			return { status: 'rejected', reason: 'invalid_evidence' }
+		}
+		const envelopeJson = JSON.stringify({
+			...candidate,
+			capabilities: [...parsed.capabilities].sort(),
+			fact: JSON.parse(canonicalizeEvidence(parsed.fact)) as unknown,
+		})
+		const payloadBytes = encodedRequestBytes(Number.MAX_SAFE_INTEGER, envelopeJson)
+		if (payloadBytes > this.#maxRecordBytes) return { status: 'rejected', reason: 'record_too_large' }
+		return this.#enqueueRecord(parsed.fact.fact_id, 'coverage', envelopeJson, payloadBytes)
+	}
+
+	/** One prospective declaration for this durable collector and exact configured capability set. */
+	enqueueCapabilityDeclaration(): PhysicalShadowEnqueueResult {
+		try {
+			return this.#database.transaction((): PhysicalShadowEnqueueResult => {
+				const existing = this.#database.query<{ id: string; effective: string }, []>(
+					`SELECT max(CASE key WHEN 'capability_declaration_id' THEN value END) AS id,
+					 max(CASE key WHEN 'capability_declaration_effective_at' THEN value END) AS effective
+					 FROM physical_shadow_settings WHERE key IN
+					 ('capability_declaration_id', 'capability_declaration_effective_at')`,
+				).get()!
+				if (existing.id !== null || existing.effective !== null) {
+					if (!existing.id || !existing.effective || !isUuidV4(existing.id) ||
+						!validUtcInstant(existing.effective)) throw new Error('Invalid declaration state')
+					return { status: 'queued', records: 0 }
+				}
+				const fact: CoverageFact = {
+					family: 'capability_declaration',
+					fact_id: this.#randomId(),
+					effective_at: new Date(this.#now()).toISOString(),
+				}
+				const result = this.enqueueCoverage(fact)
+				if (result.status !== 'queued' || result.records !== 1) return result
+				this.#database.query('INSERT INTO physical_shadow_settings VALUES (?, ?), (?, ?)').run(
+					'capability_declaration_id', fact.fact_id,
+					'capability_declaration_effective_at', fact.effective_at,
+				)
+				return result
+			}).immediate()
+		} catch { return { status: 'tracking_failed' } }
+	}
+
+	#enqueueRecord(
+		recordId: string,
+		recordKind: 'evidence' | 'coverage',
+		envelopeJson: string,
+		payloadBytes: number,
+	): PhysicalShadowEnqueueResult {
 		try {
 			return this.#database.transaction((): PhysicalShadowEnqueueResult => {
 				const existing = this.#database
-					.query<{ envelopeJson: string }, [string]>(
-						'SELECT envelope_json AS envelopeJson FROM physical_shadow_outbox WHERE evidence_id = ?',
+					.query<{ envelopeJson: string; kind: string }, [string]>(
+						'SELECT envelope_json AS envelopeJson, record_kind AS kind FROM physical_shadow_outbox WHERE evidence_id = ?',
 					)
-					.get(evidence.evidence_id)
+					.get(recordId)
 				if (existing !== null) {
-					return existing.envelopeJson === envelopeJson
+					return existing.envelopeJson === envelopeJson && existing.kind === recordKind
 						? { status: 'queued', records: 0 }
 						: { status: 'conflict' }
 				}
@@ -262,9 +330,9 @@ export class PhysicalShadowEvidenceOutbox {
 				this.#database
 					.query(
 						`INSERT INTO physical_shadow_outbox
-							(evidence_id, envelope_json, payload_bytes) VALUES (?, ?, ?)`,
+							(evidence_id, record_kind, envelope_json, payload_bytes) VALUES (?, ?, ?, ?)`,
 					)
-					.run(evidence.evidence_id, envelopeJson, payloadBytes)
+					.run(recordId, recordKind, envelopeJson, payloadBytes)
 				return { status: 'queued', records: 1 }
 			}).immediate()
 		} catch {
@@ -365,17 +433,27 @@ export class PhysicalShadowEvidenceOutbox {
 		let records = 0, bytes = 0, blocked = false, retrying = false
 		let oldest: number | null = null
 		const rows = this.#database.query<QueueRow, []>(`SELECT source_sequence AS sourceSequence,
-			evidence_id AS evidenceId, envelope_json AS envelopeJson, payload_bytes AS payloadBytes,
+			evidence_id AS evidenceId, record_kind AS recordKind, envelope_json AS envelopeJson, payload_bytes AS payloadBytes,
 			state, blocked_reason AS blockedReason, retry_attempt AS retryAttempt, retry_at_ms AS retryAtMs
 			FROM physical_shadow_outbox`).iterate()
 		for (const row of rows) {
-			const parsed = parseEvidenceEnvelope(JSON.parse(row.envelopeJson), observed)
-			if ('reason' in parsed || 'unsupported' in parsed || parsed.collectorInstanceId !== this.#collectorId ||
-				parsed.evidence.length !== 1 || 'reason' in parsed.evidence[0]!) throw new Error('Synchronization unavailable')
-			const evidence = parsed.evidence[0].value
-			// Only these current evidence families define participation; no future fact/time fallback.
-			if (!['engagement', 'execution_start', 'execution_end'].includes(evidence.family) ||
-				evidence.evidence_id !== row.evidenceId || !integer(row.sourceSequence, 1, Number.MAX_SAFE_INTEGER) ||
+			const envelope = JSON.parse(row.envelopeJson)
+			const parsed = row.recordKind === 'evidence'
+				? parseEvidenceEnvelope(envelope, observed) : parseCoverageEnvelope(envelope, observed)
+			if ('reason' in parsed || 'unsupported' in parsed || parsed.collectorInstanceId !== this.#collectorId) {
+				throw new Error('Synchronization unavailable')
+			}
+			let occurrence: number
+			if (row.recordKind === 'evidence') {
+				if (!('evidence' in parsed) || parsed.evidence.length !== 1 || 'reason' in parsed.evidence[0]!) throw new Error('Synchronization unavailable')
+				const evidence = parsed.evidence[0].value
+				if (evidence.evidence_id !== row.evidenceId) throw new Error('Synchronization unavailable')
+				occurrence = Date.parse(evidence.timing.wall_time)
+			} else {
+				if (!('fact' in parsed) || parsed.fact.fact_id !== row.evidenceId) throw new Error('Synchronization unavailable')
+				occurrence = Date.parse(parsed.fact.family === 'capability_declaration' ? parsed.fact.effective_at : parsed.fact.start)
+			}
+			if (!integer(row.sourceSequence, 1, Number.MAX_SAFE_INTEGER) ||
 				!integer(row.payloadBytes, 1, Number.MAX_SAFE_INTEGER) ||
 				!integer(row.retryAttempt, 0, 4) || !integer(row.retryAtMs, 0, Number.MAX_SAFE_INTEGER) ||
 				!['queued', 'blocked'].includes(row.state) ||
@@ -383,7 +461,6 @@ export class PhysicalShadowEvidenceOutbox {
 					'invalid_record', 'unsupported_version', 'identity_conflict', 'invalid_order',
 					'profile', 'transport', 'invalid_response',
 				].includes(row.blockedReason!))) throw new Error('Synchronization unavailable')
-			const occurrence = Date.parse(evidence.timing.wall_time)
 			if (!integer(occurrence, 0, MAX_TIME) || occurrence > observed + 600000) throw new Error('Synchronization unavailable')
 			records = Math.min(10000, records + 1)
 			bytes = Math.min(8388608, bytes + row.payloadBytes)
@@ -481,7 +558,8 @@ export class PhysicalShadowEvidenceOutbox {
 		}
 
 		const envelope = JSON.parse(row.envelopeJson) as unknown
-		const delivery = await this.#request('/v1/shadow-evidence', token, 'POST', {
+		const delivery = await this.#request(
+			row.recordKind === 'evidence' ? '/v1/shadow-evidence' : '/v1/shadow-coverage', token, 'POST', {
 			source_sequence: row.sourceSequence,
 			envelope,
 		})
@@ -575,7 +653,7 @@ export class PhysicalShadowEvidenceOutbox {
 	#oldest(): QueueRow | null {
 		return this.#database
 			.query<QueueRow, []>(
-				`SELECT source_sequence AS sourceSequence, evidence_id AS evidenceId,
+				`SELECT source_sequence AS sourceSequence, evidence_id AS evidenceId, record_kind AS recordKind,
 					envelope_json AS envelopeJson, payload_bytes AS payloadBytes, state,
 					blocked_reason AS blockedReason, retry_attempt AS retryAttempt,
 					retry_at_ms AS retryAtMs
@@ -660,7 +738,7 @@ export class PhysicalShadowEvidenceOutbox {
 		}
 		if (version === DATABASE_VERSION) return // Never recreate initialized synchronization state.
 		this.#database.transaction(() => {
-			if (version === 1) {
+			if (version === 1 || version === 2) {
 				const identity = this.#database.query<{ value: string }, []>(
 					"SELECT value FROM physical_shadow_settings WHERE key = 'collector_id'",
 				).get()
@@ -680,6 +758,7 @@ export class PhysicalShadowEvidenceOutbox {
 				CREATE TABLE IF NOT EXISTS physical_shadow_outbox (
 					source_sequence INTEGER PRIMARY KEY AUTOINCREMENT CHECK (source_sequence BETWEEN 1 AND 9007199254740991),
 					evidence_id TEXT NOT NULL UNIQUE,
+					record_kind TEXT NOT NULL DEFAULT 'evidence' CHECK (record_kind IN ('evidence', 'coverage')),
 					envelope_json TEXT NOT NULL,
 					payload_bytes INTEGER NOT NULL CHECK (payload_bytes > 0),
 					state TEXT NOT NULL DEFAULT 'queued' CHECK (state IN ('queued', 'blocked')),
@@ -692,15 +771,20 @@ export class PhysicalShadowEvidenceOutbox {
 					CHECK ((state = 'queued' AND blocked_reason IS NULL) OR
 						(state = 'blocked' AND blocked_reason IS NOT NULL))
 				) STRICT;
-				CREATE TABLE physical_shadow_synchronization (
+			`)
+			if (version === 0 || version === 1) this.#database.exec(`
+				CREATE TABLE IF NOT EXISTS physical_shadow_synchronization (
 					singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
 					sequence INTEGER NOT NULL CHECK (sequence BETWEEN 0 AND 9007199254740991),
 					pending TEXT,
 					stale INTEGER NOT NULL CHECK (stale IN (0, 1))
 				) STRICT;
-				INSERT INTO physical_shadow_synchronization VALUES (1, 0, NULL, 0);
-				PRAGMA user_version = ${DATABASE_VERSION};
+				INSERT OR IGNORE INTO physical_shadow_synchronization VALUES (1, 0, NULL, 0);
 			`)
+			if (version === 1 || version === 2) {
+				this.#database.exec("ALTER TABLE physical_shadow_outbox ADD COLUMN record_kind TEXT NOT NULL DEFAULT 'evidence' CHECK (record_kind IN ('evidence', 'coverage'))")
+			}
+			this.#database.exec(`PRAGMA user_version = ${DATABASE_VERSION}`)
 		}).immediate()
 	}
 
@@ -817,6 +901,11 @@ function validateHostname(value: string): string {
 		throw new Error('Physical shadow executor hostname is invalid')
 	}
 	return value
+}
+
+function validUtcInstant(value: string): boolean {
+	return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) &&
+		new Date(value).toISOString() === value
 }
 
 function positiveInteger(value: number | undefined, fallback: number): number {

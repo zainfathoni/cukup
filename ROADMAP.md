@@ -70,6 +70,7 @@ This ledger is the authoritative implementation sequence within top-level Stage 
 | 5Q | Complete design-contract slice | [Legacy history and reporting authority](docs/stage-5q-legacy-history-authority.md): rejects legacy-to-generic evidence backfill and heuristic cross-authority deduplication; preserves legacy semantics and separates authority at a future owner-approved account-wide Stage 5F boundary. Defines independent reconciliation vectors and approval/backup/privacy gates; an optional audit ledger is non-authoritative and deferred. No implementation or activation. |
 | 5R | Complete design-contract slice | [Durable authority activation](docs/stage-5r-authority-activation-contract.md): one owner-approved account-wide Monday 00:00 Asia/Jakarta boundary, durable approval and atomic activation, trusted-time and restoration fences, separate report/API/target routing, unavailable behavior and explicit coverage/readiness gates. No implementation, selected date, or activation. |
 | 5S | Complete design-contract slice | [Authority control storage and recovery checkpoint](docs/stage-5s-authority-control-storage.md): closed account-owned decision/approval/idempotency records, serializable external journal and checkpoint-before-acknowledgment protocol, verified SQLite materialization, accepted-write restore frontier, retention and compatibility floors, and disposable-storage acceptance vectors. No persistence code, owner HTTP/auth or clock implementation, selected date, or activation. |
+| 5T | Complete default-off delivery slice | [Physical coverage-fact delivery](docs/stage-5t-physical-coverage-delivery.md): strict physical-bearer Stage 5H route; one migrated evidence/coverage FIFO; exact retry, site/order, bounded failure and persist-before-ack semantics; and one truthful restart-idempotent prospective declaration from the existing opt-in Amp owner. No synthesized loss, OIDC, authority, report, dashboard, target, cutover, publication, deployment, or activation. |
 | Remaining Stage 5 work | Deferred to separate slices | Resolve Stage 5P's external attestation/durability blockers before proposing OIDC/Amp-orb ingestion; separately review approved evidence-time project mappings, OIDC synchronization, any Stage 5Q audit tooling, and implementations of Stage 5R/5S control/recovery state and external journal, owner controls, trusted time, report/API/client/target routing and activation gates. Legacy evidence backfill is rejected, not an implementation task. |
 
 Stages 5A and 5B change service persistence and are **not deployment-neutral**: an eventual main push may trigger service publication and requires explicit owner approval. Stage 5C is deployment-neutral because its experimental client is not imported by a runtime, installer, receiver, or service build entrypoint; activation still requires the already reviewed Stage 5B/schema-6 service. No deployment or production migration is authorized by this ledger. Support claims and top-level Stage 6 real-collector validation and owner-approved opt-in cutover remain separate gates.
@@ -126,6 +127,12 @@ retain every committed authority/data frontier before acknowledgment; missing pr
 Version 1 retains committed recovery content from genesis; deletion/compaction needs a separate
 policy. No owner operation, clock, storage migration, production infrastructure or authority is
 activated, and cumulative prerequisite publication/schema implications remain unchanged.
+
+Stage 5T changes both plugin and `service/**` publication inputs and is **not publication-neutral**.
+The service schema remains 8, while the private physical spool advances additively to schema 3 and
+preserves queued evidence plus AUTOINCREMENT high water. The owner remains exact-opt-in/default-off;
+no production activation, publication, deployment, OIDC support, loss inference, or Stage 5R authority
+decision is included. Rollback must retain a schema-3-aware spool owner and schema-8-aware service.
 
 ### First independently reviewable code slice
 

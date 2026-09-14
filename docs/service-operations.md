@@ -72,6 +72,13 @@ Deliver the token through an approved narrow secret channel. Keep the nonsecret 
 
 The current Amp plugin binds the bearer before its first v2 upload through `PUT /v1/executor-profile`. Binding is exact and immutable; an unrecognized hostname, rename attempt, or label already held by another active lineage fails without changing the credential. Keep the complete allowlist configured before permitting v2 starts.
 
+The default-off physical shadow path now uses local spool schema 3 and requires a service revision with
+`POST /v1/shadow-coverage` before activation. Its first successful durable ownership queues one prospective
+`execution.segments` declaration. A partial/failed rollout may leave that declaration or later evidence
+blocked at the FIFO head; retain the spool and disable the experiment rather than skipping rows, lowering
+its `user_version`, or inferring loss. Roll back only to a spool-schema-3-aware plugin and schema-8-aware
+service. The service schema remains 8 because coverage persistence was already added by schema 7.
+
 Rotation atomically revokes the old token, copies its Executor Label and private shadow execution-site ID to the replacement, and only then transfers all its random source claims:
 
 ```bash

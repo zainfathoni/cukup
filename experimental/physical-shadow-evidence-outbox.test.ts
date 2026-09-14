@@ -26,6 +26,7 @@ const COLLECTOR = '50000000-0000-4000-8000-000000000001'
 const PROJECT = '60000000-0000-4000-8000-000000000001'
 const TOKEN = 'cukup_v1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 const HOSTNAME = 'physical-a'
+const FACT = '80000000-0000-4000-8000-000000000001'
 const directories: string[] = []
 const outboxes: PhysicalShadowEvidenceOutbox[] = []
 const serviceStores: ServiceStore[] = []
@@ -195,6 +196,87 @@ describe('physical cloud shadow evidence outbox', () => {
 		expect(await value.drainStep()).toMatchObject({ status: 'delivered' })
 		expect(value.enqueue(engagement(6))).toEqual({ status: 'queued', records: 1 })
 		expect(rows(spoolPath)[0]?.sequence).toBe(3)
+	})
+
+	test('shares one durable FIFO across evidence and coverage without synthesizing loss', async () => {
+		const spoolPath = join(directory(), 'shadow.sqlite')
+		const requests: Array<{ url: string; init: RequestInit }> = []
+		const value = outbox(spoolPath, { fetch: scriptedFetch(undefined, requests) })
+		expect(value.enqueue(engagement(1))).toEqual({ status: 'queued', records: 1 })
+		expect(value.enqueueCoverage({
+			family: 'capability_declaration', fact_id: FACT, effective_at: new Date(NOW).toISOString(),
+		})).toEqual({ status: 'queued', records: 1 })
+		expect(value.enqueue(engagement(2))).toEqual({ status: 'queued', records: 1 })
+		expect(rows(spoolPath).map((row) => row.sequence)).toEqual([1, 2, 3])
+		for (let i = 0; i < 3; i++) expect(await value.drainStep()).toMatchObject({ status: 'delivered' })
+		expect(requests.map(({ url }) => new URL(url).pathname)).toEqual([
+			'/v1/executor-profile', '/v1/shadow-evidence',
+			'/v1/executor-profile', '/v1/shadow-coverage',
+			'/v1/executor-profile', '/v1/shadow-evidence',
+		])
+		expect(requests.map(({ init }) => JSON.stringify(init.body)).join('')).not.toContain('irreversible_loss')
+	})
+
+	test('persists one capability declaration identity and effective instant across delivery and restart', async () => {
+		const spoolPath = join(directory(), 'shadow.sqlite')
+		const ids = [COLLECTOR, FACT]
+		let value = outbox(spoolPath, { randomId: () => ids.shift()!, fetch: scriptedFetch() })
+		expect(value.enqueueCapabilityDeclaration()).toEqual({ status: 'queued', records: 1 })
+		expect(value.enqueueCapabilityDeclaration()).toEqual({ status: 'queued', records: 0 })
+		const exact = rows(spoolPath)[0]!
+		expect(JSON.parse(exact.envelopeJson)).toMatchObject({
+			collector_instance_id: COLLECTOR,
+			capabilities: ['engagement.submission', 'recovery.engagement.submission'],
+			fact: { family: 'capability_declaration', fact_id: FACT, effective_at: new Date(NOW).toISOString() },
+		})
+		expect(await value.drainStep()).toMatchObject({ status: 'delivered' })
+		value.close()
+		outboxes.splice(outboxes.indexOf(value), 1)
+		value = outbox(spoolPath, { randomId: () => { throw new Error('must not regenerate') } })
+		expect(value.enqueueCapabilityDeclaration()).toEqual({ status: 'queued', records: 0 })
+		expect(rows(spoolPath)).toEqual([])
+	})
+
+	test('coverage response loss retries exact identity/content while changed identity content conflicts', async () => {
+		const spoolPath = join(directory(), 'shadow.sqlite')
+		let now = NOW
+		let lose = true
+		const bodies: string[] = []
+		const value = outbox(spoolPath, {
+			now: () => now,
+			fetch: async (url, init) => {
+				if (url.endsWith('/v1/executor-profile')) return json({ executor_label: HOSTNAME })
+				bodies.push(String(init.body))
+				if (lose) { lose = false; throw new Error('private response loss') }
+				return json({ status: 'duplicate' })
+			},
+		})
+		const fact = { family: 'capability_declaration', fact_id: FACT, effective_at: new Date(NOW).toISOString() }
+		expect(value.enqueueCoverage(fact)).toEqual({ status: 'queued', records: 1 })
+		expect(value.enqueueCoverage({ ...fact, effective_at: new Date(NOW - 1).toISOString() })).toEqual({ status: 'conflict' })
+		const exact = rows(spoolPath)[0]!.envelopeJson
+		expect(await value.drainStep()).toMatchObject({ status: 'retryable', attempted: 1 })
+		expect(rows(spoolPath)[0]!.envelopeJson).toBe(exact)
+		now += 1_000
+		expect(await value.drainStep()).toMatchObject({ status: 'delivered', delivered: 1 })
+		expect(bodies[0]).toBe(bodies[1])
+	})
+
+	test('preserves recovery-only loss scope while refusing that scope for a capability declaration', async () => {
+		const requests: Array<{ url: string; init: RequestInit }> = []
+		const value = outbox(join(directory(), 'shadow.sqlite'), { fetch: scriptedFetch(undefined, requests) })
+		const recoveryOnly = ['recovery.execution_end.native'] as const
+		expect(value.enqueueCoverage({
+			family: 'capability_declaration', fact_id: FACT, effective_at: new Date(NOW).toISOString(),
+		}, recoveryOnly)).toEqual({ status: 'rejected', reason: 'invalid_evidence' })
+		expect(value.enqueueCoverage({
+			family: 'irreversible_loss', fact_id: FACT,
+			start: new Date(NOW - 2_000).toISOString(), end: new Date(NOW - 1_000).toISOString(),
+			reason: 'source_without_replay',
+		}, recoveryOnly)).toEqual({ status: 'queued', records: 1 })
+		expect(await value.drainStep()).toMatchObject({ status: 'delivered' })
+		const body = JSON.parse(String(requests[1]!.init.body))
+		expect(body.envelope.capabilities).toEqual(recoveryOnly)
 	})
 
 	test('survives response loss, bearer rotation, and restart; the cloud duplicate clears the exact record', async () => {
@@ -650,7 +732,7 @@ describe('Stage 5L inactive synchronization client', () => {
 		expect(h.body()).toMatchObject({ records: 10000, bytes: 10001 })
 	})
 
-	test('migrates recognized schema 1 preserving every row, identity, source high water, settings and modes', async () => {
+	test('migrates recognized schema 2 preserving every row, identity, source high water, settings and modes', async () => {
 		const path = join(directory(), 'shadow.sqlite')
 		const old = outbox(path)
 		old.enqueue(engagement(1))
@@ -658,19 +740,22 @@ describe('Stage 5L inactive synchronization client', () => {
 		closeOutbox(old)
 		let before: unknown[] = []
 		editSpool(path, (db) => {
-			db.exec(`DROP TABLE physical_shadow_synchronization; PRAGMA user_version = 1;
+			db.exec(`ALTER TABLE physical_shadow_outbox DROP COLUMN record_kind; PRAGMA user_version = 2;
 				UPDATE sqlite_sequence SET seq = 42 WHERE name = 'physical_shadow_outbox';
 				UPDATE physical_shadow_outbox SET state = 'blocked', blocked_reason = 'transport' WHERE source_sequence = 1;
 				UPDATE physical_shadow_outbox SET retry_attempt = 3, retry_at_ms = 99 WHERE source_sequence = 2;
 				INSERT INTO physical_shadow_settings VALUES ('preserved', 'setting')`)
-			before = db.query('SELECT * FROM physical_shadow_outbox').all()
+			before = db.query(`SELECT source_sequence, evidence_id, envelope_json, payload_bytes, state,
+				blocked_reason, retry_attempt, retry_at_ms FROM physical_shadow_outbox`).all()
 		})
 		const h = synchronizationHarness({ spoolPath: path })
 		editSpool(path, (db) => {
-			expect(db.query('SELECT * FROM physical_shadow_outbox').all()).toEqual(before)
+			expect(db.query(`SELECT source_sequence, evidence_id, envelope_json, payload_bytes, state,
+				blocked_reason, retry_attempt, retry_at_ms FROM physical_shadow_outbox`).all()).toEqual(before)
+			expect(db.query('SELECT DISTINCT record_kind FROM physical_shadow_outbox').all()).toEqual([{ record_kind: 'evidence' }])
 			expect(db.query("SELECT seq FROM sqlite_sequence WHERE name='physical_shadow_outbox'").get()).toEqual({ seq: 42 })
 			expect(db.query("SELECT value FROM physical_shadow_settings WHERE key='preserved'").get()).toEqual({ value: 'setting' })
-			expect(db.query('PRAGMA user_version').get()).toEqual({ user_version: 2 })
+			expect(db.query('PRAGMA user_version').get()).toEqual({ user_version: 3 })
 		})
 		expect(collectorId(path)).toBe(COLLECTOR)
 		expect(synchronizationRow(path)).toEqual({ sequence: 0, pending: null, stale: 0 })
@@ -681,6 +766,49 @@ describe('Stage 5L inactive synchronization client', () => {
 		expect(rows(path).at(-1)!.sequence).toBe(43)
 		for (const file of [path, `${path}.owner`, `${path}-wal`, `${path}-shm`]) expect(statSync(file).mode & 0o777).toBe(0o600)
 		expect(statSync(join(path, '..')).mode & 0o777).toBe(0o700)
+	})
+
+	test('schema 2 migration never recreates missing synchronization state and evidence still drains', async () => {
+		for (const missing of ['table', 'singleton'] as const) {
+			const path = join(directory(), 'shadow.sqlite')
+			let monotonic = 0
+			let value = outbox(path, { monotonicNow: () => monotonic })
+			value.enqueue(engagement(missing === 'table' ? 1 : 2))
+			closeOutbox(value)
+			editSpool(path, (db) => db.exec(`
+				ALTER TABLE physical_shadow_outbox DROP COLUMN record_kind;
+				${missing === 'table' ? 'DROP TABLE physical_shadow_synchronization;' : 'DELETE FROM physical_shadow_synchronization;'}
+				PRAGMA user_version = 2;
+			`))
+			value = outbox(path, { monotonicNow: () => monotonic })
+			monotonic = 60_000
+			expect(await value.synchronizationStep()).toBe(missing === 'table' ? 'unavailable' : 'disabled')
+			editSpool(path, (db) => {
+				expect(db.query('PRAGMA user_version').get()).toEqual({ user_version: 3 })
+				if (missing === 'table') expect(db.query("SELECT name FROM sqlite_schema WHERE name='physical_shadow_synchronization'").get()).toBeNull()
+				else expect(db.query('SELECT * FROM physical_shadow_synchronization').all()).toEqual([])
+			})
+			expect(await value.drainStep()).toMatchObject({ status: 'delivered' })
+			closeOutbox(value)
+		}
+	})
+
+	test('schema 2 migration preserves nonzero synchronization state exactly', async () => {
+		const path = join(directory(), 'shadow.sqlite')
+		let monotonic = 0
+		let value = outbox(path, { monotonicNow: () => monotonic })
+		value.enqueue(engagement(3))
+		closeOutbox(value)
+		editSpool(path, (db) => db.exec(`
+			ALTER TABLE physical_shadow_outbox DROP COLUMN record_kind;
+			UPDATE physical_shadow_synchronization SET sequence = 7, stale = 1;
+			PRAGMA user_version = 2;
+		`))
+		value = outbox(path, { monotonicNow: () => monotonic })
+		expect(synchronizationRow(path)).toEqual({ sequence: 7, pending: null, stale: 1 })
+		monotonic = 60_000
+		expect(await value.synchronizationStep()).toBe('suspended')
+		expect(await value.drainStep()).toMatchObject({ status: 'delivered' })
 	})
 
 	test.each([

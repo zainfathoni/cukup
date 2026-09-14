@@ -148,7 +148,7 @@ test('plugin entrypoint activates only the exact physical flag and keeps legacy 
 				expect(messages).toHaveLength(1)
 				expect(messages[0]).not.toContain('shadow')
 				expect(requests.some((url) => url.endsWith('/v1/executor-profile'))).toBe(flag === '1')
-				if (flag === '1') expect(rows(f.spool)).toHaveLength(2)
+				if (flag === '1') expect(rows(f.spool)).toHaveLength(3)
 				else expect(readdirSync(join(f.root, 'amp-work-hours'))).not.toContain('experimental-physical-amp-shadow')
 			} finally {
 				for (const dispose of h.disposers) await dispose()
@@ -215,19 +215,23 @@ test('real supported hooks persist only defensible execution facts, with private
 	}
 	const value = start(h, f)
 	await settle()
-	expect(calls).toBe(0)
+	expect(calls).toBe(1)
 	expect(h.reads()).toBe(0)
 	expect(h.emit('agent.start')).toEqual([{}])
 	h.emit('agent.start')
-	expect(rows(f.spool)).toEqual([])
+	expect(rows(f.spool)).toHaveLength(1)
 	f.advance(1_000); h.state('running'); h.state('running')
 	f.advance(2_000); h.state('awaiting-approval')
 	f.advance(10_000); h.state('running')
 	f.advance(3_000); h.emit('agent.end'); h.emit('agent.end')
 	await settle()
-	expect(calls).toBe(1)
+	expect(calls).toBe(2)
 	expect(durableAtRequest[0]?.[0]?.sequence).toBe(1)
-	const evidence = rows(f.spool).map((r) => JSON.parse(r.envelope).evidence[0])
+	const envelopes = rows(f.spool).map((r) => JSON.parse(r.envelope))
+	const declaration = envelopes[0].fact
+	expect(declaration).toMatchObject({ family: 'capability_declaration', effective_at: new Date(NOW).toISOString() })
+	expect(envelopes[0].capabilities).toEqual(['execution.segments'])
+	const evidence = envelopes.slice(1).map((envelope) => envelope.evidence[0])
 	expect(evidence.map((e) => [e.family, Date.parse(e.timing.wall_time) - NOW])).toEqual([
 		['execution_start', 1_000], ['execution_end', 3_000],
 		['execution_start', 13_000], ['execution_end', 16_000],
@@ -241,8 +245,8 @@ test('real supported hooks persist only defensible execution facts, with private
 	await h.commands.get('experimental-physical-shadow')!({ ui: {
 		select: async (dialog: unknown) => { dialogs.push(dialog); return 'Close' },
 	} })
-	expect(calls).toBe(1)
-	expect(value.status()).toMatchObject({ queued: 4, blocked: 0, retrying: 1 })
+	expect(calls).toBe(2)
+	expect(value.status()).toMatchObject({ queued: 5, blocked: 0, retrying: 1 })
 	await value.dispose()
 	expect(h.subscriptions()).toBe(0)
 	expect(h.commands.size).toBe(0)
@@ -272,7 +276,7 @@ test('outage/restart, response loss/duplicate and bearer-file rotation replay ex
 	h.emit('agent.start'); h.state('running'); f.advance(2_000); h.emit('agent.end')
 	await settle()
 	const exact = rows(f.spool)
-	expect(exact.map((r) => r.sequence)).toEqual([1, 2])
+	expect(exact.map((r) => r.sequence)).toEqual([1, 2, 3])
 	await offline.dispose()
 	f.advance(1_000)
 	let loseResponse = true
@@ -289,8 +293,10 @@ test('outage/restart, response loss/duplicate and bearer-file rotation replay ex
 	}
 	const restarted = start(harness(), f)
 	await settle()
-	expect(store.shadow.records()).toHaveLength(1)
-	expect(rows(f.spool)).toEqual(exact)
+	expect(store.shadow.coverageRecords()).toHaveLength(1)
+	expect(store.shadow.records()).toHaveLength(0)
+	expect(rows(f.spool).map((row) => row.sequence)).toEqual([2, 3])
+	expect(await restarted.drainStep()).toMatchObject({ status: 'retryable' })
 	expect(await restarted.drainStep()).toMatchObject({ status: 'backoff' })
 	const replacement = store.rotateBearer(first.tokenId, NOW + 1)
 	writeFileSync(f.tokenFile, replacement.token)
@@ -299,7 +305,7 @@ test('outage/restart, response loss/duplicate and bearer-file rotation replay ex
 	expect(bodies[0]).toBe(bodies[1])
 	expect(store.shadow.records()).toHaveLength(1)
 	expect(bearers.slice(-2)).toEqual([`Bearer ${replacement.token}`, `Bearer ${replacement.token}`])
-	expect(rows(f.spool).map((r) => r.sequence)).toEqual([2])
+	expect(rows(f.spool).map((r) => r.sequence)).toEqual([3])
 	// A single explicit step did not loop through the remainder.
 	await settle()
 	expect(rows(f.spool)).toHaveLength(1)
@@ -340,7 +346,7 @@ test('blocked shadow FIFO does not break actual legacy hook recording or sync', 
 	f.advance(1_000)
 	await Promise.all(h.emit('agent.end'))
 	await settle()
-	expect(value.status()).toMatchObject({ blocked: 1, queued: 1, blockedReasons: { invalidRecord: 1 } })
+	expect(value.status()).toMatchObject({ blocked: 1, queued: 2, blockedReasons: { invalidRecord: 1 } })
 	await sync.runNow()
 	expect(uploaded).toHaveLength(2)
 	expect(store.outboxCounts()).toEqual({ pending: 0, conflict: 0, rejected: 0 })
@@ -353,7 +359,7 @@ test('blocked shadow FIFO does not break actual legacy hook recording or sync', 
 		notify: async (message: string) => { notifications.push(message) },
 	} })
 	expect(notifications.map((message) => JSON.parse(message))).toMatchObject([
-		{ drain: 'blocked', spool: { blocked: 1, queued: 1 } },
+		{ drain: 'blocked', spool: { blocked: 1, queued: 2 } },
 	])
 })
 
@@ -363,16 +369,18 @@ test('disposal flushes local endpoints without synthesizing a lost end; startup 
 	const value = start(h, f)
 	h.emit('agent.start'); h.state('running')
 	await value.dispose()
-	expect(rows(f.spool)).toHaveLength(1)
+	expect(rows(f.spool)).toHaveLength(2)
+	expect(rows(f.spool).map((row) => row.envelope).join('')).not.toContain('irreversible_loss')
 	f.options.fetch = async (url) => Response.json(url.endsWith('/v1/executor-profile')
 		? { executor_label: HOST } : { status: 'accepted' })
 	const restart = harness()
 	const next = start(restart, f)
 	await settle()
-	expect(rows(f.spool)).toHaveLength(0)
+	expect(rows(f.spool)).toHaveLength(1)
 	restart.emit('agent.end'); restart.state('idle')
 	await next.dispose()
-	expect(rows(f.spool)).toHaveLength(0)
+	expect(rows(f.spool)).toHaveLength(1)
+	expect(rows(f.spool)[0]!.envelope).not.toContain('irreversible_loss')
 	expect(restart.reads()).toBe(0)
 })
 

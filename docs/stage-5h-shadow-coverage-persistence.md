@@ -2,10 +2,13 @@
 
 This slice implements only the two durable facts specified by
 [Stage 5G](stage-5g-shadow-coverage-contract.md) and [ADR 0007](adr/0007-generic-harness-evidence-boundary.md).
-It adds no HTTP route or payload, authentication change, upload, collector behavior, synchronization
+It originally added no HTTP route or payload, authentication change, upload, collector behavior, synchronization
 observation, report projection, aggregation, dashboard, or runtime activation. No historical facts
 are inferred or backfilled. Existing evidence envelopes, append outcomes, reads, segments, and
 Stage 5E/5F measurements retain their interpretation.
+
+[Stage 5T](stage-5t-physical-coverage-delivery.md) later adds the strict physical-bearer HTTP caller and
+extends the default-off physical outbox. It does not change this protocol, schema, or persistence contract.
 
 ## Internal closed protocol
 
