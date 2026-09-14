@@ -83,7 +83,9 @@ This service-only shadow route accepts one generic evidence envelope from an aut
 
 Accepted and exact retry responses are `200 {"status":"accepted"}` and `200 {"status":"duplicate"}`. Valid JSON that is invalid, unsupported, conflicted, or out of order preserves the internal closed outcome as `200 {"status":"rejected","reason":"invalid_record|unsupported_version|identity_conflict|invalid_order"}` with one actual reason. Malformed JSON uses `400 {"error":"invalid_request"}`. An unbound bearer returns `403 {"error":"executor_profile_required"}` without mutation. Workload OIDC returns `403 {"error":"physical_bearer_required"}`; generic OIDC/Amp-orb shadow ingestion awaits a separately reviewed execution-site design.
 
-The route uses the existing HTTPS, API-host, 1 MiB JSON, authentication-before-route-disclosure, no-store response, fixed error, and privacy-safe request logging boundaries. It does not add an uploader/outbox and does not change legacy ingestion, source ownership, summaries, aggregation, or dashboards.
+The route uses the existing HTTPS, API-host, 1 MiB JSON, authentication-before-route-disclosure, no-store response, fixed error, and privacy-safe request logging boundaries. It does not change legacy ingestion, source ownership, summaries, aggregation, or dashboards.
+
+The inactive Stage 5C [physical cloud shadow outbox](stage-5c-physical-shadow-outbox.md) is the first programmatic client for this route. It persists its own collector identity, source order, exact one-fact envelopes, retry state, and terminal blockers before explicit delivery. No production runtime constructs or schedules it in this slice.
 
 ## `PUT /v1/target-overrides/:date` and `DELETE /v1/target-overrides/:date`
 
