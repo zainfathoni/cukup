@@ -106,6 +106,8 @@ function createVersion2Database(path: string): void {
 	current.close()
 	const database = new Database(path, { strict: true })
 	database.exec(`
+		DROP TABLE shadow_evidence;
+		DROP TABLE shadow_collectors;
 		DROP TABLE target_overrides;
 		PRAGMA user_version = 2;
 	`)
@@ -119,6 +121,8 @@ function createVersion3Database(path: string): void {
 	current.close()
 	const database = new Database(path, { strict: true })
 	database.exec(`
+		DROP TABLE shadow_evidence;
+		DROP TABLE shadow_collectors;
 		ALTER TABLE target_overrides RENAME TO target_overrides_v4;
 		CREATE TABLE target_overrides (
 			date TEXT PRIMARY KEY CHECK (
@@ -156,7 +160,7 @@ describe('SQLite schema migration', () => {
 			store.close()
 			const inspected = new Database(path, { readonly: true, strict: true })
 			expect(inspected.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
-				user_version: 4,
+				user_version: 5,
 			})
 			expect(
 				inspected
@@ -185,7 +189,7 @@ describe('SQLite schema migration', () => {
 			store.close()
 			const inspected = new Database(path, { readonly: true, strict: true })
 			expect(inspected.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
-				user_version: 4,
+				user_version: 5,
 			})
 			inspected.close()
 		}
@@ -206,7 +210,7 @@ describe('SQLite schema migration', () => {
 			store.close()
 			const inspected = new Database(path, { readonly: true, strict: true })
 			expect(inspected.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
-				user_version: 4,
+				user_version: 5,
 			})
 			expect(
 				inspected
@@ -224,7 +228,7 @@ describe('SQLite schema migration', () => {
 		}
 	})
 
-	test('creates v4 directly with the exact target constraint and remains stable across restart', () => {
+	test('creates v5 directly with the exact target constraint and remains stable across restart', () => {
 		const path = databasePath()
 		const store = new ServiceStore(path)
 		store.putTargetOverride('2026-09-01', 240, now)
@@ -232,7 +236,7 @@ describe('SQLite schema migration', () => {
 
 		const database = new Database(path, { strict: true })
 		expect(database.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
-			user_version: 4,
+			user_version: 5,
 		})
 		database
 			.query('INSERT INTO target_overrides VALUES (?, ?, ?, ?)')
@@ -259,12 +263,12 @@ describe('SQLite schema migration', () => {
 		const store = new ServiceStore(path)
 		store.close()
 		const future = new Database(path, { strict: true })
-		future.exec('PRAGMA user_version = 5')
+		future.exec('PRAGMA user_version = 6')
 		future.close()
 		expect(() => new ServiceStore(path)).toThrow('newer than supported')
 		const inspected = new Database(path, { readonly: true, strict: true })
 		expect(inspected.query<{ user_version: number }, []>('PRAGMA user_version').get()).toEqual({
-			user_version: 5,
+			user_version: 6,
 		})
 		inspected.close()
 	})

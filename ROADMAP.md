@@ -47,7 +47,14 @@ This ledger is the authoritative implementation sequence within top-level Stage 
 | Actual Amp-orb technical proof | Complete experimental slice | [Corrected proof](docs/incidents/2026-09-13-experimental-amp-proof.md) used temporary activation—not installer or service packaging—and established actual hooks across consecutive turns, supervised receiver lifecycle, durable outage spooling, receiver-restart retention, and plugin-reload rediscovery and drain. The expected restart-lost open segment remained pending. There are no autonomous retries; endpoint changes require plugin reload; no engagement evidence was established. This is not macOS, Linux, official support, packaging-completion, deployment, or cutover evidence. |
 | Remaining Stage 4 work | Complete for the current experimental scope | Persistent login/restart policy remains outside the explicit session-only installer. One-host lifecycle evidence does not establish general OS support, and the Cukup-project Amp-orb declaration does not install the receiver in arbitrary non-Cukup projects. |
 
-Top-level Stage 5 remains the separate cloud protocol, persistence, aggregation, migration, and shadow-dashboard phase. Top-level Stage 6 remains the separate real-collector validation and owner-approved opt-in cutover phase.
+### Stage 5 shadow measurement substage ledger
+
+| Substage | Status | Independently reviewable deliverable |
+| --- | --- | --- |
+| 5A | Complete internal foundation | [Service-side shadow persistence](docs/stage-5a-shadow-persistence.md): closed generic evidence validation, append-only isolated schema 5 tables, immutable collector/site and evidence identity, source ordering, and durable pending/closed endpoints. No cloud route, collector connection, or measurement totals. |
+| Remaining Stage 5 work | Deferred to separate slices | Cloud authentication/API, collector upload, aggregation/union, cutover clipping, dashboard/coverage presentation, and historical migration/backfill. |
+
+Stage 5A changes service persistence and is **not deployment-neutral**: an eventual main push may trigger service publication and requires explicit owner approval. No deployment or production migration is authorized by this ledger. Support claims and top-level Stage 6 real-collector validation and owner-approved opt-in cutover remain separate gates.
 
 ### First independently reviewable code slice
 
