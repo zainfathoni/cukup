@@ -5,14 +5,14 @@ import {
 } from './local-harness-evidence-runtime.ts'
 
 export const LOCAL_HARNESS_EVIDENCE_RECEIVER_USAGE =
-	'Usage: cukup-experimental-receiver --state-directory <absolute-path>\n'
+	'Usage: cukup-experimental-receiver --state-directory <absolute-path> [--port <1-65535>]\n'
 export const LOCAL_HARNESS_EVIDENCE_RECEIVER_FAILURE =
 	'Cukup experimental receiver failed\n'
 
 export type LocalHarnessEvidenceReceiverSignal = 'SIGHUP' | 'SIGINT' | 'SIGTERM'
 
 export type LocalHarnessEvidenceReceiverCommandHooks = Readonly<{
-	startRuntime?: (stateDirectory: string) => LocalHarnessEvidenceRuntime
+	startRuntime?: (stateDirectory: string, port?: number) => LocalHarnessEvidenceRuntime
 	onSignal?: (
 		signal: LocalHarnessEvidenceReceiverSignal,
 		handler: () => void,
@@ -27,15 +27,16 @@ export async function runLocalHarnessEvidenceReceiverCommand(
 	hooks: LocalHarnessEvidenceReceiverCommandHooks = {},
 ): Promise<number> {
 	const writeStderr = hooks.writeStderr ?? ((message) => process.stderr.write(message))
-	const stateDirectory = parseStateDirectory(args)
-	if (stateDirectory === undefined) {
+	const options = parseOptions(args)
+	if (options === undefined) {
 		writeStderr(LOCAL_HARNESS_EVIDENCE_RECEIVER_USAGE)
 		return 2
 	}
 
 	const startRuntime =
 		hooks.startRuntime ??
-		((directory: string) => startLocalHarnessEvidenceRuntime({ stateDirectory: directory }))
+		((stateDirectory: string, port?: number) =>
+			startLocalHarnessEvidenceRuntime({ stateDirectory, port }))
 	const onSignal = hooks.onSignal ?? processSignalSubscription
 	let runtime: LocalHarnessEvidenceRuntime | undefined
 	let starting = true
@@ -109,7 +110,7 @@ export async function runLocalHarnessEvidenceReceiverCommand(
 		for (const signal of ['SIGHUP', 'SIGINT', 'SIGTERM'] as const) {
 			subscriptions.push(onSignal(signal, () => request(signal)))
 		}
-		runtime = startRuntime(stateDirectory)
+		runtime = startRuntime(options.stateDirectory, options.port)
 	} catch {
 		finish(1)
 		return completion
@@ -121,13 +122,19 @@ export async function runLocalHarnessEvidenceReceiverCommand(
 	return completion
 }
 
-function parseStateDirectory(args: readonly string[]): string | undefined {
-	if (args.length !== 2 || args[0] !== '--state-directory') return undefined
+function parseOptions(
+	args: readonly string[],
+): Readonly<{ stateDirectory: string; port?: number }> | undefined {
+	if ((args.length !== 2 && args.length !== 4) || args[0] !== '--state-directory') return undefined
 	const path = args[1]!
 	if (!isAbsolute(path) || path.length === 0 || path !== path.trim() || resolve(path) !== path || path === '/') {
 		return undefined
 	}
-	return path
+	if (args.length === 2) return { stateDirectory: path }
+	if (args[2] !== '--port' || !/^[1-9]\d{0,4}$/.test(args[3]!)) return undefined
+	const port = Number(args[3])
+	if (port > 65_535) return undefined
+	return { stateDirectory: path, port }
 }
 
 function processSignalSubscription(

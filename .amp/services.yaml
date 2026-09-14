@@ -7,3 +7,8 @@ services:
       url: /
       title: Cukup dashboard preview
       description: Interactive synthetic data; filters and heatmap dates recompute the timeline.
+  cukup-evidence-receiver:
+    command: >-
+      bun experimental/local-harness-evidence-receiver-command.ts
+      --state-directory "${XDG_STATE_HOME:-$HOME/.local/state}/cukup-experimental-local-evidence-receiver"
+      --port "$PORT"

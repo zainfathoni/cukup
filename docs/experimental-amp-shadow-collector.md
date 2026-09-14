@@ -53,6 +53,20 @@ export CUKUP_EXPERIMENTAL_RUNTIME_STATE_DIR=/absolute/owner-only/runtime-state
 export CUKUP_EXPERIMENTAL_AMP_SHADOW_STATE_DIR=/absolute/owner-only/collector-state
 ```
 
+In a Cukup project orb, the committed `.amp/services.yaml` can supervise the receiver without a
+portal:
+
+```sh
+amp orb services ensure
+export CUKUP_EXPERIMENTAL_AMP_SHADOW=1
+export CUKUP_EXPERIMENTAL_RUNTIME_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/cukup-experimental-local-evidence-receiver"
+```
+
+Amp assigns and retains the listener port across supervised restarts; collectors discover that
+loopback origin from the owner-only runtime state rather than receiving the port or token. The
+service declaration is packaging only for Cukup project orbs. It neither opts the collector in nor
+installs the plugin, runtime, or activation in another project.
+
 If runtime discovery or measurement fails, the plugin emits only one fixed privacy-safe warning;
 Amp work and legacy tracking continue. The durable client spool and collector UUID remain in the
 collector state directory. Enqueue and each event-triggered drain step retain the protocol's
@@ -63,6 +77,12 @@ The client retains the discovered loopback origin, so a runtime restart on a new
 plugin reload; queued evidence then survives in the spool and is retried. Retry attempts happen at
 startup and on later live events rather than from a timer, and each trigger performs bounded drain
 steps rather than promising autonomous eventual delivery.
+
+Stop the declared receiver with `amp orb service stop cukup-evidence-receiver`. A later
+`amp orb services ensure` starts it again while preserving receiver evidence, execution-site
+identity, and token. Removing activation requires stopping it and removing the declaration from
+repository configuration; neither action deletes durable receiver state or credentials. Broader
+repeatable installation/removal and macOS/Linux packaging remain outstanding.
 
 With a local runtime already running, exercise the real discovery, spool, negotiation, receiver,
 wait segmentation, and disposal path using synthetic events and the runtime's provisioned local
