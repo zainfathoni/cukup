@@ -525,10 +525,10 @@ describe('dashboard report aggregation', () => {
 		expect(report.shadow_disclosures.state).toBe('ready')
 		if (report.shadow_disclosures.state !== 'ready') throw new Error('Expected disclosures')
 		expect(report.shadow_disclosures.data.lanes.map((entry) => [entry.label, entry.synchronization])).toEqual([
-			['machine-a', 'clear'],
-			['machine-b', 'queued'],
-			['Shadow collector · collector 1', 'retrying'],
-			['Shadow collector · collector 2', 'blocked'],
+			['machine-a', 'unknown'],
+			['machine-b', 'unknown'],
+			['Shadow collector · collector 1', 'unknown'],
+			['Shadow collector · collector 2', 'unknown'],
 			['Shadow collector · collector 3', 'unknown'],
 		])
 		const first = report.shadow_disclosures.data.lanes[0]!

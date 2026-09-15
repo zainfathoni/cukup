@@ -108,7 +108,8 @@ one independent panel; this local change is not a claim that production has been
 - `trend`: globally unioned Overall Working Time plus independent, non-stacked, targetless selected Project, Executor, and combined series, and one `days` entry per date in the range. A day entry carries the target-bearing verdict for the Overall series — the only series that bears a target — with its interval count, first and last activity, and non-additive Project and Executor breakdowns. Filters never alter it, exactly as they never alter the Overall panel;
 - `executors`: `occurred_at`-derived latest activity, `received_at`-derived latest synchronization, and `active`, `revoked`, or `not-applicable` credential state;
 - `shadow_disclosures`: privacy-safe labels plus independent capability assessments, explicit known
-  losses, pending execution, and current synchronization for Stage 5M collector/site lanes. It has no
+  losses, pending execution, and synchronization fixed to `unknown` for Stage 5M collector/site lanes
+  until a separately reviewed cache-validity mechanism exists. It has no
   evidence/fact/project IDs, raw UUIDs when labels identify a lane, spool counts/bytes, or totals.
 
 The disclosure window follows the selected trend range and is clipped at the report's server-owned
@@ -119,6 +120,8 @@ delivery time, forcing every synchronization value to unknown while retaining us
 loss, and pending-execution context. A wholly future custom range is unavailable rather than
 ready-empty. During mixed-version serving, the schema-2 browser keeps a schema-1 report usable by
 adding only a payload-free unavailable disclosure panel; unsupported versions fail the refresh.
+Every schema-2 transport response is also normalized to `unknown` without mutating the response, so
+a stalled refresh or hidden page cannot retain a positive synchronization state past service expiry.
 
 Every data section is a panel with `state: "ready"`, `"stale"`, or `"unavailable"`. The server marks an independently failed query unavailable; the browser preserves an earlier successful panel as stale. Neither layer substitutes zero for failure.
 

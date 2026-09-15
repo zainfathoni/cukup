@@ -138,6 +138,23 @@ type DashboardReportV1 = Omit<DashboardReport, 'schema_version' | 'shadow_disclo
 	schema_version: 1
 }
 
+function withoutCurrentSynchronization(report: DashboardReport): DashboardReport {
+	if (report.shadow_disclosures.state === 'unavailable') return report
+	return {
+		...report,
+		shadow_disclosures: {
+			...report.shadow_disclosures,
+			data: {
+				...report.shadow_disclosures.data,
+				lanes: report.shadow_disclosures.data.lanes.map((lane) => ({
+					...lane,
+					synchronization: 'unknown',
+				})),
+			},
+		},
+	}
+}
+
 /** Keeps a mixed-version dashboard response usable without inventing shadow data. */
 export function normalizeDashboardReport(value: unknown): DashboardReport {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -145,7 +162,7 @@ export function normalizeDashboardReport(value: unknown): DashboardReport {
 	}
 	const report = value as Record<string, unknown>
 	if (report.schema_version === 2 && report.shadow_disclosures !== undefined) {
-		return report as DashboardReport
+		return withoutCurrentSynchronization(report as DashboardReport)
 	}
 	if (report.schema_version === 1 && report.shadow_disclosures === undefined) {
 		return {

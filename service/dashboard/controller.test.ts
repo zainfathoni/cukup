@@ -185,4 +185,20 @@ describe('dashboard interactions', () => {
 		expect(view.renders.at(-1)?.report.shadow_disclosures).toEqual(normalized.shadow_disclosures)
 		expect(() => normalizeDashboardReport({ ...schemaOne, schema_version: 3 })).toThrow()
 	})
+
+	test('redacts current synchronization from schema-2 transport without mutating its input', () => {
+		const report = structuredClone(mockDashboardReport)
+		const normalized = normalizeDashboardReport(report)
+		expect(normalized.shadow_disclosures.state).toBe('ready')
+		if (normalized.shadow_disclosures.state !== 'ready') throw new Error('Expected ready disclosures')
+		expect(normalized.shadow_disclosures.data.lanes.map((lane) => lane.synchronization)).toEqual([
+			'unknown',
+			'unknown',
+		])
+		expect(report.shadow_disclosures.state === 'ready' &&
+			report.shadow_disclosures.data.lanes.map((lane) => lane.synchronization)).toEqual([
+			'clear',
+			'blocked',
+		])
+	})
 })

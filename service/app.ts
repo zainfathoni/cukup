@@ -188,8 +188,7 @@ async function authenticatedResponse(
 		if (principal.kind !== 'bearer') {
 			return json({ error: 'physical_bearer_required' }, 403)
 		}
-		const executionSiteId = store.shadowExecutionSite(principal.tokenId)
-		if (!executionSiteId) return json({ error: 'executor_profile_required' }, 403)
+		if (!store.shadowExecutionSite(principal.tokenId)) return json({ error: 'executor_profile_required' }, 403)
 		if (url.search !== '') return json({ error: 'invalid_request' }, 400)
 		if (!isJsonRequest(request)) return json({ error: 'unsupported_media_type' }, 415)
 		const body = await requestBody(request)
@@ -198,11 +197,15 @@ async function authenticatedResponse(
 		if (!isShadowRequest(body.value)) {
 			return json({ status: 'rejected', reason: 'invalid_record' })
 		}
-		return json(store.shadow.append({
-			executionSiteId,
+		const outcome = store.appendPhysicalEvidence(principal.tokenId, {
 			sourceSequence: body.value.source_sequence,
 			envelope: body.value.envelope,
-		}, now()))
+		}, now())
+		if ('error' in outcome) {
+			return outcome.error === 'unauthorized'
+				? json(outcome, 401, { 'www-authenticate': 'Bearer' }) : json(outcome, 403)
+		}
+		return json(outcome)
 	}
 	if (url.pathname === '/v1/shadow-coverage') {
 		if (request.method !== 'POST') {
