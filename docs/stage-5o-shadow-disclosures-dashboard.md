@@ -5,7 +5,10 @@ The authenticated dashboard report now has schema version 2 and one independent
 or custom trend range and is clipped by the report builder's existing server-owned `nowMs`. The
 service reads registered collector/site lanes, supplies Stage 5K-classified synchronization reads to
 the Stage 5M projection, and passes the result through `deliverShadowDisclosures('ready', ...)`.
-Dashboard code does not inspect synchronization timestamps, infer freshness, or call `Date.now()`.
+The public report and its browser normalizer replace synchronization with `unknown`: the schema has
+no service-attested validity bound that could prevent a cached positive state from surviving its
+Stage 5K expiry during a stalled request. Dashboard code does not inspect synchronization timestamps,
+infer freshness, or call `Date.now()`.
 
 The public panel replaces private collector/site UUIDs with an existing Executor Label when that
 label uniquely identifies the execution site. Ambiguous or unlabeled lanes receive deterministic
@@ -13,8 +16,9 @@ display-only ordinals; raw collector/site, evidence, segment, fact, project, bea
 identities do not cross the report boundary. Capability intervals retain explicit declared,
 declared-limited, and unknown assessments. Known losses retain only their interval, reason, and
 affected capability names. Pending execution retains occurrence times but no evidence identities.
-Synchronization exposes only `clear`, `queued`, `retrying`, `blocked`, or `unknown`. Spool records,
-bytes, and additive disclosure totals are absent.
+Synchronization is therefore currently exposed only as `unknown`; the broader closed vocabulary is
+reserved for a separately reviewed validity mechanism. Spool records, bytes, and additive disclosure
+totals are absent.
 
 ## Availability and browser retention
 
@@ -24,7 +28,8 @@ or no work. A failed disclosure query makes only this panel `unavailable`, carri
 renders no lanes or zero. A wholly future custom range is also payload-free unavailable rather than
 a reversed ready-empty interval. Other dashboard panels retain their existing behavior.
 
-When a whole browser refresh fails, the controller retains usable disclosure dimensions but invokes
+Every schema-2 response is normalized through the same fail-closed synchronization redaction without
+mutating its input. When a whole browser refresh fails, the controller retains usable disclosure dimensions but invokes
 `deliverShadowDisclosures('stale', retainedLanes)` at delivery time. Every retained lane's
 synchronization is therefore `unknown`, including values previously delivered as clear, queued,
 retrying, or blocked. Losses, capability assessments, and pending execution remain visible with a
@@ -41,7 +46,8 @@ design OIDC collector sites, backfill history, switch authority, or establish co
 ## Publication boundary
 
 The slice changes `service/**`, including the existing runtime dashboard path, so it is not
-publication-neutral. The default production synchronization clock remains untrusted and therefore
-would disclose synchronization as unknown until a separately reviewed trust provider exists. No
-push, image publication, deployment, shared-setting change, production access, or migration is
+publication-neutral. The default production synchronization clock remains untrusted, and even a
+trusted internal read remains `unknown` at the public boundary until a separately reviewed
+cache-validity mechanism exists. No push, image publication, deployment, shared-setting change,
+production access, or migration is
 authorized or performed by this slice.

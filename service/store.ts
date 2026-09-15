@@ -235,6 +235,23 @@ export class ServiceStore {
 			.get(tokenId)?.executionSiteId
 	}
 
+	/** Revalidates bearer authority in the same writer transaction as the immutable evidence append. */
+	appendPhysicalEvidence(
+		tokenId: string,
+		input: { sourceSequence: unknown; envelope: unknown },
+		receivedAtMs: number,
+	): ShadowOutcome | { error: 'unauthorized' | 'executor_profile_required' } {
+		return this.#database.transaction(() => {
+			const authorization = this.synchronization.authorize(tokenId)
+			if ('error' in authorization) return authorization
+			return this.shadow.append({
+				executionSiteId: authorization.site,
+				sourceSequence: input.sourceSequence,
+				envelope: input.envelope,
+			}, receivedAtMs)
+		}).immediate()
+	}
+
 	/** Revalidates bearer authority in the same writer transaction as the immutable coverage append. */
 	appendPhysicalCoverage(
 		tokenId: string,

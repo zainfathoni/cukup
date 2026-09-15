@@ -77,8 +77,8 @@ test('service source composes Stage 5M lanes and Stage 5N ready delivery with ex
 		expect(report.shadow_disclosures.state).toBe('ready')
 		if (report.shadow_disclosures.state !== 'ready') throw new Error('Expected report disclosures')
 		expect(report.shadow_disclosures.data.lanes.map((lane) => [lane.label, lane.synchronization])).toEqual([
-			['machine-a', 'clear'],
-			['machine-b', 'blocked'],
+			['machine-a', 'unknown'],
+			['machine-b', 'unknown'],
 		])
 		const stale = preserveReportAsStale(report).shadow_disclosures
 		expect(stale.state).toBe('stale')

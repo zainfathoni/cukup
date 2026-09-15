@@ -110,6 +110,42 @@ describe('authenticated cloud shadow ingestion', () => {
 		expect(await old.json()).toEqual({ error: 'unauthorized' })
 	})
 
+	test('revocation or rotation committed during body read fences new and duplicate evidence writes', async () => {
+		for (const duplicate of [false, true]) for (const operation of ['revoke', 'rotate'] as const) {
+			const value = fixture()
+			expect(value.store.bindExecutorLabel(value.first.tokenId, 'machine-a').outcome).toBe('bound')
+			const payload = body()
+			if (duplicate) {
+				expect(await (await request(value, value.first.token, payload)).json()).toEqual({ status: 'accepted' })
+			}
+			const before = value.store.shadow.records()
+			let release!: () => void
+			const gate = new Promise<void>((resolve) => { release = resolve })
+			let entered!: () => void
+			const reading = new Promise<void>((resolve) => { entered = resolve })
+			const stream = new ReadableStream<Uint8Array>({ async pull(controller) {
+				entered()
+				await gate
+				controller.enqueue(new TextEncoder().encode(JSON.stringify(payload)))
+				controller.close()
+			} })
+			const pending = value.app.fetch(new Request('https://api.cukup.dev/v1/shadow-evidence', {
+				method: 'POST',
+				headers: { authorization: `Bearer ${value.first.token}`, 'content-type': 'application/json' },
+				body: stream as unknown as BodyInit,
+			}))
+			await reading
+			if (operation === 'revoke') value.store.revokeBearer(value.first.tokenId, now + 2)
+			else value.store.rotateBearer(value.first.tokenId, now + 2)
+			release()
+			const response = await pending
+			expect(response.status).toBe(401)
+			expect(response.headers.get('www-authenticate')).toBe('Bearer')
+			expect(await response.json()).toEqual({ error: 'unauthorized' })
+			expect(value.store.shadow.records()).toEqual(before)
+		}
+	})
+
 	test('refuses unbound bearers and workload OIDC without mutating either evidence generation', async () => {
 		const value = fixture()
 		const metadata = value.store.listBearerMetadata()

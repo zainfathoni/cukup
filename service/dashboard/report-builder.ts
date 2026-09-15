@@ -219,7 +219,7 @@ function disclosureLanes(
 					new Date(start.startMs).toISOString(),
 				),
 			},
-			synchronization: lane.synchronization,
+			synchronization: 'unknown',
 		}
 	})
 }

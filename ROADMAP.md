@@ -65,7 +65,7 @@ This ledger is the authoritative implementation sequence within top-level Stage 
 | 5L | Complete inactive physical-client slice | [Synchronization client](docs/stage-5l-shadow-synchronization-client.md): bounded spool snapshot, independent durable observation revision, and explicit one-step transport. Nothing schedules or invokes it automatically. |
 | 5M | Complete internal projection slice | [Synchronization disclosures](docs/stage-5m-shadow-synchronization-projection.md): Stage 5K read hardening plus a pure classified-result input, registered status-only lanes, exact collector/site isolation, and current fresh state projection without totals, history, or project attribution. No production caller or activation. |
 | 5N | Complete internal delivery slice | [Shadow availability delivery](docs/stage-5n-shadow-availability-delivery.md): ready delivery may expose current synchronization; stale delivery redacts it to unknown; unavailable carries no disclosures. Other dimensions remain independent and unchanged. No cache/report consumer, public schema, dashboard, or activation. |
-| 5O | Complete authenticated dashboard slice | [Shadow disclosures dashboard](docs/stage-5o-shadow-disclosures-dashboard.md): schema-2 independent report panel, privacy-safe labels, Stage 5M/5N ready/stale/unavailable delivery, and accessible capability/loss/pending/synchronization rendering without totals coupling. No collector scheduling, clock-trust activation, cutover, migration, deployment, or support claim. |
+| 5O | Complete authenticated dashboard slice | [Shadow disclosures dashboard](docs/stage-5o-shadow-disclosures-dashboard.md): schema-2 independent report panel, privacy-safe labels, Stage 5M/5N ready/stale/unavailable delivery, accessible capability/loss/pending rendering, and synchronization fixed to unknown until cache-validity review. No collector scheduling, clock-trust activation, cutover, migration, deployment, or support claim. |
 | 5P | Complete design-contract slice; implementation externally blocked | [Workload OIDC execution-site contract](docs/stage-5p-oidc-execution-site-contract.md): required Amp-attested incarnation lifecycle, opaque service identity, immutable collector/replay ownership, and generic-only claim/privacy policy. Current documented tokens do not establish recreation-safe identity. Project attribution remains Unassigned and OIDC synchronization unsupported; legacy OIDC unchanged. No implementation or activation. |
 | 5Q | Complete design-contract slice | [Legacy history and reporting authority](docs/stage-5q-legacy-history-authority.md): rejects legacy-to-generic evidence backfill and heuristic cross-authority deduplication; preserves legacy semantics and separates authority at a future owner-approved account-wide Stage 5F boundary. Defines independent reconciliation vectors and approval/backup/privacy gates; an optional audit ledger is non-authoritative and deferred. No implementation or activation. |
 | 5R | Complete design-contract slice | [Durable authority activation](docs/stage-5r-authority-activation-contract.md): one owner-approved account-wide Monday 00:00 Asia/Jakarta boundary, durable approval and atomic activation, trusted-time and restoration fences, separate report/API/target routing, unavailable behavior and explicit coverage/readiness gates. No implementation, selected date, or activation. |
@@ -110,9 +110,11 @@ is authorized.
 
 Stage 5O imports the Stage 5M projection and Stage 5N delivery boundary into the authenticated
 dashboard's existing service runtime path, so it is not publication-neutral. Dashboard report schema
-2 is an application response change, not a SQLite migration or authority switch. The default
-production synchronization clock remains untrusted; no push, publication, deployment, shared-setting
-change, production activation, or support claim is authorized.
+2 is an application response change, not a SQLite migration or authority switch. Synchronization is
+fixed to unknown at the public report and browser-normalization boundaries until a separately reviewed
+cache-validity mechanism can enforce service expiry during stalled requests. The default production
+clock also remains untrusted; no push, publication, deployment, shared-setting change, production
+activation, or support claim is authorized.
 
 Stage 5P is documentation-only and publication-neutral. It defines required future platform support,
 not claims Amp currently attests or permission to enable generic OIDC ingestion. Existing physical
