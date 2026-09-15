@@ -79,6 +79,7 @@ This ledger is the authoritative implementation sequence within top-level Stage 
 | 5Z | Complete design-contract slice; implementation blocked | [Authority-aware report delivery](docs/stage-5z-authority-report-envelope.md): closed versioned legacy/generic sections, independent targetless runtime, unavailable versus observed-zero semantics, truthful legacy-only compatibility, private cache provenance and initial/refresh/release fences. No runtime/schema/API/client change, selected cutover, trusted clock or activation. |
 | 5AA | Complete inactive wire-contract slice; implementation blocked | [Inactive authority-report transport](docs/stage-5aa-inactive-authority-report-transport.md): separate owner-session POST/version/media contract, bounded strict UTF-8 codecs, fixed failures, snapshot-only current-use refusal and session/generation/release fences. No route or consumer enabled; current-capable proof needs a new reviewed version. |
 | 5AB | Complete inactive pure-codec slice | [Authority-report codec](docs/stage-5ab-authority-report-codec.md): bounded strict request/response parsing, closed Stage 5AA/5Z semantic validation, and canonical response encoding. No route, authority read/construction, dashboard/client import, current-use permission, or activation. |
+| 5AC | Complete inactive pure-builder slice | [Authority-report snapshot builder](docs/stage-5ac-authority-report-builder.md): caller-classified exact authority partitions, independently floored globally unioned/clipped metric milliseconds, Stage 5N stale disclosure redaction, private-identity removal, and Stage 5AB-validated snapshot/refusal output. No authority/time proof, reads, route, consumer, selected cutover, current use, or activation. |
 | Remaining Stage 5 work | Deferred to separate slices | Resolve Stage 5P's external attestation/durability blockers before proposing OIDC/Amp-orb ingestion; separately resolve Stage 5W native lifecycle/non-reuse and event-context guarantees and implement/review Stage 5V/5W project registry, mapping authority and collector capture/recovery interfaces under Stage 5X's owner-control contract and refusal gates; separately review OIDC synchronization, any Stage 5Q audit tooling, and implementations of Stage 5R/5S control/recovery state and external journal, accounting owner controls, trusted time, report/API/client/target routing and activation gates. Legacy evidence backfill is rejected, not an implementation task. |
 
 Stages 5A and 5B change service persistence and are **not deployment-neutral**: an eventual main push may trigger service publication and requires explicit owner approval. Stage 5C is deployment-neutral because its experimental client is not imported by a runtime, installer, receiver, or service build entrypoint; activation still requires the already reviewed Stage 5B/schema-6 service. No deployment or production migration is authorized by this ledger. Support claims and top-level Stage 6 real-collector validation and owner-approved opt-in cutover remain separate gates.
@@ -186,6 +187,12 @@ no authority data. Its `service/**` path nevertheless matches the main-push serv
 workflow, so the slice is not publication-neutral. No push, publication, deployment, migration,
 cutover, current-use permission, or activation is authorized; rollback is removal of the isolated
 module/tests/docs while retaining all prerequisite schema-8 data and publication precautions.
+
+Stage 5AC adds only a pure caller-classified builder atop Stage 5AB and Stage 5N. It consumes exact
+already globally unioned/clipped millisecond metric snapshots, never reads or combines authorities,
+and emits only codec-validated stale/refusal envelopes with current use forbidden. There is no
+runtime importer or activation, but its `service/**` paths are publication-sensitive. Rollback
+removes the isolated builder/tests/docs while preserving the cumulative schema-8 prerequisites.
 
 ### First independently reviewable code slice
 
