@@ -1075,8 +1075,7 @@ svg text {
 }
 
 .heat-cell:hover + .heat-tip,
-.heat-cell:focus-visible + .heat-tip,
-.heat-selected + .heat-tip {
+.heat-cell:focus-visible + .heat-tip {
 	visibility: visible;
 	opacity: 1;
 }
@@ -1184,6 +1183,11 @@ svg text {
 @media (hover: none) {
 	.heat-cell:not(.heat-selected) + .heat-tip {
 		display: none;
+	}
+
+	.heat-selected + .heat-tip {
+		visibility: visible;
+		opacity: 1;
 	}
 }
 
