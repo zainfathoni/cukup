@@ -14,6 +14,14 @@ The narrowly approved day-off workflow does not turn the dashboard into an edito
 
 Overrides affect only authoritative target calculation. Evidence and worked minutes remain immutable, and worked minutes below, equal to, or above the selected target remain `UNDER`, `COMPLETE`, or `OVER`. Both schema-1 `/v1/summary` and the dashboard schema-1 Overall Working Time panel use the same daily and Monday-week target replacement; one weekday at 240 changes the standard weekly target from 2,400 to 2,160 minutes, and clearing restores the default target. Filtered Project and Executor activity remains targetless and unaffected. Dynamic mutation routes are logged only as a route template without dates or bodies. SQLite v4 creates the latest exact 0-or-240 table directly for fresh, v1, and v2 databases and transactionally rebuilds production v3 while preserving its zero-minute overrides and audit timestamps. v4 is restart-stable, v5 and newer fail closed, and the verified backup and clean-restore boundary covers v1 through v4. A pre-v4 binary must never run against a v4-migrated database.
 
+That final sentence records the compatibility ceiling at the time of the v4 rollout. Subsequent
+additive Stage 5 migrations advance the current database to schema 8: schema 5 adds isolated shadow
+evidence, schema 6 adds private execution-site bindings, schema 7 adds coverage, and schema 8 adds
+latest synchronization snapshots. The [service operations runbook](../service-operations.md) is the
+current recovery authority; after schema 8 migration, every deployed or restored generation must use
+a tested schema-8-aware binary. This supersedes the historical v4 ceiling without changing the
+target-override decision recorded above.
+
 ## Considered alternatives
 
 - Raw workspace paths, Git remotes, package names, and checkout-local settings are rejected as project identity; ADR 0005 records the later decision to normalize the exact Amp Project name instead.
