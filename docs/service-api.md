@@ -14,6 +14,28 @@ Summary amounts are whole minutes. All timestamps are UTC RFC 3339 strings with 
 
 This document specifies the implemented legacy v1/v2 API and the isolated, non-authoritative shadow-ingestion route. Under the historical semantics, Amp turn intervals plus grace are called Working Time. The accepted future direction in [ADR 0007](adr/0007-generic-harness-evidence-boundary.md) separates Engagement Window-based Working Time from Agent Runtime prospectively. Shadow evidence never enters legacy summaries or totals; Stage 5O adds a disclosure-only authenticated dashboard panel without reinterpreting existing v1/v2 evidence.
 
+## Reserved inactive authority-report transport (not implemented)
+
+[Stage 5AA](stage-5aa-inactive-authority-report-transport.md) freezes the prospective owner-session
+`POST https://cukup.dev/dashboard/authority-report/v1` contract, not an API-host ingestion route.
+Its sole media type is `application/vnd.cukup.authority-report+json; version=1`; request fields are
+exactly `transport_version` and a canonical half-open `range`. No query, bearer/OIDC access,
+caller as-of, filters, authority selection, existing-route negotiation or downgrade is permitted.
+The linked contract owns exact bounded streaming/UTF-8/duplicate-key rules, deadlines, closed
+response fields/errors, session/release/cache fences and future acceptance vectors.
+
+Version 1 explicitly forbids current use: `validity` is exactly
+`{"current_use":"forbidden","valid_until":null,"proof":null}`. Verified snapshots contain only
+stale targetless metrics with synchronization unknown; authority failure is a payload-free 503
+report refusal. No current target comparison is possible. A current-capable authenticated deadline
+proof requires a new reviewed transport version; `/v1/time` is not that proof. Even snapshots remain
+blocked on Stage 5R/S/Y authority/time/recovery and owner-session release integration.
+
+This is documentation only: no endpoint, initial HTML, bundle or client is enabled. The implemented
+`/v1/summary`, schema-1/2 dashboard, plugin cache/local fallback and ingestion routes remain unchanged
+and never receive generic numbers under legacy schemas. The following authentication and response
+rules describe existing `/v1/*` routes, not the reserved owner-session transport.
+
 ## Transport and authentication
 
 `/v1/*` requires HTTPS. The application accepts either a direct TLS request or an `X-Forwarded-Proto: https` request when explicitly configured behind the trusted Kamal Proxy hop. Plain HTTP is accepted only on a loopback-only development binding. Never put a credential in a URL.
