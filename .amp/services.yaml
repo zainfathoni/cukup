@@ -1,0 +1,9 @@
+services:
+  cukup-dashboard-preview:
+    command: bun run service/dashboard/preview.ts
+    health: /up
+    review: true
+    portal:
+      url: /
+      title: Cukup dashboard preview
+      description: Interactive synthetic data; filters and heatmap dates recompute the timeline.
