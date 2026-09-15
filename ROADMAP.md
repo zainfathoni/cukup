@@ -77,6 +77,7 @@ This ledger is the authoritative implementation sequence within top-level Stage 
 | 5X | Complete design-contract slice; implementation blocked | [Closed owner project and mapping controls](docs/stage-5x-owner-project-control-contract.md): exact owner-session HTTP operations, strict same-origin/pre-body auth, bounded duplicate-key-safe codecs, prospective revision/idempotency semantics, restricted mapping boundary and linearizable recovery-safe responses. No implementation until Stage 5S journal/commit-authority, trusted-time and recovery dependencies plus cross-boundary registry/mapping/capture fencing exist. |
 | 5Y | Complete provider-comparison slice; no provider selected | [External commit authority and trusted-time decision](docs/stage-5y-commit-authority-provider-decision.md): bounded authoritative-source comparison of Spanner/TrueTime, single-Region DynamoDB/EC2 ClockBound and external etcd/ClockBound. No reviewed pair establishes atomic commit-time proof/predicates plus finalized recovery; registration, privilege, retention and rehearsal gates remain. No dependency, provisioning or implementation approved. |
 | 5Z | Complete design-contract slice; implementation blocked | [Authority-aware report delivery](docs/stage-5z-authority-report-envelope.md): closed versioned legacy/generic sections, independent targetless runtime, unavailable versus observed-zero semantics, truthful legacy-only compatibility, private cache provenance and initial/refresh/release fences. No runtime/schema/API/client change, selected cutover, trusted clock or activation. |
+| 5AA | Complete inactive wire-contract slice; implementation blocked | [Inactive authority-report transport](docs/stage-5aa-inactive-authority-report-transport.md): separate owner-session POST/version/media contract, bounded strict UTF-8 codecs, fixed failures, snapshot-only current-use refusal and session/generation/release fences. No route or consumer enabled; current-capable proof needs a new reviewed version. |
 | Remaining Stage 5 work | Deferred to separate slices | Resolve Stage 5P's external attestation/durability blockers before proposing OIDC/Amp-orb ingestion; separately resolve Stage 5W native lifecycle/non-reuse and event-context guarantees and implement/review Stage 5V/5W project registry, mapping authority and collector capture/recovery interfaces under Stage 5X's owner-control contract and refusal gates; separately review OIDC synchronization, any Stage 5Q audit tooling, and implementations of Stage 5R/5S control/recovery state and external journal, accounting owner controls, trusted time, report/API/client/target routing and activation gates. Legacy evidence backfill is rejected, not an implementation task. |
 
 Stages 5A and 5B change service persistence and are **not deployment-neutral**: an eventual main push may trigger service publication and requires explicit owner approval. Stage 5C is deployment-neutral because its experimental client is not imported by a runtime, installer, receiver, or service build entrypoint; activation still requires the already reviewed Stage 5B/schema-6 service. No deployment or production migration is authorized by this ledger. Support claims and top-level Stage 6 real-collector validation and owner-approved opt-in cutover remain separate gates.
@@ -166,10 +167,17 @@ new provider, credential, retention, cost and restore approvals remain separate.
 is provisioned or accessed with credentials; cumulative publication/schema/rollback gates remain.
 
 Stage 5Z is documentation-only and publication-neutral. Old or stale reports cannot establish current
-authority; generic absence never falls back to legacy or runtime-derived working time. Wire budgets,
-compatible consumers and authenticated client validity proof remain implementation gates alongside
+authority; generic absence never falls back to legacy or runtime-derived working time. Stage 5AA
+pins wire budgets and a snapshot/refusal-only profile; compatible consumers and a current-capable
+authenticated client validity proof remain implementation gates alongside
 Stage 5R/5S/5Y's unresolved authority/time/recovery dependencies. No runtime, schema, API, dashboard,
 client, target, clock trust, cutover or activation changes; cumulative publication gates remain.
+
+Stage 5AA is documentation-only and publication-neutral. Its separate owner-session transport is
+inactive and cannot supply current target progress: null validity/proof explicitly forbids current
+use. Existing summary/dashboard routes and plugin fallback remain unchanged and cannot receive
+generic data. Even snapshot implementation awaits 5R/S/Y authority/recovery and session fencing;
+current delivery needs a new reviewed proof-capable version and all-consumer compatibility gates.
 
 ### First independently reviewable code slice
 
