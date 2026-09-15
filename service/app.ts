@@ -46,7 +46,7 @@ export function createApp(options: AppOptions): { fetch(request: Request): Promi
 		async fetch(request: Request): Promise<Response> {
 			const startedAt = performance.now()
 			const url = new URL(request.url)
-			const synchronizationRoute = url.pathname.startsWith('/v1/shadow-synchronization')
+			const synchronizationRoute = url.pathname === '/v1/shadow-synchronization'
 			let response: Response
 			try {
 				const hostname = originalHostname(request, url)

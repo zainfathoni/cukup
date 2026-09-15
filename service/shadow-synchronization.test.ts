@@ -357,7 +357,6 @@ test('route errors and headers are closed; authentication/profile precede malfor
 		[{ headers: { authorization: `Bearer ${unbound.token}` } }, '', 403, 'executor_profile_required'],
 		[{ method: 'PUT' }, '', 405, 'method_not_allowed'],
 		[{}, '?private=value', 400, 'invalid_request'],
-		[{}, '/private', 404, 'not_found'],
 		...['text/plain', 'application/json; charset=latin1', 'application/json; private=x',
 			'application/json; charset=utf-8; charset=utf-8'].map((type): [RequestInit, string, number, string] =>
 			[{ headers: { 'content-type': type } }, '', 415, 'unsupported_media_type']),
@@ -382,6 +381,24 @@ test('route errors and headers are closed; authentication/profile precede malfor
 		const log = JSON.parse(line)
 		expect(Object.keys(log).sort()).toEqual(['event', 'level', 'status'])
 		expect(log).toMatchObject({ event: 'shadow_synchronization', level: 'info' })
+	}
+})
+
+test('near-match synchronization paths use ordinary not-found routing and diagnostics', async () => {
+	for (const suffix of ['-extra', '/private']) {
+		const f = fixture()
+		const response = await f.send('{', {}, `https://api.cukup.dev/v1/shadow-synchronization${suffix}`)
+		expect(response.status).toBe(404)
+		expect(await response.json()).toEqual({ error: 'not_found' })
+		expect(f.logs).toHaveLength(1)
+		expect(JSON.parse(f.logs[0]!)).toEqual({
+			level: 'info',
+			event: 'request',
+			method: 'POST',
+			path: '/v1/*',
+			status: 404,
+			duration_ms: expect.any(Number),
+		})
 	}
 })
 

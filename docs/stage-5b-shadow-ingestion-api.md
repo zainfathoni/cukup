@@ -10,7 +10,7 @@ The bearer must already have its immutable Executor Profile. Profile binding cre
 
 ## Closed wire contract
 
-The JSON root contains exactly `source_sequence` and `envelope`. It cannot contain a caller-supplied execution site, hostname, Executor Label, source instance/ownership, metadata, or any additional field. The service constructs exactly `{executionSiteId, sourceSequence, envelope}` for `ServiceStore.shadow.append`; Stage 5A remains the single closed evidence-validation and persistence authority.
+The JSON root contains exactly `source_sequence` and `envelope`. It cannot contain a caller-supplied execution site, hostname, Executor Label, source instance/ownership, metadata, or any additional field. After body parsing, `ServiceStore.appendPhysicalEvidence` revalidates bearer activity and site binding under the same immediate writer transaction as `ServiceStore.shadow.append`, then constructs exactly `{executionSiteId, sourceSequence, envelope}`. A revocation or rotation committed first prevents both a new append and a duplicate acknowledgement. Stage 5A remains the single closed evidence-validation and persistence authority.
 
 Successful append and replay return only `accepted` or `duplicate`. Parser, identity, and ordering failures return only `invalid_record`, `unsupported_version`, `identity_conflict`, or `invalid_order`. All are fixed closed JSON values and never reflect identifiers, payload values, database diagnostics, or stack traces. Transport and authentication failures retain the existing service error contract.
 
