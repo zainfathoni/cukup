@@ -49,6 +49,12 @@ This ledger is the authoritative implementation sequence within top-level Stage 
 
 ### Stage 5 shadow measurement substage ledger
 
+**Owner decision (2026-09-15): [preserve all contracts and pause blocked implementation](docs/stage-5-path-decision-memo.md).**
+The #9/#10 investigations conclude no-go, not implementation readiness. Work in #11–#15 is paused
+with existing dependencies unchanged until applicable evidence is reviewed and the owner resumes it.
+Options B/C are not selected. PR #16 still has a separate Fleet-containment/schema-8 recovery blocker;
+this documentation decision is not a merge, publication, deployment or activation approval.
+
 | Substage | Status | Independently reviewable deliverable |
 | --- | --- | --- |
 | 5A | Complete internal foundation | [Service-side shadow persistence](docs/stage-5a-shadow-persistence.md): closed generic evidence validation, append-only isolated schema 5 tables, immutable collector/site and evidence identity, source ordering, and durable pending/closed endpoints. No cloud route, collector connection, or measurement totals. |
