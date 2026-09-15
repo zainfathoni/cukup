@@ -1376,7 +1376,8 @@ dd {
 	border: var(--border);
 	border-radius: var(--radius);
 	box-shadow: var(--shadow-sm);
-	padding: 1rem;
+	background: var(--card);
+	padding: 1rem 1.1rem;
 }
 
 .disclosure-lane-heading {
@@ -1397,6 +1398,9 @@ dd {
 .disclosure-lane-heading h3 {
 	min-width: 0;
 	overflow-wrap: anywhere;
+	font-family: var(--font-mono);
+	font-size: 0.95rem;
+	letter-spacing: 0.02em;
 }
 
 .sync-state {
