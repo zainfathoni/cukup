@@ -108,6 +108,11 @@ export class DashboardController {
 		await this.refresh()
 	}
 
+	async setTimelineDate(date: string): Promise<void> {
+		this.selection = { ...this.selection, timeline_date: date }
+		await this.refresh()
+	}
+
 	showCustomRange(): void {
 		const trend = this.report.trend
 		const dates = trend.state === 'unavailable' ? { start_date: '', end_date: '' } : trend.data

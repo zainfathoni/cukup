@@ -62,7 +62,9 @@ describe('dashboard rendering', () => {
 	test('opens a hover detail card per heatmap day and repeats it in the keyboard-reachable table', () => {
 		const html = renderDashboardContent(mockDashboardReport, selection)
 		expect(html).toContain('class="heat-board heat-roomy"')
-		expect(html).toContain('<ol class="heat-grid" role="img" aria-label="Calendar heatmap')
+		expect(html).toContain('<ol class="heat-grid" aria-label="Calendar heatmap')
+		expect(html).toContain('data-timeline-date="2026-08-31"')
+		expect(html).toContain('aria-label="Inspect Mon, Aug 31, 2026 in the activity timeline"')
 		expect(html).toContain('class="heat-tip status-under tip-start"')
 		expect(html).toContain('<p class="tip-date">Mon, Aug 31, 2026</p>')
 		expect(html).toContain('<span class="tip-figure">6h 20m</span><span class="tip-stamp">UNDER</span>')
@@ -73,8 +75,20 @@ describe('dashboard rendering', () => {
 		// The all-day-off day states its emptiness rather than showing a breakdown.
 		expect(html).toContain('class="heat-tip status-complete')
 		expect(html).toContain('No working time recorded.')
-		// The card is pointer-only, so the table carries the same detail.
+		// The table carries the same detail without requiring the interactive card.
 		expect(html).toContain('<td>7</td><td>08:15–16:30</td>')
+	})
+
+	test('marks the selected heatmap date and renders its matching timeline', () => {
+		const report = structuredClone(mockDashboardReport)
+		if (report.timeline.state === 'unavailable') throw new Error('Expected timeline')
+		report.timeline.data.date = '2026-08-29'
+		report.timeline.data.minutes = 0
+		report.timeline.data.intervals = []
+		report.timeline.data.lanes = []
+		const html = renderDashboardContent(report, { ...selection, timeline_date: '2026-08-29' })
+		expect(html).toContain('class="heat-cell heat-3 heat-selected" data-timeline-date="2026-08-29"')
+		expect(html).toContain('0 intervals · 2026-08-29')
 	})
 
 	test('renders native keyboard controls and keeps filter state out of resource URLs', () => {

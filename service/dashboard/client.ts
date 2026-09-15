@@ -87,6 +87,13 @@ export function startDashboard(
 		const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('button') : null
 		if (!button) return
 		if (button.dataset.action === 'refresh') void controller.refresh()
+		if (button.dataset.timelineDate) {
+			void controller.setTimelineDate(button.dataset.timelineDate).then(() => {
+				const title = root.querySelector<HTMLElement>('#timeline-title')
+				title?.scrollIntoView({ block: 'start' })
+				title?.focus()
+			})
+		}
 		if (button.dataset.action === 'apply-range') {
 			const start = root.querySelector<HTMLInputElement>('input[name="start_date"]')?.value ?? ''
 			const end = root.querySelector<HTMLInputElement>('input[name="end_date"]')?.value ?? ''

@@ -103,6 +103,7 @@ export type DashboardReport = {
 export type DashboardSelection = {
 	projects: string[]
 	executors: string[]
+	timeline_date?: string
 	range:
 		| { preset: 7 | 30 | 90 }
 		| { preset: 'custom'; start_date: string; end_date: string }
