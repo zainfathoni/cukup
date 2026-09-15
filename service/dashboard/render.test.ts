@@ -46,6 +46,10 @@ describe('dashboard rendering', () => {
 		expect(html).toContain('class="gantt-bar gantt-union concurrency-2"')
 		expect(html).toContain('class="gantt-bar gantt-project"')
 		expect(html).toContain('class="gantt-bar gantt-executor"')
+		expect(html).toContain('<strong>6h 20m</strong><span>selected activity</span>')
+		expect(html).toContain('class="timeline-target-meter status-under"')
+		expect(html).toContain('Selected activity: 6h 20m worked against target 8h 0m')
+		expect(html).toContain('Target 8h 0m · dashed mark on the meter')
 		expect(html).toContain('line up vertically describe the same minutes and must not be added')
 		expect(html).toContain('bars are unioned within a lane')
 		// The label gutter is fixed, so a long slug is trimmed but stays readable in full.

@@ -119,12 +119,15 @@ function weekdayIndex(date: string): number | null {
  * Worked-versus-target meter drawn as SVG geometry. The Content Security Policy
  * forbids inline style attributes, so proportions become element attributes.
  */
-function verdictMeter(period: TargetPeriod, label: string): string {
+function verdictMeter(
+	period: Pick<TargetPeriod, 'worked_minutes' | 'target_minutes'>,
+	label: string,
+): string {
 	const scale = Math.max(period.worked_minutes, period.target_minutes, 1) * 1.1
 	const inner = meterWidth - 4
 	const worked = Math.max(0, Math.min(inner, (period.worked_minutes / scale) * inner))
 	const targetX = 2 + (period.target_minutes / scale) * inner
-	const description = `${formatMinutes(period.worked_minutes)} worked against a ${formatMinutes(period.target_minutes)} target`
+	const description = `${formatMinutes(period.worked_minutes)} worked against target ${formatMinutes(period.target_minutes)}`
 	return `<svg class="verdict-meter" viewBox="0 0 ${meterWidth} ${meterHeight}" role="img" aria-label="${escapeHtml(`${label}: ${description}`)}" preserveAspectRatio="none"><rect class="meter-track" x="1" y="1" width="${meterWidth - 2}" height="${meterHeight - 2}" rx="8" vector-effect="non-scaling-stroke"></rect><rect class="meter-fill" x="2" y="2" width="${worked.toFixed(2)}" height="${meterHeight - 4}" rx="7" vector-effect="non-scaling-stroke"></rect><line class="meter-target" x1="${targetX.toFixed(2)}" y1="0" x2="${targetX.toFixed(2)}" y2="${meterHeight}" vector-effect="non-scaling-stroke"></line></svg>`
 }
 
@@ -351,7 +354,10 @@ function renderTimelineData(timeline: Timeline, timezone: string, asOf: string):
 	const equivalents = timeline.intervals.length
 		? `<ol class="text-equivalent">${timeline.intervals.map((interval) => `<li>${formatTimestamp(interval.start, timezone)}–${formatTimestamp(interval.end, timezone)}; concurrency ${interval.concurrency}</li>`).join('')}</ol>`
 		: '<p>No activity intervals recorded today.</p>'
-	return `<p class="chart-summary"><strong>${formatMinutes(timeline.minutes)}</strong> of selected activity across ${timeline.intervals.length} interval${timeline.intervals.length === 1 ? '' : 's'} on ${escapeHtml(timeline.date)}</p><ul class="chart-legend"><li><span class="block-swatch" aria-hidden="true"></span>Single-source evidence</li><li><span class="block-swatch concurrent" aria-hidden="true"></span>Concurrent evidence</li><li><span class="block-swatch project" aria-hidden="true"></span>Project lane</li><li><span class="block-swatch executor" aria-hidden="true"></span>Executor lane</li></ul><p class="guidance">Lanes share one clock. Bars are unioned inside a lane, so a project lane and an executor lane that line up vertically describe the same minutes and must not be added.</p><p class="scroll-hint">Scroll the chart horizontally to see the full day.</p><div class="chart-scroll" tabindex="0" role="region" aria-label="Scrollable current-day timeline">${renderGantt(timeline, timezone, asOf)}</div><details><summary>Timeline text equivalent</summary><h4>All selected activity</h4>${equivalents}${laneEquivalent(timeline.lanes, 'project', timezone)}${laneEquivalent(timeline.lanes, 'executor', timezone)}</details>`
+	const duration = formatMinutes(timeline.minutes)
+	const targetMinutes = 8 * 60
+	const targetStatus = timeline.minutes < targetMinutes ? 'under' : timeline.minutes > targetMinutes ? 'over' : 'complete'
+	return `<div class="timeline-summary"><p class="timeline-summary-copy"><strong>${duration}</strong><span>selected activity</span></p><div class="timeline-target-meter status-${targetStatus}">${verdictMeter({ worked_minutes: timeline.minutes, target_minutes: targetMinutes }, 'Selected activity')}<span>Target ${formatMinutes(targetMinutes)} · dashed mark on the meter</span></div><p class="timeline-summary-detail">${timeline.intervals.length} interval${timeline.intervals.length === 1 ? '' : 's'} · ${escapeHtml(timeline.date)}</p></div><ul class="chart-legend"><li><span class="block-swatch" aria-hidden="true"></span>Single-source evidence</li><li><span class="block-swatch concurrent" aria-hidden="true"></span>Concurrent evidence</li><li><span class="block-swatch project" aria-hidden="true"></span>Project lane</li><li><span class="block-swatch executor" aria-hidden="true"></span>Executor lane</li></ul><p class="guidance">Lanes share one clock. Bars are unioned inside a lane, so a project lane and an executor lane that line up vertically describe the same minutes and must not be added.</p><p class="scroll-hint">Scroll the chart horizontally to see the full day.</p><div class="chart-scroll" tabindex="0" role="region" aria-label="Scrollable current-day timeline">${renderGantt(timeline, timezone, asOf)}</div><details><summary>Timeline text equivalent</summary><h4>All selected activity</h4>${equivalents}${laneEquivalent(timeline.lanes, 'project', timezone)}${laneEquivalent(timeline.lanes, 'executor', timezone)}</details>`
 }
 
 function renderTimeline(panel: DashboardReport['timeline'], timezone: string, asOf: string): string {
