@@ -197,10 +197,18 @@ describe('dashboard HTTP contract', () => {
 				}),
 			)
 
-		const accepted = await report({ projects: [], executors: [], range: { preset: 7 } })
+		const accepted = await report({
+			projects: [],
+			executors: [],
+			timeline_date: '2026-08-30',
+			range: { preset: 7 },
+		})
 		expect(accepted.status).toBe(200)
-		expect((await accepted.json() as any).schema_version).toBe(1)
+		const acceptedReport = await accepted.json() as any
+		expect(acceptedReport.schema_version).toBe(1)
+		expect(acceptedReport.timeline.data.date).toBe('2026-08-30')
 		for (const invalid of [
+			{ projects: [], executors: [], timeline_date: 'not-a-date', range: { preset: 7 } },
 			{ projects: ['private-label'], executors: [], range: { preset: 7 } },
 			{ projects: [], executors: [], range: { preset: 365 } },
 			{ projects: [], executors: [], range: { preset: 7 }, extra: true },

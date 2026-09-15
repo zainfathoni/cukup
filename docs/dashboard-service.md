@@ -77,6 +77,7 @@ Preset request:
 {
   "projects": ["cukup", "Unassigned"],
   "executors": ["amp-orb"],
+  "timeline_date": "2026-08-31",
   "range": { "preset": 30 }
 }
 ```
@@ -95,14 +96,14 @@ Custom request (both dates inclusive):
 }
 ```
 
-The request is a closed schema. Projects and executors must be unique exact values from the report's available-label lists. A preset is exactly `7`, `30`, or `90`. A custom range uses real `YYYY-MM-DD` civil dates, is ordered, and contains at most 366 inclusive days. The content type is `application/json`, and the body limit is 32 KiB. Invalid requests receive generic errors that do not echo selections.
+The request is a closed schema. Projects and executors must be unique exact values from the report's available-label lists. The optional `timeline_date` is a real `YYYY-MM-DD` civil date; the UI sets it from the trend heatmap, and when it is absent the timeline shows the current Jakarta day. A preset is exactly `7`, `30`, or `90`. A custom range uses real `YYYY-MM-DD` civil dates, is ordered, and contains at most 366 inclusive days. The content type is `application/json`, and the body limit is 32 KiB. Invalid requests receive generic errors that do not echo selections.
 
 Response schema 1 contains:
 
 - `schema_version: 1`, UTC `as_of`, and `timezone: "Asia/Jakarta"`;
 - `available_projects`, always including `Unassigned`, and source-derived `available_executors`;
 - `overall`: globally unioned, target-bearing `today` and Monday-based current `week` values using authoritative exact-date target overrides;
-- `timeline`: selected current-day intervals and raw-evidence concurrency markers, plus one Gantt lane per Project Slug and per Executor Label that has selected activity on that day, so a label with no activity today contributes no lane. Lane intervals are unioned within their lane, so a lane never overlaps itself and cross-lane overlap is genuine concurrency. Project lanes and executor lanes describe the same minutes and must not be added;
+- `timeline`: intervals and raw-evidence concurrency markers for the selected `timeline_date`, defaulting to the current Jakarta day, plus one Gantt lane per Project Slug and per Executor Label that has selected activity on that day. Lane intervals are unioned within their lane, so a lane never overlaps itself and cross-lane overlap is genuine concurrency. Project lanes and executor lanes describe the same minutes and must not be added;
 - `trend`: globally unioned Overall Working Time plus independent, non-stacked, targetless selected Project, Executor, and combined series, and one `days` entry per date in the range. A day entry carries the target-bearing verdict for the Overall series — the only series that bears a target — with its interval count, first and last activity, and non-additive Project and Executor breakdowns. Filters never alter it, exactly as they never alter the Overall panel;
 - `executors`: `occurred_at`-derived latest activity, `received_at`-derived latest synchronization, and `active`, `revoked`, or `not-applicable` credential state.
 

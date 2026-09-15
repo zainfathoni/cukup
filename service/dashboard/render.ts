@@ -361,7 +361,7 @@ function renderTimelineData(timeline: Timeline, timezone: string, asOf: string):
 }
 
 function renderTimeline(panel: DashboardReport['timeline'], timezone: string, asOf: string): string {
-	return `<section aria-labelledby="timeline-title"><div class="section-heading"><div><p class="eyebrow">Current day · ${escapeHtml(timezone)}</p><h2 id="timeline-title">Activity timeline</h2></div></div>${panelNotice(panel)}${panel.state === 'unavailable' ? '' : renderTimelineData(panel.data, timezone, asOf)}</section>`
+	return `<section aria-labelledby="timeline-title"><div class="section-heading"><div><p class="eyebrow">Selected day · ${escapeHtml(timezone)}</p><h2 id="timeline-title" tabindex="-1">Activity timeline</h2></div></div>${panelNotice(panel)}${panel.state === 'unavailable' ? '' : renderTimelineData(panel.data, timezone, asOf)}</section>`
 }
 
 /* ---------- Trend ---------- */
@@ -395,7 +395,7 @@ function activitySpan(day: DayDetail, timezone: string): string | null {
 	return `${formatClock(day.first_activity_at, timezone)}–${formatClock(day.last_activity_at, timezone)}`
 }
 
-/** Hover detail for one heatmap cell: the day's verdict, then what it was made of. */
+/** Inspectable detail for one heatmap cell: the day's verdict, then what it was made of. */
 function dayCard(day: DayDetail, timezone: string): string {
 	const period = day.period
 	const caption =
@@ -414,11 +414,11 @@ function dayCard(day: DayDetail, timezone: string): string {
 
 /**
  * Calendar heatmap of the globally unioned Overall series, as a CSS grid so a
- * hovered day can open a detail card. Columns are Monday-started weeks and
- * intensity is quartered against the busiest day. The grid is one image to
- * assistive technology; the daily values table carries the same numbers.
+ * hovered or focused day can open a detail card and selection can drive the
+ * timeline. Columns are Monday-started weeks and intensity is quartered against
+ * the busiest day. The daily values table carries the same numbers.
  */
-function renderHeatmap(days: readonly DayDetail[], timezone: string): string {
+function renderHeatmap(days: readonly DayDetail[], timezone: string, selectedDate?: string): string {
 	if (days.length === 0) return ''
 	const first = weekdayIndex(days[0]!.date)
 	if (first === null) return ''
@@ -446,7 +446,8 @@ function renderHeatmap(days: readonly DayDetail[], timezone: string): string {
 						: ''
 			const minutes = day.period.worked_minutes
 			const level = minutes === 0 ? 0 : Math.min(4, Math.ceil((minutes / busiest) * 4))
-			return `<li class="heat-cell heat-${level}"><div class="heat-tip status-${day.period.status.toLowerCase()}${anchor}">${dayCard(day, timezone)}</div></li>`
+			const selected = day.date === selectedDate
+			return `<li><button type="button" class="heat-cell heat-${level}${selected ? ' heat-selected' : ''}" data-timeline-date="${escapeHtml(day.date)}" data-focus-key="timeline:${escapeHtml(day.date)}" aria-pressed="${selected}" aria-label="Inspect ${escapeHtml(formatCivilDay(day.date))} in the activity timeline"></button><div class="heat-tip status-${day.period.status.toLowerCase()}${anchor}" aria-hidden="true">${dayCard(day, timezone)}</div></li>`
 		})
 		.join('')
 	const monthLabels: string[] = []
@@ -461,10 +462,10 @@ function renderHeatmap(days: readonly DayDetail[], timezone: string): string {
 		.map((label) => `<li>${label}</li>`)
 		.join('')
 	const summary = `Calendar heatmap of globally unioned overall working minutes from ${days[0]!.date} to ${days.at(-1)!.date}. Busiest day ${formatMinutes(busiest)}. Every value is listed in the daily values table below.`
-	return `<div class="heatmap"><div class="heatmap-heading"><h3 id="heatmap-title">Overall day-by-day</h3><p class="heatmap-hint">Hover a day for its detail.</p></div><div class="heat-scroll"><div class="heat-board ${density}"><div class="heat-corner"></div><ol class="heat-months" aria-hidden="true">${monthLabels.join('')}</ol><ul class="heat-weekdays" aria-hidden="true">${weekdays}</ul><ol class="heat-grid" role="img" aria-label="${escapeHtml(summary)}">${pads}${cells}</ol></div></div><ul class="heat-scale"><li>Less</li><li><span class="heat-swatch heat-0" aria-hidden="true"></span></li><li><span class="heat-swatch heat-1" aria-hidden="true"></span></li><li><span class="heat-swatch heat-2" aria-hidden="true"></span></li><li><span class="heat-swatch heat-3" aria-hidden="true"></span></li><li><span class="heat-swatch heat-4" aria-hidden="true"></span></li><li>More · busiest ${formatMinutes(busiest)}</li></ul></div>`
+	return `<div class="heatmap"><div class="heatmap-heading"><h3 id="heatmap-title">Overall day-by-day</h3><p class="heatmap-hint">Hover for detail · select a day to inspect its timeline.</p></div><div class="heat-scroll"><div class="heat-board ${density}"><div class="heat-corner"></div><ol class="heat-months" aria-hidden="true">${monthLabels.join('')}</ol><ul class="heat-weekdays" aria-hidden="true">${weekdays}</ul><ol class="heat-grid" aria-label="${escapeHtml(summary)}">${pads}${cells}</ol></div></div><ul class="heat-scale"><li>Less</li><li><span class="heat-swatch heat-0" aria-hidden="true"></span></li><li><span class="heat-swatch heat-1" aria-hidden="true"></span></li><li><span class="heat-swatch heat-2" aria-hidden="true"></span></li><li><span class="heat-swatch heat-3" aria-hidden="true"></span></li><li><span class="heat-swatch heat-4" aria-hidden="true"></span></li><li>More · busiest ${formatMinutes(busiest)}</li></ul></div>`
 }
 
-function renderTrendData(trend: Trend, timezone: string): string {
+function renderTrendData(trend: Trend, timezone: string, selectedDate?: string): string {
 	const plotTop = 20
 	const plotBottom = chartHeight - 60
 	const plotLeft = 62
@@ -528,7 +529,7 @@ function renderTrendData(trend: Trend, timezone: string): string {
 			return `<tr><th scope="row">${escapeHtml(date)}</th>${valuesBySeries.map((values) => `<td>${values.has(date) ? formatMinutes(values.get(date)!) : 'No data'}</td>`).join('')}${detailCells}</tr>`
 		})
 		.join('')
-	return `<ul class="chart-legend">${legend}</ul><p class="scroll-hint">Scroll the chart horizontally to see the full range.</p><div class="chart-scroll" tabindex="0" role="region" aria-label="Scrollable daily activity trend"><svg class="trend-chart" viewBox="0 0 ${chartWidth} ${chartHeight}" role="img" aria-labelledby="trend-svg-title trend-svg-desc"><title id="trend-svg-title">Daily activity trend</title><desc id="trend-svg-desc">Separate, non-stacked lines. Series overlap and are not additive. The labelled dot on each line is its most recent day.</desc>${axes}${dateLabels}${lines}${endpoints}</svg></div>${renderHeatmap(trend.days, timezone)}<details><summary>View daily values</summary><p class="guidance">Exact values behind the chart, provided for comparison and as a text alternative. Target, status, intervals, and the activity breakdown describe the globally unioned Overall series; project and executor activity overlap and must not be added.</p><div class="table-scroll"><table><caption>Daily working time by date and series</caption><thead><tr><th scope="col">Date</th>${headings}<th scope="col">Target</th><th scope="col">Status</th><th scope="col">Intervals</th><th scope="col">First–last</th><th scope="col">Project activity</th><th scope="col">Executor activity</th></tr></thead><tbody>${rows}</tbody></table></div></details>`
+	return `<ul class="chart-legend">${legend}</ul><p class="scroll-hint">Scroll the chart horizontally to see the full range.</p><div class="chart-scroll" tabindex="0" role="region" aria-label="Scrollable daily activity trend"><svg class="trend-chart" viewBox="0 0 ${chartWidth} ${chartHeight}" role="img" aria-labelledby="trend-svg-title trend-svg-desc"><title id="trend-svg-title">Daily activity trend</title><desc id="trend-svg-desc">Separate, non-stacked lines. Series overlap and are not additive. The labelled dot on each line is its most recent day.</desc>${axes}${dateLabels}${lines}${endpoints}</svg></div>${renderHeatmap(trend.days, timezone, selectedDate)}<details><summary>View daily values</summary><p class="guidance">Exact values behind the chart, provided for comparison and as a text alternative. Target, status, intervals, and the activity breakdown describe the globally unioned Overall series; project and executor activity overlap and must not be added.</p><div class="table-scroll"><table><caption>Daily working time by date and series</caption><thead><tr><th scope="col">Date</th>${headings}<th scope="col">Target</th><th scope="col">Status</th><th scope="col">Intervals</th><th scope="col">First–last</th><th scope="col">Project activity</th><th scope="col">Executor activity</th></tr></thead><tbody>${rows}</tbody></table></div></details>`
 }
 
 function renderTrend(
@@ -536,7 +537,7 @@ function renderTrend(
 	selection: DashboardSelection,
 	timezone: string,
 ): string {
-	return `<section aria-labelledby="trend-title"><div class="section-heading"><div><p class="eyebrow">Independent, non-stacked series</p><h2 id="trend-title">Activity trend</h2></div>${renderRange(selection)}</div>${panelNotice(panel)}${panel.state === 'unavailable' ? '' : renderTrendData(panel.data, timezone)}</section>`
+	return `<section aria-labelledby="trend-title"><div class="section-heading"><div><p class="eyebrow">Independent, non-stacked series</p><h2 id="trend-title">Activity trend</h2></div>${renderRange(selection)}</div>${panelNotice(panel)}${panel.state === 'unavailable' ? '' : renderTrendData(panel.data, timezone, selection.timeline_date)}</section>`
 }
 
 /* ---------- Executors ---------- */

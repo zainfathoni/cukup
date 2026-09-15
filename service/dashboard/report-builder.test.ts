@@ -136,10 +136,20 @@ describe('dashboard selection validation', () => {
 		expect(labels.executors).toContain('unassigned-executor')
 		expect(
 			parseDashboardSelection(
-				{ projects: ['alpha'], executors: ['machine-a'], range: { preset: 30 } },
+				{
+					projects: ['alpha'],
+					executors: ['machine-a'],
+					timeline_date: '2026-08-30',
+					range: { preset: 30 },
+				},
 				labels,
 			),
-		).toEqual({ projects: ['alpha'], executors: ['machine-a'], range: { preset: 30 } })
+		).toEqual({
+			projects: ['alpha'],
+			executors: ['machine-a'],
+			timeline_date: '2026-08-30',
+			range: { preset: 30 },
+		})
 		expect(
 			parseDashboardSelection(
 				{
@@ -152,6 +162,7 @@ describe('dashboard selection validation', () => {
 		).toBeDefined()
 
 		for (const invalid of [
+			{ projects: [], executors: [], timeline_date: '2026-02-30', range: { preset: 7 } },
 			{ projects: ['unknown'], executors: [], range: { preset: 7 } },
 			{ projects: ['alpha', 'alpha'], executors: [], range: { preset: 7 } },
 			{ projects: [], executors: ['unknown'], range: { preset: 7 } },
@@ -320,6 +331,21 @@ describe('dashboard report aggregation', () => {
 		// Each dimension covers the whole day, so adding its lanes overstates it.
 		expect(projects.reduce((total, lane) => total + lane.minutes, 0)).toBeGreaterThan(timeline.minutes)
 		expect(executors.reduce((total, lane) => total + lane.minutes, 0)).toBeGreaterThan(timeline.minutes)
+	})
+
+	test('builds the activity timeline for the selected historical date', () => {
+		const report = buildDashboardReport(
+			fixture().store,
+			{ projects: [], executors: [], timeline_date: '2026-08-30', range: { preset: 7 } },
+			now,
+		)
+		if (report.timeline.state === 'unavailable') throw new Error('Expected timeline')
+		expect(report.timeline.data.date).toBe('2026-08-30')
+		expect(report.timeline.data.minutes).toBe(20)
+		expect(report.timeline.data.lanes.map((lane) => `${lane.kind}:${lane.label}`)).toEqual([
+			'project:Unassigned',
+			'executor:retired-machine',
+		])
 	})
 
 	test('restricts lanes to the selection without changing the globally unioned day details', () => {

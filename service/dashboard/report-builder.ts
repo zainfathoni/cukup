@@ -64,16 +64,25 @@ export function parseDashboardSelection(
 	value: unknown,
 	labels: DashboardLabels,
 ): DashboardSelection | undefined {
-	if (!isRecord(value) || !hasExactKeys(value, ['projects', 'executors', 'range'])) {
+	if (
+		!isRecord(value) ||
+		(!hasExactKeys(value, ['projects', 'executors', 'range']) &&
+			!hasExactKeys(value, ['projects', 'executors', 'range', 'timeline_date']))
+	) {
 		return undefined
 	}
 	const projects = parseSelectionValues(value.projects, new Set(labels.projects))
 	const executors = parseSelectionValues(value.executors, new Set(labels.executors))
 	if (!projects || !executors || !isRecord(value.range)) return undefined
+	const timelineDate = value.timeline_date
+	if (timelineDate !== undefined && (typeof timelineDate !== 'string' || !parseCivilDate(timelineDate))) {
+		return undefined
+	}
+	const selectedDate = timelineDate === undefined ? {} : { timeline_date: timelineDate }
 	const range = value.range
 	if (range.preset === 7 || range.preset === 30 || range.preset === 90) {
 		if (!hasExactKeys(range, ['preset'])) return undefined
-		return { projects, executors, range: { preset: range.preset } }
+		return { projects, executors, ...selectedDate, range: { preset: range.preset } }
 	}
 	if (
 		range.preset !== 'custom' ||
@@ -91,6 +100,7 @@ export function parseDashboardSelection(
 	return {
 		projects,
 		executors,
+		...selectedDate,
 		range: {
 			preset: 'custom',
 			start_date: range.start_date,
@@ -157,8 +167,9 @@ function buildTimeline(
 	nowMs: number,
 ): Timeline {
 	const today = localDateAt(nowMs, SERVICE_TIMEZONE)
-	const startMs = startOfZonedDay(today, SERVICE_TIMEZONE)
-	const endMs = Math.min(startOfZonedDay(addDays(today, 1), SERVICE_TIMEZONE), nowMs)
+	const date = selection.timeline_date === undefined ? today : parseCivilDate(selection.timeline_date)!
+	const startMs = startOfZonedDay(date, SERVICE_TIMEZONE)
+	const endMs = Math.min(startOfZonedDay(addDays(date, 1), SERVICE_TIMEZONE), nowMs)
 	const selected: ClippedInterval[] = intervals
 		.filter((interval) => matchesSelection(interval, selection))
 		.map((interval) => ({
@@ -169,7 +180,7 @@ function buildTimeline(
 		}))
 		.filter((interval) => interval.endMs > interval.startMs)
 	return {
-		date: civilDateString(today),
+		date: civilDateString(date),
 		minutes: totalMinutes(unionIntervals(selected)),
 		intervals: concurrencyIntervals(selected),
 		lanes: [

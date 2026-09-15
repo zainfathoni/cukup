@@ -105,6 +105,17 @@ describe('dashboard interactions', () => {
 		expect(transport.requests.at(-1)?.range).toEqual({ preset: 'custom', start_date: '2026-01-01', end_date: '2027-01-01' })
 	})
 
+	test('loads a selected heatmap date into the activity timeline', async () => {
+		const { controller, transport } = setup()
+		await controller.setTimelineDate('2026-08-29')
+		expect(transport.requests.at(-1)).toEqual({
+			projects: [],
+			executors: [],
+			timeline_date: '2026-08-29',
+			range: { preset: 7 },
+		})
+	})
+
 	test('polls every 30 seconds only while visible and resumes without an immediate request', async () => {
 		const { controller, transport, clock, visibility } = setup()
 		controller.start()
