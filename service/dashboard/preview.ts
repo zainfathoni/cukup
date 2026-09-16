@@ -87,6 +87,10 @@ const store: DashboardReportStore = {
 		{ executorLabel: 'machine-a', revokedAt: null },
 		{ executorLabel: 'retired-machine', revokedAt: '2026-08-02T00:00:00.000Z' },
 	],
+	shadowDisclosures: () => ({
+		delivery: { availability: 'ready', disclosures: [] },
+		labels: new Map(),
+	}),
 }
 
 const bundle = await Bun.build({
