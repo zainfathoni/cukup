@@ -170,8 +170,32 @@ function buildTimeline(
 	const date = selection.timeline_date === undefined ? today : parseCivilDate(selection.timeline_date)!
 	const startMs = startOfZonedDay(date, SERVICE_TIMEZONE)
 	const endMs = Math.min(startOfZonedDay(addDays(date, 1), SERVICE_TIMEZONE), nowMs)
-	const selected: ClippedInterval[] = intervals
-		.filter((interval) => matchesSelection(interval, selection))
+	const selectedIntervals = intervals.filter((interval) => matchesSelection(interval, selection))
+	const selected = clipAttributedIntervals(selectedIntervals, startMs, endMs)
+	const weekStart = addDays(date, -mondayOffset(date))
+	const weekStartMs = startOfZonedDay(weekStart, SERVICE_TIMEZONE)
+	const weekEndMs = Math.min(startOfZonedDay(addDays(weekStart, 7), SERVICE_TIMEZONE), nowMs)
+	const selectedWeek = clipAttributedIntervals(selectedIntervals, weekStartMs, weekEndMs)
+	const dayLanes = [
+		...timelineLanes('project', selected, (interval) => interval.project),
+		...timelineLanes('executor', selected, (interval) => interval.executor),
+	]
+	return {
+		date: civilDateString(date),
+		week: isoWeek(date),
+		minutes: totalMinutes(unionIntervals(selected)),
+		week_minutes: totalMinutes(unionIntervals(selectedWeek)),
+		intervals: concurrencyIntervals(selected),
+		lanes: dayLanes,
+	}
+}
+
+function clipAttributedIntervals(
+	intervals: readonly AttributedInterval[],
+	startMs: number,
+	endMs: number,
+): ClippedInterval[] {
+	return intervals
 		.map((interval) => ({
 			startMs: Math.max(interval.startMs, startMs),
 			endMs: Math.min(interval.endMs, endMs),
@@ -179,17 +203,7 @@ function buildTimeline(
 			executor: interval.executor,
 		}))
 		.filter((interval) => interval.endMs > interval.startMs)
-	return {
-		date: civilDateString(date),
-		minutes: totalMinutes(unionIntervals(selected)),
-		intervals: concurrencyIntervals(selected),
-		lanes: [
-			...timelineLanes('project', selected, (interval) => interval.project),
-			...timelineLanes('executor', selected, (interval) => interval.executor),
-		],
-	}
 }
-
 /**
  * One Gantt lane per label with selected activity today. Bars are unioned
  * within a lane, so a lane never overlaps itself and every visible overlap is
@@ -517,6 +531,22 @@ function civilDateString(date: CivilDate): string {
 
 function civilDayNumber(date: CivilDate): number {
 	return Date.UTC(date.year, date.month - 1, date.day) / 86_400_000
+}
+
+function mondayOffset(date: CivilDate): number {
+	return (new Date(Date.UTC(date.year, date.month - 1, date.day)).getUTCDay() + 6) % 7
+}
+
+/** ISO week-year and Monday-based week number for a civil date. */
+function isoWeek(date: CivilDate): string {
+	const thursday = addDays(date, 3 - mondayOffset(date))
+	const firstThursday = addDays({ year: thursday.year, month: 1, day: 4 }, 3 - mondayOffset({
+		year: thursday.year,
+		month: 1,
+		day: 4,
+	}))
+	const week = 1 + Math.round((civilDayNumber(thursday) - civilDayNumber(firstThursday)) / 7)
+	return `${String(thursday.year).padStart(4, '0')}-W${String(week).padStart(2, '0')}`
 }
 
 function latestTimestamp(values: readonly number[]): string | null {

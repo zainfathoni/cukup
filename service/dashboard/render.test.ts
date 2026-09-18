@@ -46,10 +46,14 @@ describe('dashboard rendering', () => {
 		expect(html).toContain('class="gantt-bar gantt-union concurrency-2"')
 		expect(html).toContain('class="gantt-bar gantt-project"')
 		expect(html).toContain('class="gantt-bar gantt-executor"')
-		expect(html).toContain('<strong>6h 20m</strong><span>selected activity</span>')
-		expect(html).toContain('class="timeline-target-meter status-under"')
-		expect(html).toContain('Selected activity: 6h 20m worked against target 8h 0m')
-		expect(html).toContain('Target 8h 0m · dashed mark on the meter')
+		expect(html).toContain('class="verdict-grid activity-period-grid"')
+		expect(html).toContain('<span>Selected day</span>')
+		expect(html).toContain('<span class="verdict-figure">6h 20m</span>')
+		expect(html).toContain('<p class="verdict-target">7 intervals · 2026-08-31</p>')
+		expect(html).toContain('<span>Selected ISO week</span>')
+		expect(html).toContain('<p class="verdict-target">2026-W36</p>')
+		expect(html).not.toContain('Time by project and executor')
+		expect(html).not.toContain('period-breakdown')
 		expect(html).toContain('line up vertically describe the same minutes and must not be added')
 		expect(html).toContain('bars are unioned within a lane')
 		// The label gutter is fixed, so a long slug is trimmed but stays readable in full.
@@ -84,6 +88,8 @@ describe('dashboard rendering', () => {
 		if (report.timeline.state === 'unavailable') throw new Error('Expected timeline')
 		report.timeline.data.date = '2026-08-29'
 		report.timeline.data.minutes = 0
+		report.timeline.data.week = '2026-W35'
+		report.timeline.data.week_minutes = 0
 		report.timeline.data.intervals = []
 		report.timeline.data.lanes = []
 		const html = renderDashboardContent(report, { ...selection, timeline_date: '2026-08-29' })
