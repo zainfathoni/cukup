@@ -24,7 +24,22 @@ The operator selects the newest qualifying ancestor after the publication cutove
 
 ## Local operator boundary
 
-Do not deploy from an ordinary Cukup checkout or copy production secrets into the repository, shell environment, command arguments, GitHub issues, or Amp messages. The Vikas operator owns the protected Kamal credentials and live-state verification. A local runner without that operator's environment must stop after confirming the signed `main` commit and successful image publication, then report the deployment as pending operator reconciliation.
+Do not deploy from an ordinary Cukup checkout or copy production secrets into the repository, command arguments, GitHub issues, or Amp messages. Until the staged Actions canary below succeeds, the Vikas operator remains the active protected Kamal boundary. A local runner without either protected operator environment must stop after confirming the signed `main` commit and successful image publication, then report the deployment as pending operator reconciliation.
+
+## Staged GitHub Actions canary
+
+`Deploy service` is the staged replacement for the Vikas execution boundary. It is intentionally manual-only until an owner-approved canary succeeds. Its `preflight` operation verifies an exact full SHA, successful push publication, signed-main ancestry, immutable image contract, rendered Kamal configuration, absence of a remote deploy lock, current runtime/database integrity, and public service behavior without mutation. Its `deploy` operation additionally creates and independently verifies a fresh backup, proves pre-deploy preservation, deploys the exact image, repeats the runtime/public/database/preservation gates, and attempts a verified rollback after a post-switch failure.
+
+The workflow requires a protected GitHub `production` environment with these variables:
+
+- `CUKUP_IMAGE=zainfathoni/cukup`;
+- `CUKUP_DEPLOY_HOST`, set to a VPS address reachable from a GitHub-hosted runner;
+- `CUKUP_SSH_USER` and `KAMAL_REGISTRY_USERNAME=zainfathoni`;
+- optional hostname/path overrides, which otherwise use `api.cukup.dev`, `cukup.dev`, `/srv/cukup`, and `/srv/cukup-backups`.
+
+It requires environment secrets `SSH_PRIVATE_KEY`, `SSH_KNOWN_HOSTS`, `KAMAL_REGISTRY_PASSWORD`, and every runtime secret named by `config/deploy.service.yml`. `CUKUP_API_TOKEN` is optional and enables the existing authenticated read-only acceptance probes; without it, public API/dashboard, OAuth-start, image, backup, and database gates still run. Secret values must be provisioned from an approved source rather than copied from another repository's GitHub secrets.
+
+Run `preflight` before the first `deploy`. Vikas may remain offline, but it must not return with its LaunchAgent able to mutate production: disable that operator or revoke its deploy authority before Vikas comes back. Do not release a remote lock merely because its originating machine is offline; reconcile the prior mutation first. Automatic successful-publication triggering is enabled only after the manual canary and rollback readiness pass.
 
 ## Release verification
 
