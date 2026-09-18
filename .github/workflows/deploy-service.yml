@@ -1,0 +1,144 @@
+name: Deploy service
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Full SHA of a successful push publication on main
+        required: true
+        type: string
+      operation:
+        description: Verify only, or perform the production deployment
+        required: true
+        default: preflight
+        type: choice
+        options:
+          - preflight
+          - deploy
+
+permissions:
+  actions: read
+  contents: read
+  packages: read
+
+concurrency:
+  group: cukup-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: production
+    env:
+      CUKUP_REVISION: ${{ inputs.revision }}
+      CUKUP_RELEASE_ROOT: ${{ github.workspace }}/release
+      CUKUP_IMAGE: ${{ vars.CUKUP_IMAGE }}
+      CUKUP_DEPLOY_HOST: ${{ vars.CUKUP_DEPLOY_HOST }}
+      CUKUP_SSH_USER: ${{ vars.CUKUP_SSH_USER }}
+      CUKUP_API_HOSTNAME: ${{ vars.CUKUP_API_HOSTNAME || 'api.cukup.dev' }}
+      CUKUP_DASHBOARD_HOSTNAME: ${{ vars.CUKUP_DASHBOARD_HOSTNAME || 'cukup.dev' }}
+      CUKUP_DATA_DIRECTORY: ${{ vars.CUKUP_DATA_DIRECTORY || '/srv/example-cukup-data' }}
+      CUKUP_BACKUP_DIRECTORY: ${{ vars.CUKUP_BACKUP_DIRECTORY || '/srv/example-cukup-backups' }}
+      KAMAL_REGISTRY_USERNAME: ${{ vars.KAMAL_REGISTRY_USERNAME }}
+      KAMAL_REGISTRY_PASSWORD: ${{ secrets.KAMAL_REGISTRY_PASSWORD }}
+      CUKUP_OIDC_ALLOWED_USER_ID: ${{ secrets.CUKUP_OIDC_ALLOWED_USER_ID }}
+      CUKUP_FLEET_HOSTNAMES: ${{ secrets.CUKUP_FLEET_HOSTNAMES }}
+      CUKUP_GITHUB_OAUTH_CLIENT_ID: ${{ secrets.CUKUP_GITHUB_OAUTH_CLIENT_ID }}
+      CUKUP_GITHUB_OAUTH_CLIENT_SECRET: ${{ secrets.CUKUP_GITHUB_OAUTH_CLIENT_SECRET }}
+      CUKUP_GITHUB_ALLOWED_USER_ID: ${{ secrets.CUKUP_GITHUB_ALLOWED_USER_ID }}
+      CUKUP_DASHBOARD_SESSION_KEYS: ${{ secrets.CUKUP_DASHBOARD_SESSION_KEYS }}
+      CUKUP_API_TOKEN: ${{ secrets.CUKUP_API_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Check out deployment source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Validate requested revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CUKUP_REVISION" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Check out exact release source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          path: release
+          persist-credentials: false
+          ref: ${{ inputs.revision }}
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.10
+
+      - name: Install release dependencies
+        working-directory: release
+        run: bun install --frozen-lockfile
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@a0102e0972be65f351c307e2d64b9314a57c8073 # v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Install pinned Kamal
+        run: gem install kamal --version 2.10.1 --no-document
+
+      - name: Prepare protected deployment files
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          required=(
+            CUKUP_IMAGE CUKUP_DEPLOY_HOST CUKUP_SSH_USER
+            KAMAL_REGISTRY_USERNAME KAMAL_REGISTRY_PASSWORD
+            CUKUP_OIDC_ALLOWED_USER_ID CUKUP_FLEET_HOSTNAMES
+            CUKUP_GITHUB_OAUTH_CLIENT_ID CUKUP_GITHUB_OAUTH_CLIENT_SECRET
+            CUKUP_GITHUB_ALLOWED_USER_ID CUKUP_DASHBOARD_SESSION_KEYS
+            SSH_PRIVATE_KEY SSH_KNOWN_HOSTS
+          )
+          for name in "${required[@]}"; do
+            [[ -n "${!name:-}" ]] || {
+              printf 'required production configuration is missing: %s\n' "$name" >&2
+              exit 1
+            }
+          done
+
+          install -d -m 0700 "$HOME/.ssh" release/.kamal
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$RUNNER_TEMP/cukup-deploy-key"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$RUNNER_TEMP/cukup-deploy-key" "$HOME/.ssh/known_hosts"
+          printf 'CUKUP_SSH_KEY=%s\n' "$RUNNER_TEMP/cukup-deploy-key" >> "$GITHUB_ENV"
+
+          cat > release/.kamal/secrets <<'EOF'
+          KAMAL_REGISTRY_PASSWORD=$KAMAL_REGISTRY_PASSWORD
+          CUKUP_OIDC_ALLOWED_USER_ID=$CUKUP_OIDC_ALLOWED_USER_ID
+          CUKUP_FLEET_HOSTNAMES=$CUKUP_FLEET_HOSTNAMES
+          CUKUP_GITHUB_OAUTH_CLIENT_ID=$CUKUP_GITHUB_OAUTH_CLIENT_ID
+          CUKUP_GITHUB_OAUTH_CLIENT_SECRET=$CUKUP_GITHUB_OAUTH_CLIENT_SECRET
+          CUKUP_GITHUB_ALLOWED_USER_ID=$CUKUP_GITHUB_ALLOWED_USER_ID
+          CUKUP_DASHBOARD_SESSION_KEYS=$CUKUP_DASHBOARD_SESSION_KEYS
+          EOF
+          chmod 0600 release/.kamal/secrets
+
+      - name: Authenticate Actions image pull
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Run production ${{ inputs.operation }}
+        run: scripts/deploy-service "${{ inputs.operation }}"
+
+      - name: Clean protected deployment files
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/cukup-deploy-key" release/.kamal/secrets
+          docker logout ghcr.io >/dev/null 2>&1 || true
