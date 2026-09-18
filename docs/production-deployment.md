@@ -30,11 +30,9 @@ Do not deploy from an ordinary Cukup checkout or copy production secrets into th
 
 `Deploy service` is the staged replacement for the Vikas execution boundary. It is intentionally manual-only until an owner-approved canary succeeds. Its `preflight` operation verifies an exact full SHA, successful push publication, signed-main ancestry, immutable image contract, rendered Kamal configuration, absence of a remote deploy lock, current runtime/database integrity, and public service behavior without mutation. Its `deploy` operation additionally creates and independently verifies a fresh backup, proves pre-deploy preservation, deploys the exact image, repeats the runtime/public/database/preservation gates, and attempts a verified rollback after a post-switch failure.
 
-The workflow requires a protected GitHub `production` environment with these variables:
+The workflow uses a protected GitHub `production` environment and supports these variables:
 
-- `CUKUP_IMAGE=zainfathoni/cukup`;
-- `CUKUP_DEPLOY_HOST`, set to a VPS address reachable from a GitHub-hosted runner;
-- `CUKUP_SSH_USER` and `KAMAL_REGISTRY_USERNAME=zainfathoni`;
+- optional deployment overrides; the checked-in defaults use `zainfathoni/cukup`, VPS address `103.235.75.227`, SSH user `openclaw`, and registry user `zainfathoni`;
 - optional hostname/path overrides, which otherwise use `api.cukup.dev`, `cukup.dev`, `/srv/cukup`, and `/srv/cukup-backups`.
 
 It requires environment secrets `SSH_PRIVATE_KEY`, `SSH_KNOWN_HOSTS`, `KAMAL_REGISTRY_PASSWORD`, and every runtime secret named by `config/deploy.service.yml`. `CUKUP_API_TOKEN` is optional and enables the existing authenticated read-only acceptance probes; without it, public API/dashboard, OAuth-start, image, backup, and database gates still run. Secret values must be provisioned from an approved source rather than copied from another repository's GitHub secrets.
