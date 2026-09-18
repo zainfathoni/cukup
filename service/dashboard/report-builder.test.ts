@@ -308,6 +308,8 @@ describe('dashboard report aggregation', () => {
 		if (report.timeline.state === 'unavailable') throw new Error('Expected timeline')
 		const timeline = report.timeline.data
 		expect(timeline.minutes).toBe(105)
+		expect(timeline.week).toBe('2026-W36')
+		expect(timeline.week_minutes).toBe(105)
 		expect(timeline.lanes.map((lane) => `${lane.kind}:${lane.label}`)).toEqual([
 			'project:alpha',
 			'project:beta',
@@ -341,11 +343,49 @@ describe('dashboard report aggregation', () => {
 		)
 		if (report.timeline.state === 'unavailable') throw new Error('Expected timeline')
 		expect(report.timeline.data.date).toBe('2026-08-30')
+		expect(report.timeline.data.week).toBe('2026-W35')
 		expect(report.timeline.data.minutes).toBe(20)
+		expect(report.timeline.data.week_minutes).toBe(20)
 		expect(report.timeline.data.lanes.map((lane) => `${lane.kind}:${lane.label}`)).toEqual([
 			'project:Unassigned',
 			'executor:retired-machine',
 		])
+	})
+
+	test('reports filtered time for the selected date and its ISO week, including week-only activity', () => {
+		const value = fixture()
+		value.events.push(
+			...session({
+				index: 5,
+				source: 'source-e',
+				project: 'alpha',
+				executor: 'machine-a',
+				start: Date.parse('2026-08-29T01:00:00.000Z'),
+				end: Date.parse('2026-08-29T01:15:00.000Z'),
+			}),
+		)
+		const report = buildDashboardReport(
+			value.store,
+			{ projects: [], executors: [], timeline_date: '2026-08-30', range: { preset: 7 } },
+			now,
+		)
+		if (report.timeline.state === 'unavailable') throw new Error('Expected timeline')
+		expect(report.timeline.data).toMatchObject({
+			date: '2026-08-30',
+			week: '2026-W35',
+			minutes: 20,
+			week_minutes: 50,
+		})
+	})
+
+	test('uses the ISO week-year at calendar-year boundaries', () => {
+		const report = buildDashboardReport(
+			fixture().store,
+			{ projects: [], executors: [], timeline_date: '2021-01-01', range: { preset: 7 } },
+			now,
+		)
+		if (report.timeline.state === 'unavailable') throw new Error('Expected timeline')
+		expect(report.timeline.data.week).toBe('2020-W53')
 	})
 
 	test('restricts lanes to the selection without changing the globally unioned day details', () => {

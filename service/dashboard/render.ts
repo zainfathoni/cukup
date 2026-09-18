@@ -350,14 +350,16 @@ function laneEquivalent(lanes: readonly TimelineLane[], kind: TimelineLane['kind
 	return `<h4>${heading}</h4><ul class="text-equivalent">${items}</ul>`
 }
 
+function activityPeriodCard(label: string, minutes: number, detail: string): string {
+	return `<article class="verdict activity-period-card"><p class="verdict-label"><span>${escapeHtml(label)}</span></p><p><span class="verdict-figure">${formatMinutes(minutes)}</span></p><p class="verdict-target">${escapeHtml(detail)}</p></article>`
+}
+
 function renderTimelineData(timeline: Timeline, timezone: string, asOf: string): string {
 	const equivalents = timeline.intervals.length
 		? `<ol class="text-equivalent">${timeline.intervals.map((interval) => `<li>${formatTimestamp(interval.start, timezone)}–${formatTimestamp(interval.end, timezone)}; concurrency ${interval.concurrency}</li>`).join('')}</ol>`
 		: '<p>No activity intervals recorded today.</p>'
-	const duration = formatMinutes(timeline.minutes)
-	const targetMinutes = 8 * 60
-	const targetStatus = timeline.minutes < targetMinutes ? 'under' : timeline.minutes > targetMinutes ? 'over' : 'complete'
-	return `<div class="timeline-summary"><p class="timeline-summary-copy"><strong>${duration}</strong><span>selected activity</span></p><div class="timeline-target-meter status-${targetStatus}">${verdictMeter({ worked_minutes: timeline.minutes, target_minutes: targetMinutes }, 'Selected activity')}<span>Target ${formatMinutes(targetMinutes)} · dashed mark on the meter</span></div><p class="timeline-summary-detail">${timeline.intervals.length} interval${timeline.intervals.length === 1 ? '' : 's'} · ${escapeHtml(timeline.date)}</p></div><ul class="chart-legend"><li><span class="block-swatch" aria-hidden="true"></span>Single-source evidence</li><li><span class="block-swatch concurrent" aria-hidden="true"></span>Concurrent evidence</li><li><span class="block-swatch project" aria-hidden="true"></span>Project lane</li><li><span class="block-swatch executor" aria-hidden="true"></span>Executor lane</li></ul><p class="guidance">Lanes share one clock. Bars are unioned inside a lane, so a project lane and an executor lane that line up vertically describe the same minutes and must not be added.</p><p class="scroll-hint">Scroll the chart horizontally to see the full day.</p><div class="chart-scroll" tabindex="0" role="region" aria-label="Scrollable current-day timeline">${renderGantt(timeline, timezone, asOf)}</div><details><summary>Timeline text equivalent</summary><h4>All selected activity</h4>${equivalents}${laneEquivalent(timeline.lanes, 'project', timezone)}${laneEquivalent(timeline.lanes, 'executor', timezone)}</details>`
+	const intervalDetail = `${timeline.intervals.length} interval${timeline.intervals.length === 1 ? '' : 's'} · ${timeline.date}`
+	return `<div class="verdict-grid activity-period-grid">${activityPeriodCard('Selected day', timeline.minutes, intervalDetail)}${activityPeriodCard('Selected ISO week', timeline.week_minutes, timeline.week)}</div><ul class="chart-legend"><li><span class="block-swatch" aria-hidden="true"></span>Single-source evidence</li><li><span class="block-swatch concurrent" aria-hidden="true"></span>Concurrent evidence</li><li><span class="block-swatch project" aria-hidden="true"></span>Project lane</li><li><span class="block-swatch executor" aria-hidden="true"></span>Executor lane</li></ul><p class="guidance">Lanes share one clock. Bars are unioned inside a lane, so a project lane and an executor lane that line up vertically describe the same minutes and must not be added.</p><p class="scroll-hint">Scroll the chart horizontally to see the full day.</p><div class="chart-scroll" tabindex="0" role="region" aria-label="Scrollable current-day timeline">${renderGantt(timeline, timezone, asOf)}</div><details><summary>Timeline text equivalent</summary><h4>All selected activity</h4>${equivalents}${laneEquivalent(timeline.lanes, 'project', timezone)}${laneEquivalent(timeline.lanes, 'executor', timezone)}</details>`
 }
 
 function renderTimeline(panel: DashboardReport['timeline'], timezone: string, asOf: string): string {

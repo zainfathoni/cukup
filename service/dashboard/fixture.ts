@@ -61,7 +61,9 @@ export const mockDashboardReport: DashboardReport = {
 		state: 'ready',
 		data: {
 			date: '2026-08-31',
+			week: '2026-W36',
 			minutes: 380,
+			week_minutes: 380,
 			intervals: [
 				{ start: '2026-08-31T01:15:00.000Z', end: '2026-08-31T03:05:00.000Z', concurrency: 1 },
 				{ start: '2026-08-31T04:00:00.000Z', end: '2026-08-31T04:40:00.000Z', concurrency: 1 },
