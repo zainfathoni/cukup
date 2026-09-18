@@ -33,14 +33,14 @@ jobs:
     env:
       CUKUP_REVISION: ${{ inputs.revision }}
       CUKUP_RELEASE_ROOT: ${{ github.workspace }}/release
-      CUKUP_IMAGE: ${{ vars.CUKUP_IMAGE }}
+      CUKUP_IMAGE: ${{ vars.CUKUP_IMAGE || 'zainfathoni/cukup' }}
       CUKUP_DEPLOY_HOST: ${{ vars.CUKUP_DEPLOY_HOST }}
       CUKUP_SSH_USER: ${{ vars.CUKUP_SSH_USER }}
       CUKUP_API_HOSTNAME: ${{ vars.CUKUP_API_HOSTNAME || 'api.cukup.dev' }}
       CUKUP_DASHBOARD_HOSTNAME: ${{ vars.CUKUP_DASHBOARD_HOSTNAME || 'cukup.dev' }}
       CUKUP_DATA_DIRECTORY: ${{ vars.CUKUP_DATA_DIRECTORY || '/srv/example-cukup-data' }}
       CUKUP_BACKUP_DIRECTORY: ${{ vars.CUKUP_BACKUP_DIRECTORY || '/srv/example-cukup-backups' }}
-      KAMAL_REGISTRY_USERNAME: ${{ vars.KAMAL_REGISTRY_USERNAME }}
+      KAMAL_REGISTRY_USERNAME: ${{ vars.KAMAL_REGISTRY_USERNAME || 'zainfathoni' }}
       KAMAL_REGISTRY_PASSWORD: ${{ secrets.KAMAL_REGISTRY_PASSWORD }}
       CUKUP_OIDC_ALLOWED_USER_ID: ${{ secrets.CUKUP_OIDC_ALLOWED_USER_ID }}
       CUKUP_FLEET_HOSTNAMES: ${{ secrets.CUKUP_FLEET_HOSTNAMES }}
