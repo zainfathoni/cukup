@@ -5,6 +5,9 @@ opt-in, shadow-only, and not an official Amp support claim. It emits the existin
 local Harness evidence protocol to a separately running local runtime. It never writes generic
 evidence to the deployed legacy v1/v2 store or cloud sync path.
 
+[ADR 0008](adr/0008-do-not-infer-working-time-from-agent-runtime.md) records why these execution
+signals must not be used to infer human Working Time or modeled collaboration time.
+
 ## Verified Amp capability
 
 The collector uses supported `@ampcode/plugin` APIs available to this repository:
