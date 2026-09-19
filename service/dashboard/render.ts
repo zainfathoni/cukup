@@ -474,7 +474,9 @@ function renderTrendData(trend: Trend, timezone: string, selectedDate?: string):
 	const plotRight = chartWidth - 96
 	const allPoints = trend.series.flatMap((series) => series.points)
 	const maximum = Math.max(1, ...allPoints.map((point) => point.minutes))
-	const pointCount = Math.max(2, ...trend.series.map((series) => series.points.length))
+	const dates = [...new Set(trend.series.flatMap((series) => series.points.map((point) => point.date)))].sort()
+	const dateIndex = new Map(dates.map((date, index) => [date, index]))
+	const pointCount = Math.max(2, dates.length)
 	const positionOf = (index: number, minutes: number) => ({
 		x: plotLeft + (index / (pointCount - 1)) * (plotRight - plotLeft),
 		y: plotTop + (1 - minutes / maximum) * (plotBottom - plotTop),
@@ -483,7 +485,7 @@ function renderTrendData(trend: Trend, timezone: string, selectedDate?: string):
 		.map((series, index) => {
 			const points = series.points
 				.map((point, pointIndex) => {
-					const { x, y } = positionOf(pointIndex, point.minutes)
+					const { x, y } = positionOf(dateIndex.get(point.date) ?? pointIndex, point.minutes)
 					return `${x.toFixed(2)},${y.toFixed(2)}`
 				})
 				.join(' ')
@@ -494,10 +496,36 @@ function renderTrendData(trend: Trend, timezone: string, selectedDate?: string):
 		.map((series, index) => {
 			const last = series.points.at(-1)
 			if (!last) return ''
-			const { x, y } = positionOf(series.points.length - 1, last.minutes)
+			const { x, y } = positionOf(dateIndex.get(last.date) ?? series.points.length - 1, last.minutes)
 			const value = formatMinutes(last.minutes)
 			const tagWidth = Math.max(46, value.length * 9 + 12)
 			return `<circle class="trend-dot series-${index % 4}" cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="5"></circle><rect class="trend-tag" x="${(x + 9).toFixed(2)}" y="${(y - 12).toFixed(2)}" width="${tagWidth}" height="24" rx="7"></rect><text class="trend-tag-text" x="${(x + 15).toFixed(2)}" y="${(y + 5).toFixed(2)}">${value}</text>`
+		})
+		.join('')
+	const hoverTargets = dates
+		.map((date, datePosition) => {
+			const x = positionOf(datePosition, 0).x
+			const left = datePosition === 0 ? plotLeft : (positionOf(datePosition - 0.5, 0).x + x) / 2
+			const right = datePosition === dates.length - 1 ? plotRight : (x + positionOf(datePosition + 0.5, 0).x) / 2
+			const values = trend.series
+				.map((series, seriesIndex) => {
+					const point = series.points.find((candidate) => candidate.date === date)
+					if (!point) return ''
+					const { y } = positionOf(datePosition, point.minutes)
+					const value = formatMinutes(point.minutes)
+					const tagWidth = Math.max(46, value.length * 9 + 12)
+					const tagY = Math.max(plotTop, Math.min(plotBottom - 24, y - 12))
+					return `<circle class="trend-hover-dot series-${seriesIndex % 4}" cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="5"></circle><rect class="trend-hover-tag series-${seriesIndex % 4}" x="${(x + 9).toFixed(2)}" y="${tagY.toFixed(2)}" width="${tagWidth}" height="24" rx="7"></rect><text class="trend-hover-tag-text" x="${(x + 15).toFixed(2)}" y="${(tagY + 17).toFixed(2)}">${value}</text>`
+				})
+				.join('')
+			const label = trend.series
+				.map((series) => {
+					const point = series.points.find((candidate) => candidate.date === date)
+					return point === undefined ? null : `${series.kind} ${series.label}: ${formatMinutes(point.minutes)}`
+				})
+				.filter((entry): entry is string => entry !== null)
+				.join(', ')
+			return `<g class="trend-hover" tabindex="0" aria-label="${escapeHtml(`${date}: ${label}`)}"><title>${escapeHtml(`${date}: ${label}`)}</title><rect class="trend-hit" x="${left.toFixed(2)}" y="${plotTop}" width="${(right - left).toFixed(2)}" height="${plotBottom - plotTop}"></rect><line class="trend-hover-line" x1="${x.toFixed(2)}" y1="${plotTop}" x2="${x.toFixed(2)}" y2="${plotBottom}"></line>${values}</g>`
 		})
 		.join('')
 	const axes = [maximum, Math.round(maximum / 2), 0]
@@ -513,7 +541,6 @@ function renderTrendData(trend: Trend, timezone: string, selectedDate?: string):
 				`<li><span class="legend-line series-${index % 4}" aria-hidden="true"></span><strong>${escapeHtml(series.kind)}</strong>: ${escapeHtml(series.label)}</li>`,
 		)
 		.join('')
-	const dates = [...new Set(trend.series.flatMap((series) => series.points.map((point) => point.date)))].sort()
 	const details = new Map(trend.days.map((day) => [day.date, day]))
 	const headings = trend.series
 		.map((series) => `<th scope="col">${escapeHtml(series.kind)}: ${escapeHtml(series.label)}</th>`)
@@ -531,7 +558,7 @@ function renderTrendData(trend: Trend, timezone: string, selectedDate?: string):
 			return `<tr><th scope="row">${escapeHtml(date)}</th>${valuesBySeries.map((values) => `<td>${values.has(date) ? formatMinutes(values.get(date)!) : 'No data'}</td>`).join('')}${detailCells}</tr>`
 		})
 		.join('')
-	return `<ul class="chart-legend">${legend}</ul><p class="scroll-hint">Scroll the chart horizontally to see the full range.</p><div class="chart-scroll" tabindex="0" role="region" aria-label="Scrollable daily activity trend"><svg class="trend-chart" viewBox="0 0 ${chartWidth} ${chartHeight}" role="img" aria-labelledby="trend-svg-title trend-svg-desc"><title id="trend-svg-title">Daily activity trend</title><desc id="trend-svg-desc">Separate, non-stacked lines. Series overlap and are not additive. The labelled dot on each line is its most recent day.</desc>${axes}${dateLabels}${lines}${endpoints}</svg></div>${renderHeatmap(trend.days, timezone, selectedDate)}<details><summary>View daily values</summary><p class="guidance">Exact values behind the chart, provided for comparison and as a text alternative. Target, status, intervals, and the activity breakdown describe the globally unioned Overall series; project and executor activity overlap and must not be added.</p><div class="table-scroll"><table><caption>Daily working time by date and series</caption><thead><tr><th scope="col">Date</th>${headings}<th scope="col">Target</th><th scope="col">Status</th><th scope="col">Intervals</th><th scope="col">First–last</th><th scope="col">Project activity</th><th scope="col">Executor activity</th></tr></thead><tbody>${rows}</tbody></table></div></details>`
+	return `<ul class="chart-legend">${legend}</ul><p class="scroll-hint">Scroll the chart horizontally to see the full range.</p><div class="chart-scroll" tabindex="0" role="region" aria-label="Scrollable daily activity trend"><svg class="trend-chart" viewBox="0 0 ${chartWidth} ${chartHeight}" role="img" aria-labelledby="trend-svg-title trend-svg-desc"><title id="trend-svg-title">Daily activity trend</title><desc id="trend-svg-desc">Separate, non-stacked lines. Series overlap and are not additive. Hover or focus a day to see that day’s value on every line. The labelled dot on each line is its most recent day.</desc>${axes}${dateLabels}${lines}${endpoints}${hoverTargets}</svg></div>${renderHeatmap(trend.days, timezone, selectedDate)}<details><summary>View daily values</summary><p class="guidance">Exact values behind the chart, provided for comparison and as a text alternative. Target, status, intervals, and the activity breakdown describe the globally unioned Overall series; project and executor activity overlap and must not be added.</p><div class="table-scroll"><table><caption>Daily working time by date and series</caption><thead><tr><th scope="col">Date</th>${headings}<th scope="col">Target</th><th scope="col">Status</th><th scope="col">Intervals</th><th scope="col">First–last</th><th scope="col">Project activity</th><th scope="col">Executor activity</th></tr></thead><tbody>${rows}</tbody></table></div></details>`
 }
 
 function renderTrend(

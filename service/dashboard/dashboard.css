@@ -806,6 +806,75 @@ svg text {
 	font-weight: 700;
 }
 
+.trend-hover {
+	opacity: 0;
+}
+
+.trend-hover:hover,
+.trend-hover:focus {
+	opacity: 1;
+}
+
+.trend-hit {
+	fill: transparent;
+	stroke: none;
+}
+
+.trend-hover-line {
+	stroke: var(--ink);
+	stroke-width: 1.5;
+	stroke-dasharray: 3 4;
+	opacity: 0.75;
+	vector-effect: non-scaling-stroke;
+}
+
+.trend-hover-dot {
+	stroke: var(--ink);
+	stroke-width: 2;
+}
+
+.trend-hover-tag {
+	fill: var(--card);
+	stroke-width: 2;
+}
+
+.trend-hover-tag.series-0 {
+	stroke: var(--series-0);
+}
+
+.trend-hover-tag.series-1 {
+	stroke: var(--series-1);
+}
+
+.trend-hover-tag.series-2 {
+	stroke: var(--series-2);
+}
+
+.trend-hover-tag.series-3 {
+	stroke: var(--series-3);
+}
+
+.trend-hover-tag-text {
+	font-size: 13px;
+	font-weight: 700;
+}
+
+.trend-hover-dot.series-0 {
+	fill: var(--series-0);
+}
+
+.trend-hover-dot.series-1 {
+	fill: var(--series-1);
+}
+
+.trend-hover-dot.series-2 {
+	fill: var(--series-2);
+}
+
+.trend-hover-dot.series-3 {
+	fill: var(--series-3);
+}
+
 .series-0 {
 	stroke: var(--series-0);
 }
