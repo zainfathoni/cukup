@@ -6,29 +6,24 @@ This repository owns the Cukup service source, container image, and Kamal config
 
 1. Merge the service change to the signed `main` branch.
 2. The `Publish service image` workflow runs on `push` to `main` when an image input changes (`service/`, `Dockerfile.service`, `package.json`, `bun.lock`, or `tsconfig.json`). It validates the source, builds `linux/amd64`, and publishes `ghcr.io/zainfathoni/cukup:<main-sha>` with the service and revision labels.
-3. The protected Vikas operator on `vikas-mac-mini` observes successful **push-triggered** publication runs every 300 seconds. Its installed LaunchAgent invokes:
-
-   ```text
-   /Users/zain/Docs/machines/vikas-mac-mini/operators/cukup-deployment-operator
-   ```
-
-4. The operator validates the signed `main` tip, selects the newest qualifying published ancestor, verifies the immutable image and architecture, creates and independently retrieves a database backup, then deploys through Kamal using:
+3. When that publication completes, the `Deploy service` workflow admits the run only when the upstream event was `push`, its branch was `main`, and its conclusion was `success`. It selects the exact `workflow_run.head_sha` and forces the `deploy` operation. Manual publications, non-main publications, failed or cancelled publications, and other upstream events do not enter the protected deployment job.
+4. The protected job revalidates the signed `main` ancestry and successful push publication for that exact SHA, verifies the immutable image and architecture, creates and independently retrieves a database backup, then deploys through Kamal using:
 
    ```bash
-   VERSION=<selected-main-sha> kamal deploy --skip-push
+   VERSION=<workflow-run-head-sha> kamal deploy --skip-push
    ```
 
-5. It verifies public API and dashboard health, authenticated API/dashboard behavior, database integrity and preservation, and normal restart persistence. It records the deployed immutable image and retains the prior migration-aware image for rollback.
+5. It verifies public API and dashboard health, authenticated API/dashboard behavior, database integrity and preservation, and retains the prior migration-aware image for verified rollback after a post-switch failure.
 
-The operator selects the newest qualifying ancestor after the publication cutover commit, currently `65f9c50b991886efb3dfdc5f9027b51ab26201dc`, with a successful push publication. A manually dispatched publication is not selected automatically. Documentation-only and plugin-only changes therefore do not create a service release or trigger deployment.
+A manually dispatched publication is not selected automatically. Documentation-only, plugin-only, workflow-only, and other changes outside the image inputs therefore do not create a service release or trigger deployment.
 
-## Local operator boundary
+## Deployment authority boundary
 
-Do not deploy from an ordinary Cukup checkout or copy production secrets into the repository, command arguments, GitHub issues, or Amp messages. Until the staged Actions canary below succeeds, the Vikas operator remains the active protected Kamal boundary. A local runner without either protected operator environment must stop after confirming the signed `main` commit and successful image publication, then report the deployment as pending operator reconciliation.
+Do not deploy from an ordinary Cukup checkout or copy production secrets into the repository, command arguments, GitHub issues, or Amp messages. GitHub's protected `production` environment is the active Kamal boundary. The retired Vikas LaunchAgent must remain disabled or have its deploy authority revoked so that two operators cannot mutate production concurrently.
 
-## Staged GitHub Actions canary
+## GitHub Actions deployment
 
-`Deploy service` is the staged replacement for the Vikas execution boundary. It is intentionally manual-only until an owner-approved canary succeeds. Its `preflight` operation verifies an exact full SHA, successful push publication, signed-main ancestry, immutable image contract, rendered Kamal configuration, absence of a remote deploy lock, current runtime/database integrity, and public service behavior without mutation. Its `deploy` operation additionally creates and independently verifies a fresh backup, proves pre-deploy preservation, deploys the exact image, repeats the runtime/public/database/preservation gates, and attempts a verified rollback after a post-switch failure.
+`Deploy service` runs automatically after an admitted successful publication and retains `workflow_dispatch` for an exact-SHA `preflight` or `deploy`. Its `preflight` operation verifies an exact full SHA, successful push publication, signed-main ancestry, immutable image contract, rendered Kamal configuration, absence of a remote deploy lock, current runtime/database integrity, and public service behavior without mutation. Its `deploy` operation additionally creates and independently verifies a fresh backup, proves pre-deploy preservation, deploys the exact image, repeats the runtime/public/database/preservation gates, and attempts a verified rollback after a post-switch failure.
 
 The workflow uses a protected GitHub `production` environment and supports these variables:
 
@@ -37,7 +32,7 @@ The workflow uses a protected GitHub `production` environment and supports these
 
 It requires environment secrets `SSH_PRIVATE_KEY`, `SSH_KNOWN_HOSTS`, and every runtime secret named by `config/deploy.service.yml`. Kamal uses the job's short-lived repository token to pull the associated GHCR image unless an environment-scoped `KAMAL_REGISTRY_PASSWORD` overrides it. `CUKUP_API_TOKEN` is optional and enables the existing authenticated read-only acceptance probes; without it, public API/dashboard, OAuth-start, image, backup, and database gates still run. Secret values must be provisioned from an approved source rather than copied from another repository's GitHub secrets.
 
-Run `preflight` before the first `deploy`. Vikas may remain offline, but it must not return with its LaunchAgent able to mutate production: disable that operator or revoke its deploy authority before Vikas comes back. Do not release a remote lock merely because its originating machine is offline; reconcile the prior mutation first. Automatic successful-publication triggering is enabled only after the manual canary and rollback readiness pass.
+Do not release a remote lock merely because its originating machine is offline; reconcile the prior mutation first. Enabling `workflow_run` does not replay publications that completed before the trigger reached the default branch. Such an already-published SHA must use the retained manual exact-SHA deployment path, or wait for a later qualifying push publication; do not republish manually to bypass the upstream-event gate.
 
 ## Release verification
 
@@ -50,7 +45,7 @@ curl --fail --silent https://api.cukup.dev/up
 curl --fail --silent https://api.cukup.dev/healthz
 ```
 
-The first two checks prove the signed source and same-revision push publication. The unauthenticated endpoints prove liveness only; the protected Vikas operator is responsible for the authenticated, database, backup, and dashboard acceptance checks.
+The first two checks prove the signed source and same-revision push publication. The unauthenticated endpoints prove liveness only; the protected deployment job is responsible for the authenticated, database, backup, and dashboard acceptance checks.
 
 ## Follow-up issues
 
