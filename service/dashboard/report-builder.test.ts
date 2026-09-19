@@ -212,7 +212,7 @@ describe('dashboard report aggregation', () => {
 		}
 	})
 
-	test('applies and clears overrides only in the authoritative overall target panel', () => {
+	test('applies and clears overrides in the authoritative current summary without changing trend work', () => {
 		const targetOverrides = new Map([['2026-08-31', 0]])
 		const selection: DashboardSelection = { projects: [], executors: [], range: { preset: 7 } }
 		const dayOff = buildDashboardReport(fixture(targetOverrides).store, selection, now)
@@ -336,8 +336,9 @@ describe('dashboard report aggregation', () => {
 	})
 
 	test('builds the activity timeline for the selected historical date', () => {
+		const targetOverrides = new Map([['2026-08-26', 240]])
 		const report = buildDashboardReport(
-			fixture().store,
+			fixture(targetOverrides).store,
 			{ projects: [], executors: [], timeline_date: '2026-08-30', range: { preset: 7 } },
 			now,
 		)
@@ -346,10 +347,59 @@ describe('dashboard report aggregation', () => {
 		expect(report.timeline.data.week).toBe('2026-W35')
 		expect(report.timeline.data.minutes).toBe(20)
 		expect(report.timeline.data.week_minutes).toBe(20)
+		expect(report.timeline.data.day_period).toEqual({
+			status: 'OVER',
+			worked_minutes: 20,
+			target_minutes: 0,
+			difference_minutes: 20,
+		})
+		expect(report.timeline.data.week_period).toEqual({
+			status: 'UNDER',
+			worked_minutes: 20,
+			target_minutes: 2_160,
+			difference_minutes: 2_140,
+		})
 		expect(report.timeline.data.lanes.map((lane) => `${lane.kind}:${lane.label}`)).toEqual([
 			'project:Unassigned',
 			'executor:retired-machine',
 		])
+	})
+
+	test('applies and clears an override on the selected historical day without changing worked totals', () => {
+		const targetOverrides = new Map([['2026-08-30', 60]])
+		const value = fixture(targetOverrides)
+		const selection: DashboardSelection = {
+			projects: [],
+			executors: [],
+			timeline_date: '2026-08-30',
+			range: { preset: 7 },
+		}
+		const overridden = buildDashboardReport(value.store, selection, now)
+		if (overridden.timeline.state === 'unavailable') throw new Error('Expected timeline')
+		expect(overridden.timeline.data.day_period).toEqual({
+			status: 'UNDER',
+			worked_minutes: 20,
+			target_minutes: 60,
+			difference_minutes: 40,
+		})
+		expect({
+			minutes: overridden.timeline.data.minutes,
+			week_minutes: overridden.timeline.data.week_minutes,
+		}).toEqual({ minutes: 20, week_minutes: 20 })
+
+		targetOverrides.clear()
+		const restored = buildDashboardReport(value.store, selection, now)
+		if (restored.timeline.state === 'unavailable') throw new Error('Expected timeline')
+		expect(restored.timeline.data.day_period).toEqual({
+			status: 'OVER',
+			worked_minutes: 20,
+			target_minutes: 0,
+			difference_minutes: 20,
+		})
+		expect({
+			minutes: restored.timeline.data.minutes,
+			week_minutes: restored.timeline.data.week_minutes,
+		}).toEqual({ minutes: 20, week_minutes: 20 })
 	})
 
 	test('reports filtered time for the selected date and its ISO week, including week-only activity', () => {
@@ -378,14 +428,36 @@ describe('dashboard report aggregation', () => {
 		})
 	})
 
-	test('uses the ISO week-year at calendar-year boundaries', () => {
-		const report = buildDashboardReport(
-			fixture().store,
-			{ projects: [], executors: [], timeline_date: '2021-01-01', range: { preset: 7 } },
-			now,
-		)
+	test('uses the full ISO week across a calendar-year boundary independently of trend range', () => {
+		const selection: DashboardSelection = {
+			projects: [],
+			executors: [],
+			timeline_date: '2021-01-01',
+			range: { preset: 'custom', start_date: '2026-08-31', end_date: '2026-08-31' },
+		}
+		const insideOnly = new Map([['2021-01-03', 240]])
+		const beforeBoundary = new Map([...insideOnly, ['2020-12-27', 240]])
+		const outsideBothBoundaries = new Map([...beforeBoundary, ['2021-01-04', 0]])
+		const report = buildDashboardReport(fixture(outsideBothBoundaries).store, selection, now)
 		if (report.timeline.state === 'unavailable') throw new Error('Expected timeline')
 		expect(report.timeline.data.week).toBe('2020-W53')
+		// Mon–Fri contribute 5 × 480m, Saturday 0m, and Sunday's override 240m.
+		expect(report.timeline.data.week_period).toEqual({
+			status: 'UNDER',
+			worked_minutes: 0,
+			target_minutes: 2_640,
+			difference_minutes: 2_640,
+		})
+		for (const overrides of [insideOnly, beforeBoundary]) {
+			const boundaryReport = buildDashboardReport(fixture(overrides).store, selection, now)
+			if (boundaryReport.timeline.state === 'unavailable') throw new Error('Expected timeline')
+			expect(boundaryReport.timeline.data.week_period.target_minutes).toBe(2_640)
+		}
+		if (report.trend.state === 'unavailable') throw new Error('Expected trend')
+		expect([report.trend.data.start_date, report.trend.data.end_date]).toEqual([
+			'2026-08-31',
+			'2026-08-31',
+		])
 	})
 
 	test('restricts lanes to the selection without changing the globally unioned day details', () => {
@@ -400,6 +472,16 @@ describe('dashboard report aggregation', () => {
 			'executor:machine-a',
 		])
 		expect(selected.timeline.data.minutes).toBe(45)
+		expect(selected.timeline.data.day_period).toMatchObject({
+			worked_minutes: 45,
+			target_minutes: 480,
+			status: 'UNDER',
+		})
+		expect(selected.timeline.data.week_period).toMatchObject({
+			worked_minutes: 45,
+			target_minutes: 2_400,
+			status: 'UNDER',
+		})
 
 		if (selected.trend.state === 'unavailable') throw new Error('Expected trend')
 		const today = selected.trend.data.days.at(-1)!

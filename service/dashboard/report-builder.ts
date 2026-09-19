@@ -132,7 +132,12 @@ export function buildDashboardReport(
 			return { today: summary.daily, week: summary.weekly }
 		}),
 		timeline: buildPanel('Activity timeline is unavailable.', () =>
-			buildTimeline(attributedIntervals(store.attributedEvents(), nowMs), selection, nowMs),
+			buildTimeline(
+				attributedIntervals(store.attributedEvents(), nowMs),
+				selection,
+				nowMs,
+				store.targetOverrides(),
+			),
 		),
 		trend: buildPanel('Activity trend is unavailable.', () =>
 			buildTrend(
@@ -165,6 +170,7 @@ function buildTimeline(
 	intervals: readonly AttributedInterval[],
 	selection: DashboardSelection,
 	nowMs: number,
+	targetOverrides: ReadonlyMap<string, number>,
 ): Timeline {
 	const today = localDateAt(nowMs, SERVICE_TIMEZONE)
 	const date = selection.timeline_date === undefined ? today : parseCivilDate(selection.timeline_date)!
@@ -176,6 +182,12 @@ function buildTimeline(
 	const weekStartMs = startOfZonedDay(weekStart, SERVICE_TIMEZONE)
 	const weekEndMs = Math.min(startOfZonedDay(addDays(weekStart, 7), SERVICE_TIMEZONE), nowMs)
 	const selectedWeek = clipAttributedIntervals(selectedIntervals, weekStartMs, weekEndMs)
+	const minutes = totalMinutes(unionIntervals(selected))
+	const weekMinutes = totalMinutes(unionIntervals(selectedWeek))
+	let weekTargetMinutes = 0
+	for (let offset = 0; offset < 7; offset += 1) {
+		weekTargetMinutes += targetMinutesFor(addDays(weekStart, offset), targetOverrides)
+	}
 	const dayLanes = [
 		...timelineLanes('project', selected, (interval) => interval.project),
 		...timelineLanes('executor', selected, (interval) => interval.executor),
@@ -183,8 +195,13 @@ function buildTimeline(
 	return {
 		date: civilDateString(date),
 		week: isoWeek(date),
-		minutes: totalMinutes(unionIntervals(selected)),
-		week_minutes: totalMinutes(unionIntervals(selectedWeek)),
+		minutes,
+		week_minutes: weekMinutes,
+		day_period: periodStatus(
+			minutes * 60_000,
+			targetMinutesFor(date, targetOverrides) * 60_000,
+		),
+		week_period: periodStatus(weekMinutes * 60_000, weekTargetMinutes * 60_000),
 		intervals: concurrencyIntervals(selected),
 		lanes: dayLanes,
 	}

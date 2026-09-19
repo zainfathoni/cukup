@@ -64,6 +64,18 @@ export const mockDashboardReport: DashboardReport = {
 			week: '2026-W36',
 			minutes: 380,
 			week_minutes: 380,
+			day_period: {
+				status: 'UNDER',
+				worked_minutes: 380,
+				target_minutes: 480,
+				difference_minutes: 100,
+			},
+			week_period: {
+				status: 'UNDER',
+				worked_minutes: 380,
+				target_minutes: 2_400,
+				difference_minutes: 2_020,
+			},
 			intervals: [
 				{ start: '2026-08-31T01:15:00.000Z', end: '2026-08-31T03:05:00.000Z', concurrency: 1 },
 				{ start: '2026-08-31T04:00:00.000Z', end: '2026-08-31T04:40:00.000Z', concurrency: 1 },

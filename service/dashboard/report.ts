@@ -41,6 +41,8 @@ export type Timeline = {
 	week: string
 	minutes: number
 	week_minutes: number
+	day_period: TargetPeriod
+	week_period: TargetPeriod
 	intervals: ActivityInterval[]
 	lanes: TimelineLane[]
 }
