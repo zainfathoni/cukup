@@ -15,6 +15,13 @@ on:
         options:
           - preflight
           - deploy
+  workflow_run:
+    workflows:
+      - Publish service image
+    types:
+      - completed
+    branches:
+      - main
 
 permissions:
   actions: read
@@ -27,11 +34,18 @@ concurrency:
 
 jobs:
   deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment: production
     env:
-      CUKUP_REVISION: ${{ inputs.revision }}
+      CUKUP_REVISION: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.revision }}
+      CUKUP_OPERATION: ${{ github.event_name == 'workflow_run' && 'deploy' || inputs.operation }}
       CUKUP_RELEASE_ROOT: ${{ github.workspace }}/release
       CUKUP_IMAGE: ${{ vars.CUKUP_IMAGE || 'zainfathoni/cukup' }}
       CUKUP_DEPLOY_HOST: ${{ vars.CUKUP_DEPLOY_HOST }}
@@ -69,7 +83,7 @@ jobs:
           fetch-depth: 0
           path: release
           persist-credentials: false
-          ref: ${{ inputs.revision }}
+          ref: ${{ env.CUKUP_REVISION }}
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -133,8 +147,8 @@ jobs:
           set -euo pipefail
           printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
 
-      - name: Run production ${{ inputs.operation }}
-        run: scripts/deploy-service "${{ inputs.operation }}"
+      - name: Run production ${{ env.CUKUP_OPERATION }}
+        run: scripts/deploy-service "$CUKUP_OPERATION"
 
       - name: Clean protected deployment files
         if: always()
