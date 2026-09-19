@@ -1,6 +1,6 @@
 # Cukup roadmap
 
-> **Status: accepted product direction.** Outcomes are commitments of direction, not claims that their implementations exist. The deployed product remains Amp-only with event schemas v1/v2 until prospective outcomes pass their own review and rollout. [ADR 0007](docs/adr/0007-generic-harness-evidence-boundary.md) is the current Harness Adapter authority.
+> **Status: personal Amp maintenance.** Cukup is maintained for the owner's personal Amp workflow. Broader Harness Adapter generalization, external adoption, stable SDK work, and multi-user expansion are paused indefinitely. The deployed product remains Amp-only with event schemas v1/v2; the retained plans below are historical context, not active implementation commitments. [ADR 0007](docs/adr/0007-generic-harness-evidence-boundary.md) remains the current Harness Adapter authority if that work resumes.
 
 Cukup is a privacy-first WakaTime for AI-assisted work. Future Working Time is an interaction-based estimate from explicit human observations; Agent Runtime measures evidenced execution separately, excluding explicit waiting for human input. Tokens, cost, prompts, and output volume are not substitutes for either metric.
 
@@ -11,12 +11,11 @@ GitHub issues own scoped work and acceptance criteria; ADRs record durable decis
 - Reconcile and close or rescope completed Fleet rollout issues #30–#33.
 - Make deployment failures externally visible and rehearse backup restoration and rollback on a routine schedule.
 - Keep path-aware release automation and its deployment-operator selection contract covered by regression checks: documentation-only, plugin-only, and other non-image changes must not publish an image, create a service release version, or trigger production deployment.
-- Complete external-implementation-contributor readiness: safe pull-request CI, credential-free integration fixtures, and scoped work with executable acceptance criteria.
-- Establish the generic Harness Adapter foundation below. GitHub issue **#3 (production deploy speed/self-healing)** has a separate owner and is outside this initiative; operations bullets above are not adapter deliverables.
+- Preserve the current personal Amp workflow without activating the paused generic measurement or authority work below.
 
-## Generic Harness Adapter initiative
+## Generic Harness Adapter initiative — paused
 
-Each stage is independently reviewable. Routine engineering decisions belong within its scope; return to the owner for changes to metric semantics, privacy, compatibility, or first-party support scope. These stages are a plan, not blanket implementation or deployment authorization.
+No further implementation or activation is planned without a new owner decision and a concrete user need. The stages are retained to explain prior work and its safety boundaries; they are not a current roadmap or blanket implementation, publication, or deployment authorization.
 
 | Stage | Deliverable | Gate before proceeding |
 | --- | --- | --- |
@@ -62,9 +61,9 @@ Use existing tests plus focused characterization cases for callback/state recove
 - Rollback may pause collection and disclose gaps, but retains accepted records, queues, and compatible ingestion. Returning to legacy target accounting requires a separate owner decision.
 - Attribution uses approved project mappings or explicit bindings, never paths or repository guesses. Native renames refresh future activity automatically; no rename approval workflow or historical relabeling is required.
 
-## External-contributor readiness checkpoint
+## External-contributor readiness checkpoint — paused
 
-Cukup is ready for design contribution now. External implementation needs the relevant gates below, not production access:
+External adoption is not a current goal. If it resumes, implementation still needs the relevant gates below, not production access:
 
 - [x] MIT contribution terms are explicit.
 - [x] `CONTRIBUTING.md` documents setup, boundaries, review expectations, and `bun run check`.
