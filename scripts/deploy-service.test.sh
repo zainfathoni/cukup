@@ -109,6 +109,7 @@ case "$command" in
 			"cukup-service-web-$TEST_PRIOR" \
 			"ghcr.io/zainfathoni/cukup:$TEST_PRIOR"
 		;;
+	*"Config.Env"*) printf '%s\n' "$(printf '%s' "${TEST_RUNTIME_SECRET_VALUE:-test}" | sha256sum | cut -d' ' -f1)" ;;
 	*"sha256sum"*) printf '%s\n' "$(printf 'c%.0s' {1..64})" ;;
 	*"PRAGMA user_version"*) printf '4\nok\n' ;;
 	*) exit 1 ;;
@@ -175,6 +176,12 @@ run_operator() {
 		CUKUP_BACKUP_DIRECTORY=/srv/example-cukup-backups \
 		KAMAL_REGISTRY_USERNAME=zainfathoni \
 		GITHUB_TOKEN=test \
+		CUKUP_OIDC_ALLOWED_USER_ID=test \
+		CUKUP_FLEET_HOSTNAMES=test \
+		CUKUP_GITHUB_OAUTH_CLIENT_ID=test \
+		CUKUP_GITHUB_OAUTH_CLIENT_SECRET=test \
+		CUKUP_GITHUB_ALLOWED_USER_ID=test \
+		CUKUP_DASHBOARD_SESSION_KEYS=test \
 		GITHUB_STEP_SUMMARY="$summary" \
 		"$operator" preflight
 }
@@ -198,7 +205,7 @@ assert_absent 'systemctl start cukup-backup.service' "$root/ssh.log"
 
 : > "$root/kamal.log"
 : > "$root/ssh.log"
-if TEST_LOCKED=1 run_operator "$root/locked-summary"; then
+if TEST_LOCKED=1 run_operator "$root/locked-summary" 2> "$root/locked-stderr"; then
 	printf 'held deployment lock unexpectedly passed preflight\n' >&2
 	exit 1
 fi
@@ -206,6 +213,18 @@ fi
 grep -Fq '`preflight` `failed-before-deploy`' "$root/locked-summary"
 # shellcheck disable=SC2016 # Markdown backticks are literal.
 grep -Fq 'phase `remote-lock`' "$root/locked-summary"
+grep -Fq 'deployment failed at phase: remote-lock' "$root/locked-stderr"
+assert_absent '(^| )(deploy|rollback)( |$)' "$root/kamal.log"
+assert_absent 'systemctl start cukup-backup.service' "$root/ssh.log"
+
+: > "$root/kamal.log"
+: > "$root/ssh.log"
+if TEST_RUNTIME_SECRET_VALUE=wrong run_operator "$root/mismatch-summary" 2> "$root/mismatch-stderr"; then
+	printf 'runtime secret mismatch unexpectedly passed preflight\n' >&2
+	exit 1
+fi
+grep -Fq 'runtime secret does not match protected environment: CUKUP_OIDC_ALLOWED_USER_ID' "$root/mismatch-stderr"
+grep -Fq 'deployment failed at phase: runtime-secrets' "$root/mismatch-stderr"
 assert_absent '(^| )(deploy|rollback)( |$)' "$root/kamal.log"
 assert_absent 'systemctl start cukup-backup.service' "$root/ssh.log"
 

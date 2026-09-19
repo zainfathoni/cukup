@@ -29,6 +29,12 @@ required_environment=(
 	CUKUP_BACKUP_DIRECTORY
 	KAMAL_REGISTRY_USERNAME
 	GITHUB_TOKEN
+	CUKUP_OIDC_ALLOWED_USER_ID
+	CUKUP_FLEET_HOSTNAMES
+	CUKUP_GITHUB_OAUTH_CLIENT_ID
+	CUKUP_GITHUB_OAUTH_CLIENT_SECRET
+	CUKUP_GITHUB_ALLOWED_USER_ID
+	CUKUP_DASHBOARD_SESSION_KEYS
 )
 for name in "${required_environment[@]}"; do
 	[[ -n "${!name:-}" ]] || {
@@ -159,6 +165,28 @@ MemorySwap:.HostConfig.MemorySwap,
 PidsLimit:.HostConfig.PidsLimit,
 Binds:(.HostConfig.Binds | sort)
 }' | sha256sum | cut -d' ' -f1"
+}
+
+verify_runtime_secrets() {
+	local name expected_hash actual_hash matches=1
+	for name in \
+		CUKUP_OIDC_ALLOWED_USER_ID \
+		CUKUP_FLEET_HOSTNAMES \
+		CUKUP_GITHUB_OAUTH_CLIENT_ID \
+		CUKUP_GITHUB_OAUTH_CLIENT_SECRET \
+		CUKUP_GITHUB_ALLOWED_USER_ID \
+		CUKUP_DASHBOARD_SESSION_KEYS; do
+		expected_hash="$(printf '%s' "${!name}" | sha256sum | cut -d' ' -f1)"
+		if ! actual_hash="$(remote "set -o pipefail; docker inspect '$prior_container' | jq -r --arg name '$name' '.[0].Config.Env | map(select(startswith(\$name + \"=\"))) | if length == 1 then .[0][(\$name | length) + 1:] else error(\"missing or duplicate environment entry\") end' | tr -d '\\n' | sha256sum | cut -d' ' -f1" 2>/dev/null)"; then
+			printf 'runtime secret is unavailable for comparison: %s\n' "$name" >&2
+			return 1
+		fi
+		if [[ "$actual_hash" != "$expected_hash" ]]; then
+			printf 'runtime secret does not match protected environment: %s\n' "$name" >&2
+			matches=0
+		fi
+	done
+	(( matches ))
 }
 
 verify_database() {
@@ -373,11 +401,14 @@ on_error() {
 	local status=$?
 	trap - ERR
 	set +e
+	printf 'deployment failed at phase: %s\n' "$phase" >&2
 	if (( mutation_started )); then
 		phase="rollback"
 		if rollback_if_needed; then
+			printf 'rollback verified: restored %s\n' "$prior_version" >&2
 			summary "failed-and-rolled-back"
 		else
+			printf 'rollback could not be verified\n' >&2
 			summary "failed-rollback-unverified"
 		fi
 	else
@@ -422,6 +453,9 @@ git -C "$release_root" merge-base --is-ancestor "$prior_version" "$candidate"
 git -C "$release_root" show "$prior_version:service/store.ts" | grep -Eq '^const DATABASE_VERSION = 4$'
 prior_runtime_hash="$(runtime_hash "$prior_container")"
 [[ "$prior_runtime_hash" =~ ^[0-9a-f]{64}$ ]]
+phase="runtime-secrets"
+verify_runtime_secrets
+phase="current-service"
 verify_database
 verify_service
 
