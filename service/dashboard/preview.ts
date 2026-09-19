@@ -79,10 +79,17 @@ const events = [
 	}),
 ]
 
+// Historical all-day-off overrides make the selected W35 fixture visibly over target.
+const targetOverrides = new Map(
+	['2026-08-24', '2026-08-25', '2026-08-26', '2026-08-27', '2026-08-28'].map(
+		(date) => [date, 0] as const,
+	),
+)
+
 const store: DashboardReportStore = {
 	events: () => events.map(({ executorLabel: _, ...event }) => event),
 	attributedEvents: () => events,
-	targetOverrides: () => new Map(),
+	targetOverrides: () => targetOverrides,
 	listBearerMetadata: () => [
 		{ executorLabel: 'machine-a', revokedAt: null },
 		{ executorLabel: 'retired-machine', revokedAt: '2026-08-02T00:00:00.000Z' },

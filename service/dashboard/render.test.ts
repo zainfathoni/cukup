@@ -54,9 +54,11 @@ describe('dashboard rendering', () => {
 		expect(html).toContain('class="verdict-grid activity-period-grid"')
 		expect(html).toContain('<span>Selected day</span>')
 		expect(html).toContain('<span class="verdict-figure">6h 20m</span>')
-		expect(html).toContain('<p class="verdict-target">7 intervals · 2026-08-31</p>')
+		expect(html).toContain('Selected day: 6h 20m worked against target 8h 0m')
+		expect(html).toContain('<p class="verdict-caption">1h 40m remaining</p>')
 		expect(html).toContain('<span>Selected ISO week</span>')
-		expect(html).toContain('<p class="verdict-target">2026-W36</p>')
+		expect(html).toContain('Selected ISO week: 6h 20m worked against target 40h 0m')
+		expect(html).toContain('its full Monday–Sunday 2026-W36 week, not separate project or executor quotas')
 		expect(html).not.toContain('Time by project and executor')
 		expect(html).not.toContain('period-breakdown')
 		expect(html).toContain('line up vertically describe the same minutes and must not be added')
@@ -95,11 +97,44 @@ describe('dashboard rendering', () => {
 		report.timeline.data.minutes = 0
 		report.timeline.data.week = '2026-W35'
 		report.timeline.data.week_minutes = 0
+		report.timeline.data.day_period = {
+			status: 'COMPLETE',
+			worked_minutes: 0,
+			target_minutes: 0,
+			difference_minutes: 0,
+		}
+		report.timeline.data.week_period = {
+			status: 'UNDER',
+			worked_minutes: 0,
+			target_minutes: 2_400,
+			difference_minutes: 2_400,
+		}
 		report.timeline.data.intervals = []
 		report.timeline.data.lanes = []
 		const html = renderDashboardContent(report, { ...selection, timeline_date: '2026-08-29' })
 		expect(html).toContain('class="heat-cell heat-3 heat-selected" data-timeline-date="2026-08-29"')
-		expect(html).toContain('0 intervals · 2026-08-29')
+		expect(html).toContain('<span>Selected day</span>')
+		expect(html).toContain('<p class="verdict-caption">Target met</p>')
+	})
+
+	test('shows over-target status and duration for a selected historical week', () => {
+		const report = structuredClone(mockDashboardReport)
+		if (report.timeline.state === 'unavailable') throw new Error('Expected timeline')
+		report.timeline.data.date = '2026-08-28'
+		report.timeline.data.week = '2026-W35'
+		report.timeline.data.week_period = {
+			status: 'OVER',
+			worked_minutes: 4_264,
+			target_minutes: 2_400,
+			difference_minutes: 1_864,
+		}
+		const html = renderDashboardContent(report, {
+			...selection,
+			timeline_date: '2026-08-28',
+		})
+		expect(html).toContain('<span class="verdict-figure">71h 4m</span>')
+		expect(html).toContain('Selected ISO week: 71h 4m worked against target 40h 0m')
+		expect(html).toContain('<p class="verdict-caption">31h 4m over target</p>')
 	})
 
 	test('renders native keyboard controls and keeps filter state out of resource URLs', () => {
