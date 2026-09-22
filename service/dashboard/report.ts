@@ -96,6 +96,7 @@ export type DashboardReport = {
 	schema_version: 1
 	as_of: string
 	timezone: string
+	timeline_date: string
 	available_projects: string[]
 	available_executors: string[]
 	overall: Panel<OverallSummary>
@@ -115,4 +116,25 @@ export type DashboardSelection = {
 
 export interface DashboardTransport {
 	load(selection: DashboardSelection): Promise<DashboardReport>
+}
+
+export function reportTimelineDate(report: DashboardReport): string {
+	return report.timeline_date
+}
+
+export function effectiveTimelineDate(
+	report: DashboardReport,
+	selection: DashboardSelection,
+): string {
+	return selection.timeline_date ?? reportTimelineDate(report)
+}
+
+export function isoWeekStart(value: string): string {
+	const date = new Date(`${value}T00:00:00Z`)
+	date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7))
+	return date.toISOString().slice(0, 10)
+}
+
+export function sameIsoWeek(left: string, right: string): boolean {
+	return isoWeekStart(left) === isoWeekStart(right)
 }

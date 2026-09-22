@@ -48,6 +48,7 @@ export const mockDashboardReport: DashboardReport = {
 	schema_version: 1,
 	as_of: '2026-08-31T09:42:00.000Z',
 	timezone: 'Asia/Jakarta',
+	timeline_date: '2026-08-31',
 	available_projects: ['cukup', LONG_SLUG, 'personal-site', 'Unassigned'],
 	available_executors: ['amp-orb', 'nixos-workstation', 'unassigned-executor'],
 	overall: {

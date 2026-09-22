@@ -117,7 +117,7 @@ export function buildDashboardReport(
 	const asOf = new Date(nowMs).toISOString()
 	let labels: DashboardLabels = { projects: [], executors: [] }
 	try {
-		labels = availableDashboardLabels(store)
+		labels = availableDashboardLabelsForWeek(store.attributedEvents(), selection, nowMs)
 	} catch {
 		// Label discovery is not allowed to make otherwise independent panels look healthy.
 	}
@@ -125,6 +125,8 @@ export function buildDashboardReport(
 		schema_version: 1,
 		as_of: asOf,
 		timezone: SERVICE_TIMEZONE,
+		timeline_date:
+			selection.timeline_date ?? civilDateString(localDateAt(nowMs, SERVICE_TIMEZONE)),
 		available_projects: labels.projects,
 		available_executors: labels.executors,
 		overall: buildPanel('Working-time summary is unavailable.', () => {
@@ -150,6 +152,23 @@ export function buildDashboardReport(
 		executors: buildPanel('Executor details are unavailable.', () =>
 			buildExecutors(store.attributedEvents(), store.listBearerMetadata()),
 		),
+	}
+}
+
+function availableDashboardLabelsForWeek(
+	events: readonly AttributedStoredWorkEvent[],
+	selection: DashboardSelection,
+	nowMs: number,
+): DashboardLabels {
+	const today = localDateAt(nowMs, SERVICE_TIMEZONE)
+	const date = selection.timeline_date === undefined ? today : parseCivilDate(selection.timeline_date)!
+	const weekStart = addDays(date, -mondayOffset(date))
+	const startMs = startOfZonedDay(weekStart, SERVICE_TIMEZONE)
+	const endMs = Math.min(startOfZonedDay(addDays(weekStart, 7), SERVICE_TIMEZONE), nowMs)
+	const intervals = clipAttributedIntervals(attributedIntervals(events, nowMs), startMs, endMs)
+	return {
+		projects: [...new Set(intervals.map((interval) => interval.project))].sort(labelOrder),
+		executors: [...new Set(intervals.map((interval) => interval.executor))].sort(labelOrder),
 	}
 }
 
