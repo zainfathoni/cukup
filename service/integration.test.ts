@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
+import { existsSync } from 'node:fs'
 import { createLocalStack } from './fixture.ts'
 
 test('plugin migrates and converges delayed legacy evidence through the service contract', async () => {
@@ -59,20 +60,39 @@ test('the local stack needs no ambient credential, token file, or service URL', 
 	const previous = new Map(removed.map((name) => [name, process.env[name]]))
 	for (const name of removed) delete process.env[name]
 
-	const stack = createLocalStack()
 	try {
-		expect(stack.token).toMatch(/^cukup_v1_/)
-		expect(stack.pluginPath.startsWith(stack.directory)).toBe(true)
-		expect(stack.servicePath.startsWith(stack.directory)).toBe(true)
-		expect((await stack.client.fetchSummary(stack.token)).schema_version).toBe(1)
-		await expect(stack.client.fetchSummary('an-unverifiable-workload-jwt')).rejects.toThrow(
-			'Cukup authentication was rejected.',
-		)
+		const stack = createLocalStack()
+		try {
+			expect(stack.token).toMatch(/^cukup_v1_/)
+			expect(stack.pluginPath.startsWith(stack.directory)).toBe(true)
+			expect(stack.servicePath.startsWith(stack.directory)).toBe(true)
+			expect(await stack.sync.runNow()).toEqual({ authoritativeSummary: true })
+			await expect(stack.client.fetchSummary('header.payload.signature')).rejects.toThrow(
+				'Cukup authentication was rejected.',
+			)
+		} finally {
+			await stack.close()
+		}
 	} finally {
-		await stack.close()
 		for (const [name, value] of previous) {
 			if (value === undefined) delete process.env[name]
 			else process.env[name] = value
 		}
 	}
+})
+
+test('the local stack removes temporary state when setup fails', () => {
+	let directory: string | undefined
+
+	expect(() =>
+		createLocalStack({
+			seedPluginDatabase(pluginPath) {
+				directory = pluginPath.replace(/\/plugin\/state\.sqlite$/, '')
+				throw new Error('seed failed')
+			},
+		}),
+	).toThrow('seed failed')
+
+	expect(directory).toBeDefined()
+	expect(existsSync(directory!)).toBe(false)
 })
