@@ -29,6 +29,8 @@ bun run check
 
 `bun run check` runs tests, TypeScript checking, and plugin/service/browser builds. It is the required local gate. A future pull-request workflow will run the same non-secret checks for contributor branches; until that exists, implementation-contributor readiness remains incomplete.
 
+For credential-free plugin/service integration tests, use `service/fixture.ts`'s `createLocalStack()`. It creates temporary SQLite stores, an in-process service app, a locally issued bearer, and a deterministic clock; requests never leave the process, and `close()` removes the temporary state. The fixture is test-only and exercises the existing plugin/service boundary, not a Harness Adapter implementation.
+
 ## Architecture boundaries
 
 - Harness Adapters observe native systems and emit harness-neutral evidence.
