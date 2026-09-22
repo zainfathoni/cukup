@@ -1,88 +1,44 @@
 # Cukup roadmap
 
-> **Status: personal Amp maintenance.** Cukup is maintained for the owner's personal Amp workflow. Broader Harness Adapter generalization, external adoption, stable SDK work, and multi-user expansion are paused indefinitely. The deployed product remains Amp-only with event schemas v1/v2; the retained plans below are historical context, not active implementation commitments. [ADR 0007](docs/adr/0007-generic-harness-evidence-boundary.md) remains the current Harness Adapter authority if that work resumes.
+**Current scope: personal Amp maintenance.** Other harnesses, external adoption, stable SDK work, and multi-user support are paused indefinitely. Production remains Amp-only v1/v2.
 
-Cukup is a privacy-first WakaTime for AI-assisted work. Future Working Time is an interaction-based estimate from explicit human observations; Agent Runtime measures evidenced execution separately, excluding explicit waiting for human input. Tokens, cost, prompts, and output volume are not substitutes for either metric.
+GitHub issues own scoped work and acceptance criteria. ADRs own durable decisions. Review priorities monthly; retained plans do not authorize implementation or deployment.
 
-GitHub issues own scoped work and acceptance criteria; ADRs record durable decisions. Review this roadmap monthly and change outcomes when evidence changes.
+## What work is active?
 
-## Now — establish the product foundation
+- Preserve the owner's personal Amp workflow.
+- Reconcile completed Fleet rollout issues [#30–#33](https://github.com/zainfathoni/fleet/issues/30).
+- Make deployment failures externally visible.
+- Rehearse backup restoration and rollback regularly.
+- Preserve the release policy: changes outside service-image inputs must not cause automatic service publication or deployment.
 
-- Reconcile and close or rescope completed Fleet rollout issues #30–#33.
-- Make deployment failures externally visible and rehearse backup restoration and rollback on a routine schedule.
-- Keep path-aware release automation and its deployment-operator selection contract covered by regression checks: documentation-only, plugin-only, and other non-image changes must not publish an image, create a service release version, or trigger production deployment.
-- Preserve the current personal Amp workflow without activating the paused generic measurement or authority work below.
+## Generic Harness Adapter initiative
 
-## Generic Harness Adapter initiative — paused
+**Paused.** Resume only after a new owner decision and a concrete user need. [ADR 0007](docs/adr/0007-generic-harness-evidence-boundary.md) governs this work. [ADR 0008](docs/adr/0008-do-not-infer-working-time-from-agent-runtime.md) rejects runtime-based estimates of human collaboration.
 
-No further implementation or activation is planned without a new owner decision and a concrete user need. The stages are retained to explain prior work and its safety boundaries; they are not a current roadmap or blanket implementation, publication, or deployment authorization.
+The retained sequence is:
 
-| Stage | Deliverable | Gate before proceeding |
-| --- | --- | --- |
-| 1. Documentation foundation | Supersede ADR 0006; reconcile product language, contribution boundaries, and candidate Tycho guidance with ADR 0007. | No active-doc claim that the new metrics/protocol are deployed or that an unmerged Tycho contract is accepted. |
-| 2. Preserve Amp behavior | Isolate native Amp observation behind an internal legacy boundary. | Existing and focused characterization tests preserve v1/v2 records, recovery, ordering, attribution, synchronization, and totals. No new metric semantics. |
-| 3. Experimental protocol | Review version negotiation, explicit capabilities, closed evidence families, identity, timing, and conformance fixtures. | Rich, partial, and process-lifecycle-only sources map without invented human origin or execution time. Specify conflicts, unsupported versions, clocks, duplicates, and recovery. No stable SDK promise. |
-| 4. Durable receiver | Implement bounded delivery, persist-before-acknowledgement, safe retries, execution-site binding, and secure caller-managed local runtime provisioning; allow separate collectors and approved embedded packaging. Immediate, retry-safe receiver-token rotation with no overlap is implemented for the caller-managed runtime. | Restart, offline delivery, storage failure, replay, conflicting IDs, prohibited-field, lifecycle, ownership, stale-discovery, and rotation-boundary tests; measurement failure cannot indefinitely block AI work. Initial macOS/Linux and Amp-orb packaging verification remains required before claiming support. |
-| 5. New measurements in shadow | Separately review cloud protocol/persistence, aggregation, migration, and dashboard slices. | v1/v2 and queued data remain unchanged; union, late evidence, cutover clipping, and unresolved runtime are tested. Dashboard distinguishes estimated, runtime, and legacy metrics, coverage gaps, and unavailable data. |
-| 6. Real collectors and opt-in cutover | Validate supported Amp, Tycho, Claude Code, or other surfaces without fixing their order in advance. | Stable compatibility requires three real harness integrations plus weak-capability/recovery tests. Authoritative cutover separately requires shadow validation, dashboard readiness, and explicit owner acceptance of coverage and one Monday 00:00 Asia/Jakarta account-wide transition. |
+1. Agree on language, ownership, and privacy.
+2. Separate Amp observation without changing existing behavior.
+3. Validate an experimental evidence protocol.
+4. Verify durable local delivery and installation.
+5. Validate separate measurements without changing authoritative totals.
+6. Validate real collectors before an owner-approved accounting transition.
 
-Stable SDK publication and accounting cutover are distinct gates; neither implies the other. Collectors may be first-party, harness-owned, or third-party, embedded or separate. Protocol compatibility is not official support. An unmerged Tycho fork cannot satisfy a supported integration gate.
+The experimental receiver and Amp collector exist. The [orb proof](docs/incidents/2026-09-13-experimental-amp-proof.md) used temporary activation. It did not establish repeatable installation, service packaging, physical-machine support, or human-interaction evidence.
 
-### Stage 4 durable receiver substage ledger
+Remaining gates:
 
-This ledger is the authoritative implementation sequence within top-level Stage 4. Completion means the experimental slice and its focused contract tests exist; it does not claim deployment, stable compatibility, or first-party operating-system support.
+- Verify installation, restart, delivery, and removal on macOS, Linux, and Amp orbs before claiming support.
+- Review cloud storage, aggregation, migration, and dashboard changes separately.
+- Require three real harness integrations plus limited-capability and recovery tests before stable SDK compatibility.
+- Require shadow validation, dashboard readiness, and explicit owner acceptance of coverage before changing authoritative accounting.
+- Use one owner-approved Monday at 00:00 Asia/Jakarta for the account-wide transition.
 
-| Substage | Status | Independently reviewable deliverable |
-| --- | --- | --- |
-| 4A | Complete | Transport-independent durable receiver core with persist-before-outcome, immutable negotiation/site binding, replay, conflict, and pending-segment behavior. |
-| 4B1 | Complete | Authenticated, bounded IPv4-loopback HTTP transport around the caller-owned receiver. |
-| 4B2 | Complete | Explicit-drain collector client with a bounded sanitized durable spool and retry-safe FIFO delivery. |
-| 4B3A | Complete | Caller-managed secure state-directory provisioning, SQLite runtime ownership, endpoint publication/discovery, and clean stop. |
-| 4B3B | Complete | Immediate synchronous receiver-token rotation with no credential overlap and reconcile-or-withdraw failure behavior. |
-| 4B3C | Complete | Foreground Bun receiver command with strict arguments and serialized `SIGHUP` rotation plus `SIGTERM`/`SIGINT` shutdown. No daemonization or autonomous delivery poller. |
-| Experimental Amp shadow collector | Complete experimental slice | Real supported Amp hooks produce live, Unassigned execution segments without claiming engagement evidence, recovery, or official Amp support. |
-| Actual Amp-orb technical proof | Complete experimental slice | [Corrected proof](docs/incidents/2026-09-13-experimental-amp-proof.md) used temporary activation—not installer or service packaging—and established actual hooks across consecutive turns, supervised receiver lifecycle, durable outage spooling, receiver-restart retention, and plugin-reload rediscovery and drain. The expected restart-lost open segment remained pending. There are no autonomous retries; endpoint changes require plugin reload; no engagement evidence was established. This is not macOS, Linux, official support, packaging-completion, deployment, or cutover evidence. |
-| Remaining Stage 4 work | Not started | Repeatable installation and removal, service packaging, and macOS/Linux verification before any support claim. Amp-orb service packaging was not established by the temporary technical proof. |
+Stable compatibility and accounting transition are separate approvals. Neither experimental conformance nor an unmerged Tycho fork establishes official support.
 
-Top-level Stage 5 remains the separate cloud protocol, persistence, aggregation, migration, and shadow-dashboard phase. Top-level Stage 6 remains the separate real-collector validation and owner-approved opt-in cutover phase.
+## What must precede external contributions?
 
-### First independently reviewable code slice
+If external adoption resumes, require contributor-branch checks without secrets or publication access. Also require credential-free fixtures for the relevant adapter path, scoped issues, and verified collector capabilities.
 
-After documentation review, extract only the native Amp observation responsibility from the existing plugin into an internal legacy adapter boundary. Preserve the existing persistence transaction, local native-key recovery, random wire identities, sequence/outbox behavior, project resolution, v1/v2 payloads, and historical grace/crash-cap aggregation. Keep the legacy boundary explicitly separate from future Engagement Observations and execution intervals.
-
-Use existing tests plus focused characterization cases for callback/state recovery, duplicates and restart, completed versus unmatched turns, and attribution. Run `bun run check`. This slice must not introduce a daemon, new protocol, new metric, Tycho collector, project-rename fix, dashboard change, or historical migration. Review its diff as a behavior-preserving refactor before starting protocol behavior changes.
-
-### Rollout invariants
-
-- Explicit human interactions alone open or renew 15-minute estimated Working Time windows; execution does not extend them. Missing observations bound a richer-observation window metric, not actual human attention.
-- Agent Runtime initially includes only defensible closed execution intervals, excluding explicit human-input waits. Pending work contributes no provisional duration; missing endpoints remain unresolved.
-- The dashboard keeps target-bearing **Working Time · estimated**, targetless **Agent Runtime**, and historical **Legacy Working Time · turn-based** distinct across charts, filters, and summaries. Never add these overlapping metrics together or fill missing evidence with zero.
-- Account-wide cutover preserves complete legacy records separately; only independently collected new evidence contributes to new metrics after the boundary. Late evidence belongs to occurrence time and may increase past totals.
-- Rollback may pause collection and disclose gaps, but retains accepted records, queues, and compatible ingestion. Returning to legacy target accounting requires a separate owner decision.
-- Attribution uses approved project mappings or explicit bindings, never paths or repository guesses. Native renames refresh future activity automatically; no rename approval workflow or historical relabeling is required.
-
-## External-contributor readiness checkpoint — paused
-
-External adoption is not a current goal. If it resumes, implementation still needs the relevant gates below, not production access:
-
-- [x] MIT contribution terms are explicit.
-- [x] `CONTRIBUTING.md` documents setup, boundaries, review expectations, and `bun run check`.
-- [x] Accepted generic ownership and metric decisions are independent of native Amp/Tycho APIs.
-- [x] Zain Fathoni is the initial Cukup maintainer; upstream maintainers own acceptance of their native API changes.
-- [ ] Contributor-branch CI runs all non-secret checks and cannot publish or deploy.
-- [ ] Credential-free fixtures exercise the relevant local service and adapter path without Fleet or production access.
-- [ ] Each implementation slice has scoped work recording non-goals, privacy constraints, and executable acceptance criteria.
-- [ ] Each collector proposal verifies its actual supported surfaces and capability limits; no assumed Tycho open-run contract.
-
-## Next — broaden personal use
-
-- Make installation and onboarding repeatable without access to the creator's Fleet repository or production environment.
-- Add privacy-safe composition observations where supported, independently of other harness capabilities.
-- Add useful personal exports, goals, and project/agent activity views while keeping time distinct from tokens, cost, and outcomes.
-
-## Later — expand the product surface
-
-- Evaluate further Harnesses based on demand, evidence fidelity, and privacy-safe coverage.
-- Offer token and cost telemetry as optional, separately named dimensions if it preserves the privacy contract.
-- Explore multi-user tenancy, team privacy controls, aggregate reporting, and organization-level workflow trends.
-- Decide whether long-term distribution is hosted, self-hosted, or both.
+Repeatable onboarding, exports, further harnesses, optional cost telemetry, team features, and distribution choices remain possibilities, not commitments.

@@ -1,141 +1,144 @@
 # Shared service operations runbook
 
-This runbook describes the deployed Cukup service. Following it does not by itself authorize a release, production mutation, credential operation, DNS/TLS change, restore, or rollback.
+This runbook describes the deployed service. It does not authorize a release, production mutation, credential change, restore, or rollback.
 
 ## Ownership and production baseline
 
-The current owner assignments are:
+Zain Fathoni owns the service, DNS, TLS, backups, incident response, and credential revocation.
 
-| Responsibility | Required owner |
-| --- | --- |
-| Service/runtime | Zain Fathoni |
-| DNS and TLS | Zain Fathoni |
-| Backup schedule, retention, and off-site pull | Zain Fathoni |
-| Incident response and credential revocation | Zain Fathoni |
+Production runs on `production-host` behind Kamal Proxy. The public hosts are `api.cukup.dev` and `cukup.dev`.
 
-Production runs on `production-host` behind Kamal Proxy at `api.cukup.dev` and `cukup.dev`. The linux/amd64 role is capped at half of one CPU, 256 MiB RAM+swap, and 128 processes with a read-only root filesystem. Initial deployment and subsequent releases passed public reachability, authenticated API, dashboard, restart, runtime-contract, database-integrity, preservation, and rollback-retention checks. Sustained saturation and a durable external operator-failure alert remain operational concerns.
+GitHub Actions is the active deployment authority. Keep the retired off-site operator LaunchAgent disabled or revoke its authority. Prevent concurrent production operators.
 
-Keep the active backup cadence, retention, targets, and monitoring status in private operator configuration. Verify online snapshots, off-site retrieval, and a clean restore.
+Keep the recovery objectives, backup schedules, and retention settings in the private operator runbook.
+
+There is no cloud object-storage dependency. Keep the monitoring status in the private operator runbook. Verify alert delivery and owner response before claiming coverage.
 
 ## Runtime and TLS
 
-`Dockerfile.service` builds a non-root Bun image containing the server plus database/token operator bundles. `/var/lib/cukup` is the only persistent volume. `config/deploy.service.yml` is a distinct Kamal application with hostname, host, image, registry, allowed OIDC user, and host-volume path supplied outside Git. It contains no credential values. Before first start, create the host data directory with ownership that maps to the image's `bun` user and mode `0700`; a bind mount overrides the directory ownership baked into the image.
+Keep `/var/lib/cukup` as the persistent volume. Create the host data directory with mode `0700` and image-user ownership before first start.
 
-Required deployment inputs:
+Keep container port 3000 private to Kamal Proxy. Public TLS terminates at the proxy. The service trusts `X-Forwarded-Proto` only on this private boundary.
 
-- `CUKUP_IMAGE`: image name without embedding registry credentials;
-- `CUKUP_DEPLOY_HOST`: authorized VPS host;
-- `CUKUP_API_HOSTNAME` and `CUKUP_DASHBOARD_HOSTNAME`: exact public hostnames;
-- `CUKUP_DATA_DIRECTORY`: persistent host directory (defaults to `/srv/example-cukup-data`);
-- `KAMAL_REGISTRY_USERNAME` and Kamal secret `KAMAL_REGISTRY_PASSWORD`;
-- Kamal secret `CUKUP_OIDC_ALLOWED_USER_ID`, containing only the exact permitted Amp `user_id`;
-- Kamal secret `CUKUP_FLEET_HOSTNAMES`, containing the comma-separated exact canonical lowercase hostnames permitted to bind physical credentials;
-- `CUKUP_NEW_TURN_EVENT_SCHEMA_VERSION`, currently `2` after the plugin attribution rollout passed orb and physical-runner canaries. Set it back to `1` to make only future turns use v1 without disabling delayed v2 replay.
+Inject registry, OIDC, Fleet, OAuth, and session values through protected configuration. Do not store credential values in the Kamal file.
 
-The fixed OIDC issuer and audience are code constants, not deployment overrides. The container accepts HTTP only behind Kamal Proxy and requires the single exact value `X-Forwarded-Proto: https` on secure API and dashboard routes; Kamal Proxy owns public TLS. Routing uses the preserved original `Host` and never trusts `X-Forwarded-Host`. Direct Bun TLS is available outside this asset by setting both `CUKUP_TLS_CERT_PATH` and `CUKUP_TLS_KEY_PATH`. Never expose container port 3000 publicly because proxy-header trust relies on that network boundary.
+Production sets `CUKUP_NEW_TURN_EVENT_SCHEMA_VERSION=2`. Set it to `1` only to move future turn starts back to v1.
 
-The checked-in Kamal asset configures both exact hosts and uses host-agnostic `/up` for Kamal Proxy readiness while public API liveness remains the API-host `/healthz`. Inject `CUKUP_GITHUB_OAUTH_CLIENT_ID`, `CUKUP_GITHUB_OAUTH_CLIENT_SECRET`, `CUKUP_GITHUB_ALLOWED_USER_ID`, and `CUKUP_DASHBOARD_SESSION_KEYS` only through protected runtime configuration. Missing or invalid values disable dashboard routes without affecting ingestion. The exact routes, key-ring rotation procedure, report contract, and release checks are in [the dashboard service contract](dashboard-service.md).
+Missing dashboard secrets disable dashboard routes. They do not disable ingestion. See [the dashboard contract](dashboard-service.md).
 
 ## Publication and protected deployment operator
 
-GitHub Actions verifies and publishes an immutable linux/amd64 GHCR image labeled with the service name, source repository, and revision when a `main` change touches an image input: `service/`, `Dockerfile.service`, `package.json`, `bun.lock`, or `tsconfig.json`. An operator may also dispatch the workflow manually. The protected off-site operator operator recorded in [Fleet](https://github.com/zainfathoni/fleet) follows the newest successful push publication whose SHA remains an ancestor of signed Cukup `main`; verifies that candidate's signature, image labels, and architecture; creates and independently retrieves a backup; deploys with Kamal; validates API/dashboard/database/preservation contracts; and records success only after all gates pass. Its automatic rollback uses the captured prior v4-aware release.
+Use the protected GitHub `production` environment for deployment. Do not use the retired off-site operator deployment operator.
 
-Documentation-only, plugin-only, workflow-only, test-only, and other changes outside those image inputs create no service image or release version and do not trigger production deployment. They may be pushed directly to `main` through the normal repository policy. A manually dispatched publication is not selected automatically because the deployment operator requires a push-triggered run.
+Before an approved release, run non-mutating local checks:
 
-The publication filter and operator selection rule are one contract: if image inputs change, the push must publish that exact SHA; otherwise the operator keeps the latest qualifying ancestor. Preserve signed-tip and signed-candidate verification, same-revision workflow evidence, immutable image verification, backup, acceptance, and rollback gates when changing either side.
-
-Before changing a release, render and validate the config and build the image without deploying:
-
-```bash
+```sh
 kamal config -c config/deploy.service.yml
 docker build -f Dockerfile.service -t cukup-service-rc .
 ```
 
-After explicit deployment approval, verify minimal health through both final HTTPS hostnames, then authenticated capabilities/time/summary, dashboard sign-in/report/logout, database integrity, preservation, and persistence across one normal restart. Do not paste credentials, JWTs, headers, identity-bearing responses, dashboard data, or database rows into Fleet, GitHub, or an Amp thread.
+After deployment, verify API health, authenticated API behavior, dashboard login, database integrity, preservation, and one normal restart.
 
-Record the deployed immutable image reference and the prior known-good migration-aware reference for every release. SQLite `user_version=4` is the half-day target rollout floor. Fresh, v1, and v2 databases create the latest `target_overrides(date, target_minutes, created_at, updated_at)` table directly; a v3 database transactionally rebuilds its strict zero-only table while preserving every existing override and audit timestamp. The v4 table accepts exactly target 0 or 240 and no reason or other free text. Startup is restart-safe, leaves v4 unchanged, never lowers `user_version`, and fails closed on v5 or newer. Once v4 has opened the persistent database, never run or restore a pre-v4 binary against it.
+Record the deployed immutable image and the prior known-good v4-aware image. Keep both available for rollback.
 
-To roll back attribution, set `CUKUP_NEW_TURN_EVENT_SCHEMA_VERSION=1` so only future turns start as v1. The service must continue accepting delayed and in-progress v2 events. To roll back application code after v4 migration, deploy only a tested v4-aware reference against the existing persistent volume, then verify authenticated capabilities, time, mixed v1/v2 delayed replay, full-day/half-day target set and clear, summary schema 1, labeled token rotation, and one further normal restart. Do not run a v3-only image or replace SQLite merely to roll back application behavior: restore a backup only for a diagnosed data incident, using the stopped-service procedure below.
+SQLite `user_version=4` is the production floor. Never run a pre-v4 binary against a database opened by v4.
 
-The completed v4 rollout deployed the service before publishing the plugin's half-day option. Retain that compatibility rule for recovery: older zero-target clients remain compatible, but a pre-v4 service does not understand a half-day selection and must never run against the migrated database. The rollout verified a pre-migration backup, 0→240→clear behavior, schema-1 summary and dashboard targets, restart, post-migration backup retrieval, and clean restore without recording exercised dates, bodies, credentials, or responses.
+For attribution rollback, prefer event schema v1 only for future starts. Continue to accept delayed and active v2 evidence.
+
+For application rollback, deploy only a tested v4-aware image. Do not replace SQLite to reverse application behavior.
 
 ## Physical-machine bearer lifecycle
 
-Operate on the persistent database from a protected administrative session. Token values are generated server-side, printed exactly once, and never accepted as process arguments or environment variables. Start with `umask 077` and redirect output to a protected file rather than terminal capture:
+Use a protected administrative session. Set `umask 077`. Redirect new token output to a protected file.
 
-```bash
+```sh
 umask 077
-bun run service:token issue /var/lib/cukup/cukup.sqlite > /secure-transfer/new-machine-token.json
+bun run service:token issue /var/lib/cukup/cukup.sqlite \
+  > /secure-transfer/new-machine-token.json
 ```
 
-Deliver the token through an approved narrow secret channel. Keep the nonsecret `token_id` for operations.
+Deliver the token through an approved narrow secret channel. Keep the nonsecret token ID for later operations.
 
-The current Amp plugin binds the bearer before its first v2 upload through `PUT /v1/executor-profile`. Binding is exact and immutable; an unrecognized hostname, rename attempt, or label already held by another active lineage fails without changing the credential. Keep the complete allowlist configured before permitting v2 starts.
+Keep every physical hostname in the Fleet allowlist before v2 starts. A hostname binding is exact and cannot rename a lineage.
 
-Rotation atomically revokes the old token, copies its Executor Label to the replacement, and only then transfers all its random source claims:
+Rotate a token with:
 
-```bash
-bun run service:token rotate TOKEN_ID /var/lib/cukup/cukup.sqlite > /secure-transfer/replacement-token.json
+```sh
+bun run service:token rotate TOKEN_ID /var/lib/cukup/cukup.sqlite \
+  > /secure-transfer/replacement-token.json
 ```
 
-Confirm the replacement works, then remove the transfer file. Rotation already revokes the old value. Emergency revocation is independent per machine:
+Confirm the replacement. Then remove the transfer file. Rotation already revokes the old token.
 
-```bash
+For emergency revocation and inspection, run:
+
+```sh
 bun run service:token revoke TOKEN_ID /var/lib/cukup/cukup.sqlite
 bun run service:token list /var/lib/cukup/cukup.sqlite
 ```
 
-`list` emits token IDs, lifecycle timestamps, and nullable Executor Labels—never hashes or bearer values. Treat its output as machine-identifying operational data. A fresh Amp orb uses workload OIDC, derives `amp-orb`, and must never receive a physical-machine token. Historical evidence is not rewritten: source ownership derives the current lineage label, and history from a never-bound physical lineage remains `unassigned-executor`.
+Treat list output as machine-identifying operational data. Never give a physical token to an Amp orb.
 
 ## Integrity and online backup
 
-The service uses WAL mode and restrictive directory/database permissions. `backup` opens the live source read-only and executes SQLite `VACUUM INTO`, producing a transactionally consistent online snapshot without copying WAL files. The snapshot includes target overrides and their audit timestamps with the rest of SQLite. It then runs full `PRAGMA integrity_check`, records SQLite schema version, size, SHA-256, creation time, and backup ID in adjacent JSON metadata, and publishes both files atomically.
+Run these commands for integrity, backup, and verification:
 
-```bash
+```sh
 bun run service:db integrity /var/lib/cukup/cukup.sqlite
 bun run service:db backup /srv/example-cukup-backups /var/lib/cukup/cukup.sqlite
-bun run service:db verify /srv/example-cukup-backups/BACKUP.sqlite /srv/example-cukup-backups/BACKUP.json
+bun run service:db verify BACKUP.sqlite BACKUP.json
 ```
 
-Run and verify backups at the configured interval. Apply the configured retention policy and keep each database file with its metadata.
+Keep each SQLite file with its JSON metadata. A backup succeeds only after integrity and metadata verification.
 
-An independent system must pull—not merely push—the pair off the VPS. A provider-neutral example from the off-site system is:
+Create and verify local backups at the approved interval. Apply the configured retention policy.
 
-```bash
-rsync --archive --protect-args DEPLOY_HOST:/srv/example-cukup-backups/ /independent/cukup-backups/
-bun run service:db verify /independent/cukup-backups/BACKUP.sqlite /independent/cukup-backups/BACKUP.json
-```
+Pull backup pairs from the production host to an independent backup host. Verify each pair after retrieval and apply the configured retention policy.
 
-Pull backup pairs from an independent host and verify them on receipt. Apply the configured retention policy after a successful inventory check. Prove a clean restore before claiming off-site protection.
+Prune off-site pairs only after a successful inventory check. Record backup verification success or alert Zain Fathoni on failure.
+
+Do not count a push from the VPS as independent recovery. A missed pull can degrade the recovery point objective.
 
 ## Clean restore and replacement
 
-Perform a clean restore drill at the approved interval and before any recovery-path change:
+Perform clean restore drills at the approved interval. Also perform one before a recovery-path change.
 
-1. Retrieve one database/metadata pair from the off-site system into a new protected directory.
-2. Verify it before touching any service database.
-3. Restore to a new path, run integrity, start an isolated service against it, and authenticate with a designated drill credential.
-4. Confirm expected mixed-schema event count, summary schema 1, executor attribution, target overrides, and token rotation; record only nonsensitive evidence (backup ID, backup creation time, integrity result, and pass/fail).
+1. Retrieve one backup pair into a new protected directory.
+2. Verify the pair before you touch any service database.
+3. Restore to a new path.
+4. Run database integrity.
+5. Start an isolated service with the restored database.
+6. Verify mixed v1/v2 evidence, summary schema 1, attribution, target overrides, and token rotation.
+7. Record only backup identity, creation time, integrity result, and pass or fail.
 
-```bash
+```sh
 bun run service:db verify /retrieved/BACKUP.sqlite /retrieved/BACKUP.json
-bun run service:db restore /retrieved/BACKUP.sqlite /restore-drill/cukup.sqlite /retrieved/BACKUP.json
+bun run service:db restore /retrieved/BACKUP.sqlite \
+  /restore-drill/cukup.sqlite /retrieved/BACKUP.json
 bun run service:db integrity /restore-drill/cukup.sqlite
 ```
 
-For incident replacement, obtain explicit approval, stop the service, preserve the failed database and sidecars for investigation, and only then use `--replace`:
+For incident replacement, get explicit approval. Stop the service. Preserve the failed database and sidecars.
 
-```bash
-bun run service:db restore /retrieved/BACKUP.sqlite /var/lib/cukup/cukup.sqlite /retrieved/BACKUP.json --replace
+Only then run:
+
+```sh
+bun run service:db restore /retrieved/BACKUP.sqlite \
+  /var/lib/cukup/cukup.sqlite /retrieved/BACKUP.json --replace
 bun run service:db integrity /var/lib/cukup/cukup.sqlite
 ```
 
-`--replace` removes stale WAL/SHM sidecars before the atomic replacement. Never run it against a live service. Restored `user_version=1` and `user_version=2` backups create the latest target table while upgrading to v4; a restored v3 backup transactionally preserves its zero-minute overrides while relaxing the table to 0 or 240; a v4 backup restarts unchanged. Use only the v4-aware binary for every restored generation once migration begins. Restart, verify `/healthz`, authenticated `/v1/capabilities` and `/v1/time`, delayed v1/v2 replay, 0/240 target set and clear, summary schema 1, labeled rotation, and persistence through one further normal restart. If integrity, checksum, authentication, attribution, target, or expected summary fails, stop and retain all artifacts; do not overwrite the backup or attempt repeated blind restores.
+Never use `--replace` on a live service. Use only a v4-aware binary after migration starts.
+
+After replacement, verify health, authentication, delayed replay, targets, summary, rotation, and one additional restart.
+
+Stop if any integrity, checksum, authentication, attribution, target, or summary check fails. Retain all artifacts. Do not repeat restores blindly.
 
 ## Incident boundaries
 
-- Revoke only the affected physical token; other machine credentials and OIDC remain independent.
-- Change the allowed OIDC user only as an intentional auth-policy change, then restart the service. Existing JWTs for the old user fail without database mutation.
-- Logs contain method, route template, status, duration, and redacted internal errors. They intentionally omit headers, bodies, target-override dates, event IDs, source/session IDs, JWT claims, and database details.
-- Treat unexpected conflict or clock-skew outcomes as visible client incidents. Never mutate accepted events to make a retry pass.
-- The unauthenticated health response is liveness only. Use authenticated checks and database integrity tooling for diagnosis.
+- Revoke only the affected physical token.
+- Change the allowed OIDC user only as an intentional policy change.
+- Never mutate accepted evidence to make a conflict pass.
+- Use authenticated checks and database tools for diagnosis.
+- Treat unauthenticated health as liveness only.
+- Keep credentials, request bodies, target dates, private identities, claims, and database rows out of logs and public incident records.

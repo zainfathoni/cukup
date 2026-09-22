@@ -1,127 +1,50 @@
-# Dashboard service contract
+# Dashboard operations
 
-The dashboard backend is part of the deployed Bun service, but it is a separate host and authentication boundary. The single-owner dashboard is live at `cukup.dev`; ingestion remains isolated at `api.cukup.dev`. This document records the active contract and does not by itself authorize configuration, credential, DNS/TLS, or production mutations.
+The single-owner dashboard is deployed at `cukup.dev`. Ingestion stays at `api.cukup.dev`. This document does not authorize configuration or production changes.
 
-## Host-first route matrix
+## What external setup is required?
 
-The service compares the original `Host` with the two configured canonical hostnames before matching a path or authenticating a request. A hostname with a port, alternate casing, suffix, or unexpected value does not match. `X-Forwarded-Host` is ignored.
-
-| Exact host | Routes | Authentication |
-| --- | --- | --- |
-| `CUKUP_API_HOSTNAME` (default `api.cukup.dev`) | `GET /healthz`, existing `/v1/*` | Existing physical bearer or Amp workload OIDC rules |
-| `CUKUP_DASHBOARD_HOSTNAME` (default `cukup.dev`) | Routes below | Dashboard session cookie only |
-| Anything else | None | Generic `404 not_found` |
-
-`GET /up` is the sole host-agnostic exception. It returns only the same minimal readiness body used by the container and Kamal Proxy health checks, because Kamal 2.10.1 cannot configure a health-check `Host` header. The container port must remain private to Kamal Proxy; all other paths still pass through exact host routing. Public API health remains `GET /healthz` on the API host.
-
-The dashboard host exposes:
-
-- `GET /`: minimal sign-in page without a valid session; the dashboard document with a valid session, whose first paint uses the 30-day trend range;
-- `GET /auth/github`: starts GitHub OAuth with a random state value and S256 PKCE;
-- `GET /auth/github/callback`: accepts the one exact configured callback, exchanges the authorization code, fetches the authenticated GitHub user, and compares the numeric `id`;
-- `POST /logout`: expires the session and transient OAuth cookies, then redirects to `/`;
-- `GET /assets/dashboard.css` and `GET /assets/dashboard.js`: local build artifacts only;
-- `GET /assets/favicon.svg`: an inline, locally served mark with no remote reference;
-- `POST /dashboard/report`: same-origin, cookie-authenticated report operation.
-
-Dashboard routes do not inspect `Authorization`; `/v1/*` does not inspect `Cookie`. A credential valid at one host therefore has no meaning at the other. Dashboard configuration failure returns the same generic not-found response as a disabled route and does not affect API health or ingestion startup.
-
-When `CUKUP_BEHIND_TLS_PROXY=1`, secure routes require the single exact header value `X-Forwarded-Proto: https`. They do not accept comma-separated or case-varied values. This mode is safe only while the service port remains private to the trusted proxy; a client that can bypass that network boundary could supply proxy headers. Without proxy mode, the request itself must use HTTPS. The proxy must preserve the original `Host` and health-check the API host.
-
-## Configuration
-
-Host routing always exists. Dashboard routes are enabled only when every OAuth/session value below is present and valid:
-
-| Environment variable | Contract |
-| --- | --- |
-| `CUKUP_API_HOSTNAME` | Optional canonical API hostname; defaults to `api.cukup.dev` |
-| `CUKUP_DASHBOARD_HOSTNAME` | Optional canonical dashboard hostname; defaults to `cukup.dev` |
-| `CUKUP_GITHUB_OAUTH_CLIENT_ID` | GitHub OAuth application client ID |
-| `CUKUP_GITHUB_OAUTH_CLIENT_SECRET` | GitHub OAuth application client secret |
-| `CUKUP_GITHUB_ALLOWED_USER_ID` | One positive immutable numeric GitHub user ID, not a login name |
-| `CUKUP_DASHBOARD_SESSION_KEYS` | Comma-separated base64url-encoded 32-byte keys, primary first |
-
-The callback is derived, not independently configurable:
+Create a dedicated GitHub OAuth application. Register this exact callback:
 
 ```text
 https://${CUKUP_DASHBOARD_HOSTNAME}/auth/github/callback
 ```
 
-Generate a session key without recording it in shell history or logs, then put it directly into the protected secret store. One suitable generation pipeline is `openssl rand -base64 32 | tr '+/' '-_' | tr -d '='`. For rotation, prepend a new key, keep the prior key in the ring for at least seven days, restart, then remove the prior key after every cookie it encrypted has expired. Rotation has no SQLite migration.
+Provision these values through protected runtime configuration:
 
-Missing, malformed, partial, or incorrectly sized OAuth/session input disables all dashboard routes. It does not terminate the service process. The existing required ingestion inputs, including `CUKUP_OIDC_ALLOWED_USER_ID`, remain independent.
+- `CUKUP_GITHUB_OAUTH_CLIENT_ID`;
+- `CUKUP_GITHUB_OAUTH_CLIENT_SECRET`;
+- `CUKUP_GITHUB_ALLOWED_USER_ID`: the owner's immutable numeric ID, not a login name;
+- `CUKUP_DASHBOARD_SESSION_KEYS`: comma-separated base64url 32-byte keys, newest first.
 
-## OAuth and session design
+Keep the container port private to Kamal Proxy. Direct access would let a client forge trusted proxy headers.
 
-OAuth state and the PKCE verifier live in an authenticated-encrypted `__Host-cukup_oauth` cookie for at most ten minutes. The browser-visible authorization URL contains the exact callback, state, S256 challenge, and no application redirect target. The token request uses the same exact callback. GitHub HTTP is injected behind an interface in tests, so the test suite makes no external requests.
+Kamal Proxy 2.10.1 cannot set a health-check Host header. This limitation requires the host-independent `/up` route; public API liveness uses `/healthz`.
 
-After token exchange, the service calls `https://api.github.com/user` and accepts only the configured numeric `id`. Login, account mismatch, GitHub outage, malformed response, state failure, and code failure all produce the same generic account-authorization response. OAuth codes, access tokens, GitHub account fields, and cookie values are not logged.
+## How must session keys rotate?
 
-The successful session is a purpose- and dashboard-host-bound AES-256-GCM envelope containing only the configured numeric subject and issued/expiry timestamps. It is stateless and survives service/SQLite restarts and temporary GitHub outages. Its fixed lifetime is seven days. The cookie is named `__Host-cukup_session` and always has:
+Generate a key directly into the protected secret store. Do not capture its value in history, logs, or review artifacts.
 
-```text
-Secure; HttpOnly; SameSite=Lax; Path=/
-```
+1. Prepend the new key to the key ring.
+2. Restart the service after approval.
+3. Keep the prior key for at least seven days.
+4. Remove it only after every session that used it has expired.
 
-It never has `Domain`. Duplicate cookie names, tampering, an unknown key, a different dashboard host, and expiry fail closed. Logout expires both `__Host-` cookies. Report and logout operations also reject an explicitly cross-origin `Origin` or `Sec-Fetch-Site` value.
+## Which browser cases need release checks?
 
-An opaque `Origin: null` is not an explicitly cross-origin value. A same-origin form navigation from a `Referrer-Policy: no-referrer` document — which every dashboard response is — serializes its origin that way, so the sign-out form would otherwise fail in a real browser. An opaque origin is therefore decided by `Sec-Fetch-Site`, which must then be exactly `same-origin`; an absent or differing fetch site fails closed. A genuine cross-site post carries `Sec-Fetch-Site: cross-site`, a cross-origin `fetch` carries its real origin, and framing is already refused by `frame-ancestors 'none'` and `X-Frame-Options: DENY`.
+For each dashboard release:
 
-## `POST /dashboard/report`
+1. Verify exact host routing and credential separation.
+2. Verify public TLS, `/up`, and API-host `/healthz`.
+3. Test OAuth start, callback, report, and logout in a real browser.
+4. Test guarded `Origin: null` logout.
+5. Check URLs, logs, and assets for sensitive data.
+6. Verify keyboard use, narrow layouts, reduced motion, and contrast.
+7. Confirm that dashboard failures do not affect ingestion.
+8. Verify database integrity, backup recovery, mixed-version ingestion, and the v4 rollback floor.
 
-Selections exist only in the JSON request body. They never enter the URL, browser history, copied links, or request logs.
+The `Origin: null` case matters because the `no-referrer` policy affects same-origin form navigation. Do not remove its fetch-site guard to fix logout.
 
-Preset request:
+## Where are implementation details defined?
 
-```json
-{
-  "projects": ["cukup", "Unassigned"],
-  "executors": ["amp-orb"],
-  "timeline_date": "2026-08-31",
-  "range": { "preset": 30 }
-}
-```
-
-Custom request (both dates inclusive):
-
-```json
-{
-  "projects": [],
-  "executors": [],
-  "range": {
-    "preset": "custom",
-    "start_date": "2025-09-01",
-    "end_date": "2026-09-01"
-  }
-}
-```
-
-The request is a closed schema. Projects and executors must be unique exact values from the server's global inventory of known labels. The UI offers only the narrower available-label lists returned for the resolved week; the broader server validation lets an old-week filtered polling request return the report metadata needed to detect an implicit week rollover. The optional `timeline_date` is a real `YYYY-MM-DD` civil date; the UI sets it from the trend heatmap, and when it is absent the timeline shows the current Jakarta day. A preset is exactly `7`, `30`, or `90`. A custom range uses real `YYYY-MM-DD` civil dates, is ordered, and contains at most 366 inclusive days. The content type is `application/json`, and the body limit is 32 KiB. Invalid requests receive generic errors that do not echo selections.
-
-Response schema 1 contains:
-
-- `schema_version: 1`, UTC `as_of`, `timezone: "Asia/Jakarta"`, and required `timeline_date`, the resolved civil date whose ISO week owns the available filter options even when the Timeline panel is unavailable;
-- `available_projects` and `available_executors`, containing only labels with attributed activity overlapping the Monday–Sunday ISO week of `timeline_date`. `Unassigned` appears only when unattributed activity overlaps that week;
-- `overall`: globally unioned, target-bearing `today` and Monday-based current `week` values using authoritative exact-date target overrides;
-- `timeline`: intervals and raw-evidence concurrency markers for the selected `timeline_date`, defaulting to the current Jakarta day, plus one Gantt lane per Project Slug and per Executor Label that has selected activity on that day. It also includes the ISO week (`YYYY-Www`) containing the selected date and filtered, unioned totals for both the day and week. Each total is classified against the overall configured target for that historical day or full Monday–Sunday week, including exact-date overrides; these targets are benchmarks, not separate Project or Executor quotas. Project and executor lanes describe the same minutes and must not be added;
-- `trend`: globally unioned Overall Working Time plus independent, non-stacked, targetless selected Project, Executor, and combined series, and one `days` entry per date in the range. A day entry carries the target-bearing verdict for the Overall series — the only series that bears a target — with its interval count, first and last activity, and non-additive Project and Executor breakdowns. Filters never alter it, exactly as they never alter the Overall panel;
-- `executors`: `occurred_at`-derived latest activity, `received_at`-derived latest synchronization, and `active`, `revoked`, or `not-applicable` credential state.
-
-Every data section is a panel with `state: "ready"`, `"stale"`, or `"unavailable"`. The server marks an independently failed query unavailable; the browser preserves an earlier successful panel as stale. Neither layer substitutes zero for failure.
-
-Aggregation first derives each mixed-v1/v2 session interval with the existing grace, crash-cap, monotonic-duration, clipping, Asia/Jakarta, and Monday rules. v1 and absent-v2 project attribution become `Unassigned`; executor attribution comes from stable source ownership. Values within one dimension use OR. Project and executor dimensions use AND. Each resulting set of underlying intervals is unioned before minutes are calculated. Displayed series are never added together, and filters never alter the global target-bearing Overall Working Time panel or series. Target overrides affect that global Overall panel, the matching per-day Overall verdicts in `trend.days`, and the overall configured benchmarks shown against filtered timeline totals; they never change activity evidence or worked minutes, create Project or Executor quotas, or make dashboard routes writable.
-
-All dashboard responses use `Cache-Control: no-store`, a restrictive Content Security Policy, frame denial, MIME sniffing protection, same-origin resource/opener policy, no-referrer, and a restrictive permissions policy. Executable JavaScript and CSS are bundled locally; there are no analytics, remote fonts, or external browser assets.
-
-## Production acceptance and ongoing checks
-
-The initial production gates passed before dashboard enablement: dedicated GitHub OAuth and immutable owner allowlisting, protected secret injection, dual-host proxy/DNS/TLS, real-browser sign-in/report/logout checks, guarded Chrome `Origin: null` logout, responsive 30-day first paint, mixed-v1/v2 preservation, backup verification, and migration-aware rollback retention.
-
-For every dashboard-affecting release, continue to verify:
-
-1. exact host routing and credential separation;
-2. public TLS, `/up`, and API-host `/healthz`;
-3. OAuth start/callback, authenticated report, cookie protections, and logout variants in a real browser;
-4. no sensitive URL, response-log, application-log, or browser-asset leakage;
-5. dashboard failures do not affect ingestion or API health;
-6. database integrity, backup verification, mixed-version ingestion, and the migration-aware rollback floor.
+Read [routing and configuration](../service/dashboard/backend.ts), [OAuth and sessions](../service/dashboard/auth.ts), and [report contracts](../service/dashboard/report.ts). Read [ADR 0004](adr/0004-personal-dashboard-and-explicit-attribution.md) for rationale, and [service operations](service-operations.md) for recovery.
