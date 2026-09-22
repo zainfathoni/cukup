@@ -56,45 +56,72 @@ export function createLocalStack(options: LocalStackOptions = {}): LocalStack {
 	const directory = mkdtempSync(join(tmpdir(), 'cukup-local-stack-'))
 	const pluginPath = join(directory, 'plugin', 'state.sqlite')
 	const servicePath = join(directory, 'service', 'state.sqlite')
-	mkdirSync(dirname(pluginPath), { recursive: true })
-	options.seedPluginDatabase?.(pluginPath)
+	let pluginStore: WorkHoursStore | undefined
+	let serviceStore: ServiceStore | undefined
 
-	const pluginStore = new WorkHoursStore(pluginPath)
-	const serviceStore = new ServiceStore(servicePath)
-	const issued = serviceStore.issueBearer(nowMs)
-	const app = createApp({
-		store: serviceStore,
-		oidcVerifier: { verify: async () => false },
-		now,
-		logger: new ServiceLogger(() => {}),
-	})
-	const client = new CukupServiceClient(
-		'https://api.cukup.dev',
-		(input, init) => app.fetch(new Request(input, init)),
-		now,
-	)
-	const sync = new SyncEngine({
-		store: pluginStore,
-		client,
-		tokenProvider: { getToken: async () => issued.token },
-		now,
-	})
+	try {
+		mkdirSync(dirname(pluginPath), { recursive: true })
+		options.seedPluginDatabase?.(pluginPath)
 
-	return {
-		nowMs,
-		directory,
-		pluginPath,
-		servicePath,
-		pluginStore,
-		serviceStore,
-		token: issued.token,
-		client,
-		sync,
-		async close() {
-			await sync.dispose()
-			pluginStore.close()
-			serviceStore.close()
-			rmSync(directory, { recursive: true, force: true })
-		},
+		const createdPluginStore = new WorkHoursStore(pluginPath)
+		pluginStore = createdPluginStore
+		const createdServiceStore = new ServiceStore(servicePath)
+		serviceStore = createdServiceStore
+		const issued = createdServiceStore.issueBearer(nowMs)
+		const app = createApp({
+			store: createdServiceStore,
+			oidcVerifier: { verify: async () => false },
+			now,
+			logger: new ServiceLogger(() => {}),
+		})
+		const client = new CukupServiceClient(
+			'https://api.cukup.dev',
+			(input, init) => app.fetch(new Request(input, init)),
+			now,
+		)
+		const sync = new SyncEngine({
+			store: createdPluginStore,
+			client,
+			tokenProvider: { getToken: async () => issued.token },
+			now,
+		})
+
+		return {
+			nowMs,
+			directory,
+			pluginPath,
+			servicePath,
+			pluginStore: createdPluginStore,
+			serviceStore: createdServiceStore,
+			token: issued.token,
+			client,
+			sync,
+			async close() {
+				try {
+					await sync.dispose()
+				} finally {
+					try {
+						createdPluginStore.close()
+					} finally {
+						try {
+							createdServiceStore.close()
+						} finally {
+							rmSync(directory, { recursive: true, force: true })
+						}
+					}
+				}
+			},
+		}
+	} catch (error) {
+		try {
+			pluginStore?.close()
+		} finally {
+			try {
+				serviceStore?.close()
+			} finally {
+				rmSync(directory, { recursive: true, force: true })
+			}
+		}
+		throw error
 	}
 }
