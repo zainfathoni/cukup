@@ -1,67 +1,46 @@
 # Contributing to Cukup
 
-Cukup welcomes design contributions now. Implementation contributions are ready only after the relevant roadmap checkpoint is green. Zain Fathoni is the initial maintainer and owns Cukup's domain, protocol, privacy, and production decisions. A contribution never implies access to production, Fleet, credentials, or deployment authority.
+Zain Fathoni owns domain, privacy, protocol, and production decisions. Contributions use the [MIT License](LICENSE). Upstream projects set their own contribution terms.
 
-Contributions are provided under the [MIT License](LICENSE). Changes submitted upstream to another project, including Tycho, follow that project's contribution terms.
+External adoption is [paused](ROADMAP.md). Discuss a scoped issue before implementation. A contribution does not grant production access or deployment authority.
 
-## Start with the contracts
+## What must a change preserve?
 
-Read these before proposing a behavior change:
+Read the [product vision](docs/product/vision.md), [glossary](CONTEXT.md), and relevant [decisions](docs/adr/0007-generic-harness-evidence-boundary.md).
 
-- [Product vision](docs/product/vision.md)
-- [Domain language](CONTEXT.md)
-- [Roadmap](ROADMAP.md)
-- [Generic evidence boundary ADR](docs/adr/0007-generic-harness-evidence-boundary.md)
-- [Experimental local Harness evidence protocol](docs/experimental-local-harness-evidence-protocol.md) for Stage 3 contract work
-- [Service API](docs/service-api.md)
-- [Candidate Tycho collector guidance](docs/tycho-adapter.md) for Tycho work
+- Keep behavior-preserving refactors separate from metric or protocol changes.
+- Preserve historical evidence and its meaning.
+- Do not describe experimental compatibility as official support.
+- Review collector trust separately from schema conformance. Validation does not contain a malicious collector.
 
-The deployed v1/v2 protocol still measures Amp turn intervals under its historical semantics. The accepted Working Time/Agent Runtime split is prospective and must not be described as already implemented.
+## How do contributors verify work?
 
-## Local setup and verification
+Use the Bun version in [package.json](package.json):
 
-Use Bun 1.3.10 and install the lockfile exactly:
-
-```bash
+```sh
 bun install --frozen-lockfile
 bun run check
 ```
 
-`bun run check` runs tests, TypeScript checking, and plugin/service/browser builds. It is the required local gate. A future pull-request workflow will run the same non-secret checks for contributor branches; until that exists, implementation-contributor readiness remains incomplete.
+These are local checks, not publication steps. Use synthetic data and the [local integration fixture](service/fixture.ts), not production credentials or databases.
 
-For credential-free plugin/service integration tests, use `service/fixture.ts`'s `createLocalStack()`. It creates temporary SQLite stores, an in-process service app, a locally issued bearer, and a deterministic clock; requests never leave the process, and `close()` removes the temporary state. The fixture is test-only and exercises the existing plugin/service boundary, not a Harness Adapter implementation.
+## What belongs in a pull request?
 
-## Architecture boundaries
+- The issue, intended outcome, and non-goals.
+- Affected contracts and decisions.
+- Verification commands and decisive results.
+- Migration and rollback risks.
+- Privacy review: data observed, stored, sent, and logged.
+- Rendered evidence for visual changes.
 
-- Harness Adapters observe native systems and emit harness-neutral evidence.
-- Collectors may be first-party, harness-owned, or third-party, embedded or separate. Experimental protocol compatibility is not official support.
-- The Cukup core owns durable local evidence, closed-schema validation, privacy identities, schema negotiation, outbox ordering, retry, and cloud synchronization. Separate collectors may submit local protocol messages; they do not construct cloud events or write the core's outbox.
-- Native identities and API details remain collector-local. Attribution uses approved project mappings or explicit bindings, never workspace paths or Git metadata. Native conversation identifiers never cross the generic evidence boundary.
-- The service owns immutable ingestion, global interval union, authoritative targets, and summaries.
-- Preserve existing behavior before changing metric semantics. Refactor Amp behind the adapter ports separately from introducing new event schemas or aggregation behavior.
+Do not publish, deploy, rotate credentials, or change Fleet state during contribution checks.
 
-Installing a collector is a trust decision. Closed-schema validation rejects prohibited fields but does not contain a malicious collector or prevent covert leakage through allowed values. Review minimized collection separately from protocol conformance. First-party deployment scope is initially macOS/Linux physical machines and Amp orbs, with execution-site authentication and attribution.
+## What must stay out of review artifacts?
 
-## Privacy and repository hygiene
+Exclude secrets, identity claims, tracked prompts, output, and source content. Also exclude private paths, remotes, machine details, native session identifiers, and production rows. This applies to fixtures, logs, screenshots, and issues.
 
-Never commit or include in issues, tests, fixtures, logs, screenshots, or review artifacts:
+## What belongs in documentation?
 
-- credentials, tokens, cookies, OAuth codes, or identity claims;
-- prompts, model output, transcripts, or source code from tracked work;
-- private workspace paths, Git remotes, machine details, native session IDs, or Amp thread/message IDs;
-- production database rows or sensitive operational output.
+Record purpose, rationale, external requirements, operating procedures, and unresolved decisions. Link to source for implemented behavior. Do not duplicate schemas, algorithms, or command registries.
 
-Use synthetic fixtures and random identifiers. Unknown event fields must continue to fail closed.
-
-## Pull requests
-
-Before implementation, link a scoped issue and any decision-bearing ADR. A pull request should include:
-
-- the intended outcome and explicit non-goals;
-- contracts and invariants affected;
-- verification commands and decisive results;
-- migration and rollback implications;
-- privacy review, including fields observed locally, persisted locally, transmitted, and logged;
-- visual evidence for dashboard changes.
-
-Do not combine a behavior-preserving adapter refactor with a metric, protocol, or aggregation change. Do not deploy, publish, rotate credentials, modify production, or update Fleet state as part of ordinary contribution verification.
+Keep the README limited to context that source cannot provide. Use ASD-STE100 writing rules: short sentences, active voice, consistent technical terms, and one instruction per sentence. Keep necessary safety warnings.

@@ -1,60 +1,59 @@
 # Cukup production deployment path
 
-This repository owns the Cukup service source, container image, and Kamal configuration. Production execution is intentionally separated from this checkout because the deployment requires the protected VPS, database, registry, and runtime-secret boundary.
+GitHub Actions is the active production deployment authority. The protected `production` environment controls access to the VPS, registry, database, and runtime secrets.
+
+Do not deploy from an ordinary checkout. Keep the retired Vikas LaunchAgent disabled or revoke its authority. Two operators must not mutate production concurrently.
 
 ## Release path
 
-1. Merge the service change to the signed `main` branch.
-2. The `Publish service image` workflow runs on `push` to `main` when an image input changes (`service/`, `Dockerfile.service`, `package.json`, `bun.lock`, or `tsconfig.json`). It validates the source, builds `linux/amd64`, and publishes `ghcr.io/zainfathoni/cukup:<main-sha>` with the service and revision labels.
-3. When that publication completes, the `Deploy service` workflow admits the run only when the upstream event was `push`, its branch was `main`, and its conclusion was `success`. It selects the exact `workflow_run.head_sha` and forces the `deploy` operation. Manual publications, non-main publications, failed or cancelled publications, and other upstream events do not enter the protected deployment job.
-4. The protected job revalidates the signed `main` ancestry and successful push publication for that exact SHA, verifies the immutable image and architecture, creates and independently retrieves a database backup, then deploys through Kamal using:
+1. Merge the service change to signed `main`.
+2. Wait for `Publish service image` to verify the source and publish the immutable `linux/amd64` image.
+3. Confirm that the image tag is the full `main` commit SHA.
+4. Let `Deploy service` select the successful push publication for that exact SHA.
+5. Let the protected job verify ancestry, image labels, architecture, database integrity, and the remote deployment lock.
+6. Let the job create and independently verify a fresh backup.
+7. Let Kamal deploy the exact image without rebuilding it.
+8. Confirm API, dashboard, database, preservation, restart, and rollback gates.
 
-   ```bash
-   VERSION=<workflow-run-head-sha> kamal deploy --skip-push
-   ```
+Automatic deployment accepts only a successful push publication from `main`. Manual, failed, cancelled, and non-main publications do not enter this path.
 
-5. It verifies public API and dashboard health, authenticated API/dashboard behavior, database integrity and preservation, and retains the prior migration-aware image for verified rollback after a post-switch failure.
-
-A manually dispatched publication is not selected automatically. Documentation-only, plugin-only, workflow-only, and other changes outside the image inputs therefore do not create a service release or trigger deployment.
+Changes outside service image inputs do not publish an image. The source paths are listed in [the publication workflow](../.github/workflows/publish-service.yml).
 
 ## Deployment authority boundary
 
-Do not deploy from an ordinary Cukup checkout or copy production secrets into the repository, command arguments, GitHub issues, or Amp messages. GitHub's protected `production` environment is the active Kamal boundary. The retired Vikas LaunchAgent must remain disabled or have its deploy authority revoked so that two operators cannot mutate production concurrently.
+Do not copy production secrets into Git, command arguments, issues, or Amp messages. Provision each secret from an approved source.
+
+Do not clear a remote lock only because its original machine is offline. First reconcile the prior mutation.
 
 ## GitHub Actions deployment
 
-`Deploy service` runs automatically after an admitted successful publication and retains `workflow_dispatch` for an exact-SHA `preflight` or `deploy`. Its `preflight` operation verifies an exact full SHA, successful push publication, signed-main ancestry, immutable image contract, rendered Kamal configuration, absence of a remote deploy lock, current runtime/database integrity, and public service behavior without mutation. Its `deploy` operation additionally creates and independently verifies a fresh backup, proves pre-deploy preservation, deploys the exact image, repeats the runtime/public/database/preservation gates, and attempts a verified rollback after a post-switch failure.
+Use manual `preflight` for one exact full SHA when you need a non-mutating check. Use manual `deploy` only with explicit production approval.
 
-The workflow uses a protected GitHub `production` environment and supports these variables:
+The workflow requires protected SSH, registry, OIDC, Fleet, OAuth, and session secrets. `CUKUP_API_TOKEN` is optional and enables authenticated read-only probes.
 
-- optional deployment overrides; the checked-in defaults use `zainfathoni/cukup`, VPS address `103.235.75.227`, SSH user `openclaw`, and registry user `zainfathoni`;
-- optional hostname/path overrides, which otherwise use `api.cukup.dev`, `cukup.dev`, `/srv/cukup`, and `/srv/cukup-backups`.
+An older publication does not run automatically after the workflow trigger reaches `main`. Use manual exact-SHA deployment or wait for a later qualifying push.
 
-It requires environment secrets `SSH_PRIVATE_KEY`, `SSH_KNOWN_HOSTS`, and every runtime secret named by `config/deploy.service.yml`. Kamal uses the job's short-lived repository token to pull the associated GHCR image unless an environment-scoped `KAMAL_REGISTRY_PASSWORD` overrides it. `CUKUP_API_TOKEN` is optional and enables the existing authenticated read-only acceptance probes; without it, public API/dashboard, OAuth-start, image, backup, and database gates still run. Secret values must be provisioned from an approved source rather than copied from another repository's GitHub secrets.
-
-Do not release a remote lock merely because its originating machine is offline; reconcile the prior mutation first. Enabling `workflow_run` does not replay publications that completed before the trigger reached the default branch. Such an already-published SHA must use the retained manual exact-SHA deployment path, or wait for a later qualifying push publication; do not republish manually to bypass the upstream-event gate.
+Do not republish manually to bypass the push-event gate.
 
 ## Release verification
 
-For a release at `<sha>`, confirm the following without exposing credentials or identity-bearing responses:
+Check source verification, publication, and public liveness without exposing identity-bearing responses:
 
-```bash
+```sh
 gh api repos/zainfathoni/cukup/commits/<sha> --jq '.commit.verification'
-gh run list --repo zainfathoni/cukup --workflow publish-service.yml --json headSha,status,conclusion,event,url
+gh run list --repo zainfathoni/cukup \
+  --workflow publish-service.yml \
+  --json headSha,status,conclusion,event,url
 curl --fail --silent https://api.cukup.dev/up
 curl --fail --silent https://api.cukup.dev/healthz
 ```
 
-The first two checks prove the signed source and same-revision push publication. The unauthenticated endpoints prove liveness only; the protected deployment job is responsible for the authenticated, database, backup, and dashboard acceptance checks.
+These HTTP checks prove liveness only. The protected job must verify authentication, backup, database, preservation, and dashboard behavior.
 
 ## Follow-up issues
 
-The reliability improvements are tracked under parent issue [#3](https://github.com/zainfathoni/cukup/issues/3):
-
-- [#4 — Add bounded deployment preflight and self-healing](https://github.com/zainfathoni/cukup/issues/4) can start immediately.
-- [#5 — Reduce production deployment detection latency](https://github.com/zainfathoni/cukup/issues/5) is a child of #3 and is blocked by #4.
-- [#6 — Add deployment observability and failure alerting](https://github.com/zainfathoni/cukup/issues/6) is a child of #3 and is blocked by #4.
+Deployment reliability work is tracked by [issue #3](https://github.com/zainfathoni/cukup/issues/3) and its linked child issues.
 
 ## Current example
 
-PR #2 merged as [`586d8fa`](https://github.com/zainfathoni/cukup/commit/586d8fa27d31a4c7c0505ed8d5521e92eaa849f8). Its push publication completed successfully in [workflow run 34596552634](https://github.com/zainfathoni/cukup/actions/runs/34596552634). The Vikas operator then completed the deployment with `outcome=success`, retaining the prior `545aa68` release for rollback. The running image is `ghcr.io/zainfathoni/cukup:586d8fa27d31a4c7c0505ed8d5521e92eaa849f8` with image digest `sha256:e1a8a133751d95f396ea7229a761da585c141fa4632b405ed0a189e17eed57a0`. Public API, dashboard, authenticated contract, backup/preservation, SQLite v4 integrity, and restart gates passed.
+Do not use a historical release record as the current production source of truth. Read the protected workflow record and live image reference instead.

@@ -1,15 +1,9 @@
-# Cukup plugin authentication boundary
+# Plugin credential ownership
 
-The plugin defaults to `https://api.cukup.dev`. An explicit `CUKUP_SERVICE_URL` override is
-non-secret configuration and must be HTTPS, except when the plugin talks to a loopback deployment proxy.
+The machine's secret owner provisions and rotates physical-machine credentials, for example through 1Password. Do not put bearer values in Amp settings, shell profiles, workspace files, or environment variables.
 
-Authentication is selected from Amp's executor context:
+Provision the token as an owner-owned file with mode `0600`. The default location is `~/.config/cukup/token`. Use `CUKUP_TOKEN_FILE` only for an absolute-path override.
 
-- On an Amp-managed remote executor, the plugin mints one ephemeral workload token per sync cycle with `amp orb id-token --audience https://cukup.dev`. The default thread subject scope is intentional.
-- On a local physical executor, the plugin reads `~/.config/cukup/token` by default. An explicit
-  `CUKUP_TOKEN_FILE` may override it with another absolute path. The selected path must be an owner-owned
-  regular file with no group or other permissions (mode `0600`). The machine secret owner provisions and
-  rotates this file, for example through 1Password. The plugin rereads it for each sync cycle.
-- An unknown executor fails closed.
+Amp supplies workload identity for orbs. The default thread subject scope is intentional; do not broaden it to bypass an authorization failure.
 
-The bearer value is held only in memory for the current sync cycle and sent only in the HTTPS `Authorization` header. It is never placed in command arguments, persisted in SQLite, included in event payloads, or logged. Do not put the bearer value itself in Amp configuration, shell profiles, workspace files, or ambient environment variables.
+See [auth.ts](auth.ts) for credential validation and [index.ts](index.ts) for executor selection. See [service operations](../docs/service-operations.md) for issuance, rotation, and recovery.

@@ -4,30 +4,36 @@ status: accepted
 
 # Add a personal dashboard with explicit activity attribution
 
-Cukup provides a single-owner dashboard at `cukup.dev` while retaining `api.cukup.dev` as the ingestion boundary. The Bun service and SQLite authority serve both hosts; browser access uses GitHub OAuth restricted by immutable GitHub user ID, secure seven-day sessions, and no browser-visible machine bearer. The dashboard is read-only and shows overall Working Time, non-additive Project Activity, non-additive Executor Activity, and executor last-activity/credential state without analytics or sensitive logging.
+## Decision
 
-Project attribution is an optional Project Slug: a lowercase kebab-case identifier durably snapshotted with event schema at turn start. ADR 0005 replaces this ADR's original per-checkout configuration source with automatic resolution from the exact Amp Project identity. Event schema v2 carries the optional slug; v1 remains accepted and historical project-less evidence stays Unassigned. Physical Executor Labels come from canonical Fleet hostnames, are validated against a deployment allowlist, and bind once to one active Bearer Lineage rather than being trusted per event. OIDC-owned sources use `amp-orb`. Historical executor attribution is derived through stable source ownership across rotating bearer credentials without rewriting events; unlabeled physical history remains visible as `unassigned-executor`.
+Provide a single-owner, read-only dashboard at `cukup.dev`. Keep ingestion at `api.cukup.dev`. Use GitHub OAuth with an immutable owner ID, not a browser-visible machine bearer.
+
+Keep Project and Executor Activity separate from overall target accounting. These views can overlap; they do not allocate human attention.
+
+Bind physical Executor Labels to authenticated Bearer Lineages using canonical Fleet names. Keep missing attribution visible rather than guessing it or hiding evidence.
+
+[ADR 0005](0005-derive-attribution-from-amp-project.md) replaces the original per-checkout project setting with Amp-owned selection. Keep native Amp Project IDs local.
 
 ## Approved target-override addendum
 
-The narrowly approved day-off workflow does not turn the dashboard into an editor. An authenticated API-host boundary, available to the same personal bearer and allowed workload OIDC principals as the service, may set one exact Asia/Jakarta civil date's authoritative target to exactly zero (full day off) or 240 minutes (half day), or explicitly clear it. The request is closed and stores only date, selected target, and audit timestamps—never a free-text reason. The plugin exposes the validated, previewed, confirmed `cukup: Set day off` workflow; dashboard routes remain read-only.
+Permit an authenticated plugin workflow to change one Asia/Jakarta date's target. Allow full days off, half days, or restoration of the default. Require a preview and confirmation. Do not add free-text reasons or make the dashboard an editor.
 
-Overrides affect only authoritative target calculation. Evidence and worked minutes remain immutable, and worked minutes below, equal to, or above the selected target remain `UNDER`, `COMPLETE`, or `OVER`. Both schema-1 `/v1/summary` and the dashboard schema-1 Overall Working Time panel use the same daily and Monday-week target replacement; one weekday at 240 changes the standard weekly target from 2,400 to 2,160 minutes, and clearing restores the default target. Filtered Project and Executor activity remains targetless and unaffected. Dynamic mutation routes are logged only as a route template without dates or bodies. SQLite v4 creates the latest exact 0-or-240 table directly for fresh, v1, and v2 databases and transactionally rebuilds production v3 while preserving its zero-minute overrides and audit timestamps. v4 is restart-stable, v5 and newer fail closed, and the verified backup and clean-restore boundary covers v1 through v4. A pre-v4 binary must never run against a v4-migrated database.
+Overrides change targets, not worked time or evidence. They do not create Project or Executor quotas.
 
 ## Considered alternatives
 
-- Raw workspace paths, Git remotes, package names, and checkout-local settings are rejected as project identity; ADR 0005 records the later decision to normalize the exact Amp Project name instead.
-- Amp Project IDs remain local resolution inputs and never cross the Cukup event boundary.
-- Per-event machine claims and ephemeral orb hostnames were rejected because executor identity belongs to the authenticated principal.
-- Heartbeats were rejected because inactivity is not evidence of machine health.
-- A separate dashboard service and frontend framework were rejected because they would add deployment and runtime boundaries without current product value.
-- Splitting concurrent time between projects was rejected because Cukup cannot observe human attention allocation; project and executor series are therefore explicitly non-additive.
+- Reject paths, Git remotes, and package names as project identity. They are not approved project classifications.
+- Reject per-event machine claims and ephemeral orb hostnames. Executor identity belongs to the authenticated principal.
+- Reject heartbeats as machine-health evidence. Inactivity does not establish failure.
+- Reject a separate dashboard service and frontend framework. They add deployment and runtime boundaries without current product value.
+- Reject splitting concurrent time between projects. Cukup cannot observe human attention allocation.
 
 ## Consequences
 
-- Dashboard filters never affect the authoritative overall target classification; filtered project/executor views are targetless.
-- Existing physical credentials can bind in place on first v2 sync, and rotations carry their label and source ownership forward.
-- Every queued event retains its original schema and Project Slug. The service must accept mixed v1/v2 replay permanently after v2 emission; a migration-aware build becomes the rollback compatibility floor.
-- Dashboard and ingestion share a process but use host-first route dispatch, distinct credential types, independently disabled dashboard configuration, and a host-only dashboard cookie.
-- Dashboard filters containing Project Slugs or Executor Labels stay out of URLs and logs.
-- Deployment requires a GitHub OAuth application, protected runtime secrets, the canonical Fleet hostname allowlist, and a separately gated `cukup.dev` DNS/TLS cutover.
+Keep dashboard filters out of URLs and logs because they contain project and machine labels. Do not add analytics or sensitive logging.
+
+Keep mixed v1/v2 replay available after v2 emission. A rollback must preserve queued evidence, ownership, and historical meaning.
+
+Deployment requires a dedicated GitHub OAuth application, protected secrets, a Fleet hostname allowlist, and separately approved DNS/TLS changes.
+
+Use [dashboard operations](../dashboard-service.md) for setup and browser checks. Use [service operations](../service-operations.md) for the v4-aware rollback requirement. Read [dashboard source](../../service/dashboard/) for implementation.
