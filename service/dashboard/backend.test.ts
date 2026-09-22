@@ -206,6 +206,7 @@ describe('dashboard HTTP contract', () => {
 		expect(accepted.status).toBe(200)
 		const acceptedReport = await accepted.json() as any
 		expect(acceptedReport.schema_version).toBe(1)
+		expect(acceptedReport.timeline_date).toBe('2026-08-30')
 		expect(acceptedReport.timeline.data.date).toBe('2026-08-30')
 		for (const invalid of [
 			{ projects: [], executors: [], timeline_date: 'not-a-date', range: { preset: 7 } },

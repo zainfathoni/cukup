@@ -10,6 +10,7 @@ import type {
 	TimelineLane,
 	Trend,
 } from './report.ts'
+import { effectiveTimelineDate, isoWeekStart, reportTimelineDate, sameIsoWeek } from './report.ts'
 
 const chartWidth = 960
 const chartHeight = 260
@@ -170,19 +171,26 @@ function filterGroup(
 	name: 'projects' | 'executors',
 	values: string[],
 	selected: string[],
+	disabled: boolean,
 ): string {
-	return `<fieldset><legend>${legend}</legend><div class="filter-options">${values
+	return `<fieldset${disabled ? ' disabled' : ''}><legend>${legend}</legend><div class="filter-options">${values
 		.map(
 			(value) => `<label><input type="checkbox" name="${name}" value="${escapeHtml(value)}" ${selected.includes(value) ? 'checked' : ''} data-focus-key="${name}:${escapeHtml(value)}"> <span>${escapeHtml(value)}</span></label>`,
 		)
 		.join('')}</div></fieldset>`
 }
 
-function renderFilters(report: DashboardReport, selection: DashboardSelection, refreshing: boolean): string {
+function renderFilters(
+	report: DashboardReport,
+	selection: DashboardSelection,
+	refreshing: boolean,
+	forceDisabled: boolean,
+): string {
+	const disabled = forceDisabled || !sameIsoWeek(effectiveTimelineDate(report, selection), reportTimelineDate(report))
 	return `<section class="filters" aria-labelledby="filters-title">
 		<div class="section-heading"><div><p class="eyebrow">Filtered activity view</p><h2 id="filters-title">Filters</h2></div><button type="button" class="button" data-action="refresh" data-focus-key="refresh" ${refreshing ? 'disabled aria-disabled="true"' : ''}>${refreshing ? 'Refreshing…' : 'Refresh now'}</button></div>
-		<p class="guidance"><strong>Activity is non-additive.</strong> Concurrent project and executor values overlap and must not be added. Multiple values within a filter use OR; project and executor filters combine with AND. Overall Working Time above never changes.</p>
-		<div class="filter-grid">${filterGroup('Projects', 'projects', report.available_projects, selection.projects)}${filterGroup('Executors', 'executors', report.available_executors, selection.executors)}</div>
+		<p class="guidance"><strong>Options reflect activity in the selected ISO week.</strong> Choosing a day in another week clears filters. Activity is non-additive: concurrent project and executor values overlap and must not be added. Multiple values within a filter use OR; project and executor filters combine with AND. Overall Working Time above never changes.</p>
+		<div class="filter-grid">${filterGroup('Projects', 'projects', report.available_projects, selection.projects, disabled)}${filterGroup('Executors', 'executors', report.available_executors, selection.executors, disabled)}</div>
 	</section>`
 }
 
@@ -419,6 +427,7 @@ function renderHeatmap(days: readonly DayDetail[], timezone: string, selectedDat
 	if (days.length === 0) return ''
 	const first = weekdayIndex(days[0]!.date)
 	if (first === null) return ''
+	const selectedWeek = selectedDate === undefined ? undefined : isoWeekStart(selectedDate)
 	const busiest = Math.max(1, ...days.map((day) => day.period.worked_minutes))
 	const columns = Math.ceil((first + days.length) / 7)
 	const [density, columnStep] =
@@ -444,7 +453,8 @@ function renderHeatmap(days: readonly DayDetail[], timezone: string, selectedDat
 			const minutes = day.period.worked_minutes
 			const level = minutes === 0 ? 0 : Math.min(4, Math.ceil((minutes / busiest) * 4))
 			const selected = day.date === selectedDate
-			return `<li><button type="button" class="heat-cell heat-${level}${selected ? ' heat-selected' : ''}" data-timeline-date="${escapeHtml(day.date)}" data-focus-key="timeline:${escapeHtml(day.date)}" aria-pressed="${selected}" aria-label="Inspect ${escapeHtml(formatCivilDay(day.date))} in the activity timeline"></button><div class="heat-tip status-${day.period.status.toLowerCase()}${anchor}" aria-hidden="true">${dayCard(day, timezone)}</div></li>`
+			const inSelectedWeek = selectedWeek !== undefined && isoWeekStart(day.date) === selectedWeek
+			return `<li><button type="button" class="heat-cell heat-${level}${inSelectedWeek ? ' heat-selected-week' : ''}${selected ? ' heat-selected' : ''}" data-timeline-date="${escapeHtml(day.date)}" data-focus-key="timeline:${escapeHtml(day.date)}" aria-pressed="${selected}" aria-label="Inspect ${escapeHtml(formatCivilDay(day.date))} in the activity timeline"></button><div class="heat-tip status-${day.period.status.toLowerCase()}${anchor}" aria-hidden="true">${dayCard(day, timezone)}</div></li>`
 		})
 		.join('')
 	const monthLabels: string[] = []
@@ -459,7 +469,7 @@ function renderHeatmap(days: readonly DayDetail[], timezone: string, selectedDat
 		.map((label) => `<li>${label}</li>`)
 		.join('')
 	const summary = `Calendar heatmap of globally unioned overall working minutes from ${days[0]!.date} to ${days.at(-1)!.date}. Busiest day ${formatMinutes(busiest)}. Every value is listed in the daily values table below.`
-	return `<div class="heatmap"><div class="heatmap-heading"><h3 id="heatmap-title">Overall day-by-day</h3><p class="heatmap-hint">Hover for detail · select a day to inspect its timeline.</p></div><div class="heat-scroll"><div class="heat-board ${density}"><div class="heat-corner"></div><ol class="heat-months" aria-hidden="true">${monthLabels.join('')}</ol><ul class="heat-weekdays" aria-hidden="true">${weekdays}</ul><ol class="heat-grid" aria-label="${escapeHtml(summary)}">${pads}${cells}</ol></div></div><ul class="heat-scale"><li>Less</li><li><span class="heat-swatch heat-0" aria-hidden="true"></span></li><li><span class="heat-swatch heat-1" aria-hidden="true"></span></li><li><span class="heat-swatch heat-2" aria-hidden="true"></span></li><li><span class="heat-swatch heat-3" aria-hidden="true"></span></li><li><span class="heat-swatch heat-4" aria-hidden="true"></span></li><li>More · busiest ${formatMinutes(busiest)}</li></ul></div>`
+	return `<div class="heatmap"><div class="heatmap-heading"><h3 id="heatmap-title">Overall day-by-day</h3><p class="heatmap-hint">Hover for detail · select a day to inspect its timeline · outlined cells mark the selected week.</p></div><div class="heat-scroll"><div class="heat-board ${density}"><div class="heat-corner"></div><ol class="heat-months" aria-hidden="true">${monthLabels.join('')}</ol><ul class="heat-weekdays" aria-hidden="true">${weekdays}</ul><ol class="heat-grid" aria-label="${escapeHtml(summary)}">${pads}${cells}</ol></div></div><ul class="heat-scale"><li>Less</li><li><span class="heat-swatch heat-0" aria-hidden="true"></span></li><li><span class="heat-swatch heat-1" aria-hidden="true"></span></li><li><span class="heat-swatch heat-2" aria-hidden="true"></span></li><li><span class="heat-swatch heat-3" aria-hidden="true"></span></li><li><span class="heat-swatch heat-4" aria-hidden="true"></span></li><li>More · busiest ${formatMinutes(busiest)}</li></ul></div>`
 }
 
 function renderTrendData(trend: Trend, timezone: string, selectedDate?: string): string {
@@ -560,8 +570,9 @@ function renderTrend(
 	panel: DashboardReport['trend'],
 	selection: DashboardSelection,
 	timezone: string,
+	selectedDate?: string,
 ): string {
-	return `<section aria-labelledby="trend-title"><div class="section-heading"><div><p class="eyebrow">Independent, non-stacked series</p><h2 id="trend-title">Activity trend</h2></div>${renderRange(selection)}</div>${panelNotice(panel)}${panel.state === 'unavailable' ? '' : renderTrendData(panel.data, timezone, selection.timeline_date)}</section>`
+	return `<section aria-labelledby="trend-title"><div class="section-heading"><div><p class="eyebrow">Independent, non-stacked series</p><h2 id="trend-title">Activity trend</h2></div>${renderRange(selection)}</div>${panelNotice(panel)}${panel.state === 'unavailable' ? '' : renderTrendData(panel.data, timezone, selectedDate)}</section>`
 }
 
 /* ---------- Executors ---------- */
@@ -584,11 +595,13 @@ export function renderDashboardContent(
 	report: DashboardReport,
 	selection: DashboardSelection,
 	refreshing = false,
+	filtersDisabled = false,
 ): string {
 	const partial = [report.overall, report.timeline, report.trend, report.executors].some(
 		(panel) => panel.state !== 'ready',
 	)
-	return `<header class="masthead"><div><p class="eyebrow">Personal dashboard</p><div class="wordmark"><h1>Cukup</h1><span class="wordmark-tag">${escapeHtml(report.timezone)}</span></div></div><div class="freshness ${partial ? 'freshness-partial' : ''}"><span class="freshness-mark" aria-hidden="true"></span><span>${partial ? '<strong>Partial report.</strong> ' : ''}Authoritative as of <time datetime="${escapeHtml(report.as_of)}">${formatTimestamp(report.as_of, report.timezone)}</time></span><span class="sr-only" role="status" aria-live="polite">${refreshing ? 'Refreshing dashboard' : partial ? 'Dashboard has stale or unavailable panels' : 'Dashboard up to date'}</span></div></header><main>${renderOverall(report.overall)}${renderFilters(report, selection, refreshing)}${renderTimeline(report.timeline, report.timezone, report.as_of)}${renderTrend(report.trend, selection, report.timezone)}${renderExecutors(report.executors, report.timezone)}</main><footer class="page-footer"><p>Cukup reports Working Time, never prompts or content. Filtered activity is non-additive; timeline targets are overall configured benchmarks, not filtered quotas.</p></footer>`
+	const selectedDate = effectiveTimelineDate(report, selection)
+	return `<header class="masthead"><div><p class="eyebrow">Personal dashboard</p><div class="wordmark"><h1>Cukup</h1><span class="wordmark-tag">${escapeHtml(report.timezone)}</span></div></div><div class="freshness ${partial ? 'freshness-partial' : ''}"><span class="freshness-mark" aria-hidden="true"></span><span>${partial ? '<strong>Partial report.</strong> ' : ''}Authoritative as of <time datetime="${escapeHtml(report.as_of)}">${formatTimestamp(report.as_of, report.timezone)}</time></span><span class="sr-only" role="status" aria-live="polite">${refreshing ? 'Refreshing dashboard' : partial ? 'Dashboard has stale or unavailable panels' : 'Dashboard up to date'}</span></div></header><main>${renderOverall(report.overall)}${renderTrend(report.trend, selection, report.timezone, selectedDate)}${renderFilters(report, selection, refreshing, filtersDisabled)}${renderTimeline(report.timeline, report.timezone, report.as_of)}${renderExecutors(report.executors, report.timezone)}</main><footer class="page-footer"><p>Cukup reports Working Time, never prompts or content. Filtered activity is non-additive; timeline targets are overall configured benchmarks, not filtered quotas.</p></footer>`
 }
 
 export function renderDashboardDocument(

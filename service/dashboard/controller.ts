@@ -1,7 +1,20 @@
-import type { DashboardReport, DashboardSelection, DashboardTransport, Panel } from './report.ts'
+import {
+	effectiveTimelineDate,
+	reportTimelineDate,
+	sameIsoWeek,
+	type DashboardReport,
+	type DashboardSelection,
+	type DashboardTransport,
+	type Panel,
+} from './report.ts'
 
 export interface DashboardView {
-	render(report: DashboardReport, selection: DashboardSelection, refreshing: boolean): void
+	render(
+		report: DashboardReport,
+		selection: DashboardSelection,
+		refreshing: boolean,
+		filtersDisabled: boolean,
+	): void
 	announce(message: string): void
 }
 
@@ -43,6 +56,7 @@ export class DashboardController {
 	private timer: unknown | undefined
 	private refreshing = false
 	private refreshQueued = false
+	private filtersBlocked = false
 	private unsubscribeVisibility: (() => void) | undefined
 
 	constructor(
@@ -72,20 +86,42 @@ export class DashboardController {
 	async refresh(): Promise<void> {
 		if (this.refreshing) {
 			this.refreshQueued = true
+			this.view.render(this.report, this.selection, true, this.filtersBlocked)
 			return
 		}
 		this.clearPoll()
 		this.refreshing = true
-		this.view.render(this.report, this.selection, true)
+		this.view.render(this.report, this.selection, true, this.filtersBlocked)
+		const requested = structuredClone(this.selection)
 		try {
-			this.report = await this.transport.load(structuredClone(this.selection))
+			const report = await this.transport.load(requested)
+			if (!sameSelection(requested, this.selection)) {
+				this.refreshQueued = true
+				return
+			}
+			if (
+				requested.timeline_date === undefined &&
+				!sameIsoWeek(reportTimelineDate(this.report), reportTimelineDate(report)) &&
+				(requested.projects.length > 0 || requested.executors.length > 0)
+			) {
+				this.selection = { ...this.selection, projects: [], executors: [] }
+				this.filtersBlocked = true
+				this.refreshQueued = true
+				return
+			}
+			this.report = report
+			this.filtersBlocked = false
 			this.view.announce('Dashboard updated')
 		} catch {
+			if (!sameSelection(requested, this.selection)) {
+				this.refreshQueued = true
+				return
+			}
 			this.report = preserveReportAsStale(this.report)
 			this.view.announce('Dashboard refresh failed; last successful values remain visible')
 		} finally {
 			this.refreshing = false
-			this.view.render(this.report, this.selection, false)
+			this.view.render(this.report, this.selection, false, this.filtersBlocked)
 			if (this.refreshQueued) {
 				this.refreshQueued = false
 				await this.refresh()
@@ -97,6 +133,12 @@ export class DashboardController {
 
 	async setFilter(kind: 'projects' | 'executors', value: string, checked: boolean): Promise<void> {
 		const values = new Set(this.selection[kind])
+		const available = kind === 'projects' ? this.report.available_projects : this.report.available_executors
+		const optionsAreCurrent = sameIsoWeek(
+			effectiveTimelineDate(this.report, this.selection),
+			reportTimelineDate(this.report),
+		)
+		if (checked && (this.filtersBlocked || !optionsAreCurrent || !available.includes(value))) return
 		if (checked) values.add(value)
 		else values.delete(value)
 		this.selection = { ...this.selection, [kind]: [...values] }
@@ -109,7 +151,13 @@ export class DashboardController {
 	}
 
 	async setTimelineDate(date: string): Promise<void> {
-		this.selection = { ...this.selection, timeline_date: date }
+		const changingWeek = !sameIsoWeek(effectiveTimelineDate(this.report, this.selection), date)
+		this.filtersBlocked = false
+		this.selection = {
+			...this.selection,
+			...(changingWeek ? { projects: [], executors: [] } : {}),
+			timeline_date: date,
+		}
 		await this.refresh()
 	}
 
@@ -120,7 +168,7 @@ export class DashboardController {
 			...this.selection,
 			range: { preset: 'custom', start_date: dates.start_date, end_date: dates.end_date },
 		}
-		this.view.render(this.report, this.selection, false)
+		this.view.render(this.report, this.selection, false, this.filtersBlocked)
 	}
 
 	async applyCustomRange(startDate: string, endDate: string): Promise<void> {
@@ -158,4 +206,8 @@ export class DashboardController {
 		this.clock.clearTimeout(this.timer)
 		this.timer = undefined
 	}
+}
+
+function sameSelection(left: DashboardSelection, right: DashboardSelection): boolean {
+	return JSON.stringify(left) === JSON.stringify(right)
 }

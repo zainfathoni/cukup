@@ -31,11 +31,16 @@ class DomDashboardView implements DashboardView {
 		document.body.append(this.announcements)
 	}
 
-	render(report: DashboardReport, selection: DashboardSelection, refreshing: boolean): void {
+	render(
+		report: DashboardReport,
+		selection: DashboardSelection,
+		refreshing: boolean,
+		filtersDisabled: boolean,
+	): void {
 		if (document.activeElement instanceof HTMLElement && this.root.contains(document.activeElement)) {
 			this.lastFocused = document.activeElement.dataset.focusKey
 		}
-		this.root.innerHTML = renderDashboardContent(report, selection, refreshing)
+		this.root.innerHTML = renderDashboardContent(report, selection, refreshing, filtersDisabled)
 		if (this.lastFocused && !refreshing) {
 			for (const element of this.root.querySelectorAll<HTMLElement>('[data-focus-key]')) {
 				if (element.dataset.focusKey === this.lastFocused) {

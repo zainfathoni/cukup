@@ -270,13 +270,64 @@ describe('dashboard report aggregation', () => {
 		])
 	})
 
+	test('limits filter labels to activity in the selected ISO week', () => {
+		const value = fixture()
+		value.events.push(
+			...session({
+				index: 5,
+				source: 'source-e',
+				project: 'ends-at-boundary',
+				executor: 'boundary-machine',
+				start: Date.parse('2026-08-30T16:30:00.000Z'),
+				end: Date.parse('2026-08-30T16:45:00.000Z'),
+			}),
+			...session({
+				index: 6,
+				source: 'source-f',
+				project: 'crosses-boundary',
+				executor: 'crossing-machine',
+				start: Date.parse('2026-08-30T16:46:00.000Z'),
+				end: Date.parse('2026-08-30T16:47:00.000Z'),
+			}),
+		)
+		const report = buildDashboardReport(
+			value.store,
+			{ projects: [], executors: [], range: { preset: 7 } },
+			now,
+		)
+		expect(report.timeline_date).toBe('2026-08-31')
+		expect(report.available_projects).toEqual(['alpha', 'beta', 'crosses-boundary'])
+		expect(report.available_executors).toEqual(['amp-orb', 'crossing-machine', 'machine-a'])
+
+		const historical = buildDashboardReport(
+			value.store,
+			{
+				projects: [],
+				executors: [],
+				timeline_date: '2026-08-30',
+				range: { preset: 7 },
+			},
+			now,
+		)
+		expect(historical.timeline_date).toBe('2026-08-30')
+		expect(historical.available_projects).toEqual([
+			'crosses-boundary',
+			'ends-at-boundary',
+			'Unassigned',
+		])
+		expect(historical.available_executors).toEqual([
+			'boundary-machine',
+			'crossing-machine',
+			'retired-machine',
+		])
+	})
+
 	test('reports mixed-v1/v2 attribution and separate activity/synchronization and lineage states', () => {
 		const report = buildDashboardReport(
 			fixture().store,
 			{ projects: [], executors: [], range: { preset: 7 } },
 			now,
 		)
-		expect(report.available_projects).toEqual(['alpha', 'beta', 'Unassigned'])
 		if (report.executors.state === 'unavailable') throw new Error('Expected executors')
 		expect(report.executors.data.find((value) => value.label === 'machine-a')).toEqual({
 			label: 'machine-a',

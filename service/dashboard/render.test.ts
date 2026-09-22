@@ -15,7 +15,8 @@ describe('dashboard rendering', () => {
 		expect(html).toContain('Authoritative as of')
 		expect(html).toContain('<fieldset><legend>Projects</legend>')
 		expect(html).toContain('<fieldset><legend>Executors</legend>')
-		expect(html).toContain('Activity is non-additive.')
+		expect(html).toContain('Options reflect activity in the selected ISO week.')
+		expect(html).toContain('Choosing a day in another week clears filters.')
 		expect(html).toContain('must not be added')
 		expect(html).toContain('role="img" aria-labelledby="timeline-svg-title timeline-svg-desc"')
 		expect(html).toContain('Timeline text equivalent')
@@ -39,6 +40,7 @@ describe('dashboard rendering', () => {
 		expect(html).toContain('Last activity is evidence, not an online/offline health signal.')
 		const targetX = Number(html.match(/class="meter-target" x1="([^"]+)"/)?.[1])
 		expect(targetX).toBeLessThan(470)
+		expect(html.indexOf('id="trend-title"')).toBeLessThan(html.indexOf('id="filters-title"'))
 	})
 
 	test('draws the timeline as lanes that name their dimension and keep overlap non-additive', () => {
@@ -76,6 +78,9 @@ describe('dashboard rendering', () => {
 		expect(html).toContain('<ol class="heat-grid" aria-label="Calendar heatmap')
 		expect(html).toContain('data-timeline-date="2026-08-31"')
 		expect(html).toContain('aria-label="Inspect Mon, Aug 31, 2026 in the activity timeline"')
+		expect(html).toContain('class="heat-cell heat-3 heat-selected-week heat-selected" data-timeline-date="2026-08-31"')
+		expect(html.match(/heat-selected-week/g)).toHaveLength(1)
+		expect(html).toContain('outlined cells mark the selected week')
 		expect(html).toContain('class="heat-tip status-under tip-start"')
 		expect(html).toContain('<p class="tip-date">Mon, Aug 31, 2026</p>')
 		expect(html).toContain('<span class="tip-figure">6h 20m</span><span class="tip-stamp">UNDER</span>')
@@ -112,7 +117,8 @@ describe('dashboard rendering', () => {
 		report.timeline.data.intervals = []
 		report.timeline.data.lanes = []
 		const html = renderDashboardContent(report, { ...selection, timeline_date: '2026-08-29' })
-		expect(html).toContain('class="heat-cell heat-3 heat-selected" data-timeline-date="2026-08-29"')
+		expect(html).toContain('class="heat-cell heat-3 heat-selected-week heat-selected" data-timeline-date="2026-08-29"')
+		expect(html.match(/heat-selected-week/g)).toHaveLength(6)
 		expect(html).toContain('<span>Selected day</span>')
 		expect(html).toContain('<p class="verdict-caption">Target met</p>')
 	})
@@ -164,6 +170,43 @@ describe('dashboard rendering', () => {
 		expect(html).toContain('<strong>Unavailable.</strong> Timeline query failed. No value is shown as zero.')
 		expect(html).not.toContain('No activity intervals recorded today.')
 		expect(html).toContain('nixos-workstation')
+	})
+
+	test('uses report-level timeline date for active-week rendering when timeline is unavailable', () => {
+		const partial = structuredClone(mockDashboardReport)
+		partial.as_of = '2026-08-30T17:30:00.000Z'
+		partial.timeline_date = '2026-08-31'
+		partial.timeline = { state: 'unavailable', message: 'Timeline query failed.' }
+		const html = renderDashboardContent(partial, selection)
+		expect(html).toContain('class="heat-cell heat-3 heat-selected-week heat-selected" data-timeline-date="2026-08-31"')
+	})
+
+	test('keeps historical filters enabled when their timeline panel is unavailable', () => {
+		const partial = structuredClone(mockDashboardReport)
+		partial.as_of = '2026-08-31T09:42:00.000Z'
+		partial.timeline_date = '2026-08-30'
+		partial.timeline = { state: 'unavailable', message: 'Timeline query failed.' }
+		const html = renderDashboardContent(partial, {
+			...selection,
+			timeline_date: '2026-08-30',
+		})
+		expect(html).toContain('<fieldset><legend>Projects</legend>')
+		expect(html).not.toContain('<fieldset disabled>')
+	})
+
+	test('disables obsolete options while a different selected week is loading', () => {
+		const html = renderDashboardContent(mockDashboardReport, {
+			...selection,
+			timeline_date: '2026-08-30',
+		}, true)
+		expect(html).toContain('<fieldset disabled><legend>Projects</legend>')
+		expect(html).toContain('<fieldset disabled><legend>Executors</legend>')
+	})
+
+	test('allows the controller to disable filters during an implicit week rollover', () => {
+		const html = renderDashboardContent(mockDashboardReport, selection, true, true)
+		expect(html).toContain('<fieldset disabled><legend>Projects</legend>')
+		expect(html).toContain('<fieldset disabled><legend>Executors</legend>')
 	})
 
 	test('escapes labels in markup and embedded initial state', () => {

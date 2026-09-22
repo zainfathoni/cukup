@@ -209,8 +209,9 @@ select {
 	font: inherit;
 }
 
-button,
-input[type="checkbox"] {
+button:not(:disabled),
+a.button,
+input[type="checkbox"]:not(:disabled) {
 	cursor: pointer;
 }
 
@@ -228,14 +229,14 @@ button,
 	transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 
-button:hover,
-.button:hover {
+button:where(:not(:disabled)):hover,
+a.button:hover {
 	transform: translate(-1px, -1px);
 	box-shadow: 4px 4px 0 var(--ink);
 }
 
-button:active,
-.button:active {
+button:where(:not(:disabled)):active,
+a.button:active {
 	transform: translate(2px, 2px);
 	box-shadow: 1px 1px 0 var(--ink);
 }
@@ -536,6 +537,10 @@ fieldset {
 	padding: 0.9rem 1rem 1rem;
 }
 
+fieldset:disabled {
+	opacity: 0.55;
+}
+
 legend {
 	border: var(--border);
 	border-radius: 2rem;
@@ -570,6 +575,14 @@ legend {
 
 .filter-options label:hover {
 	background: var(--empty);
+}
+
+fieldset:disabled .filter-options label {
+	box-shadow: none;
+}
+
+fieldset:disabled .filter-options label:hover {
+	background: var(--card);
 }
 
 .filter-options input {
@@ -1063,6 +1076,11 @@ svg text {
 	background: var(--accent);
 }
 
+.heat-selected-week {
+	border-color: var(--focus);
+	box-shadow: inset 0 0 0 1px var(--focus);
+}
+
 /* Hover detail card. Progressive enhancement only: it is pointer-driven, and
    the daily values table below carries the same numbers for everyone else. */
 .heat-tip {
@@ -1102,7 +1120,7 @@ svg text {
 .heat-cell:focus-visible,
 .heat-cell:active,
 .heat-selected {
-	outline: 2px solid var(--ink);
+	outline: 3px solid var(--ink);
 	outline-offset: 1px;
 	box-shadow: none;
 	transform: none;
@@ -1463,10 +1481,10 @@ dd {
 		transition-duration: 0.01ms !important;
 	}
 
-	button:hover,
-	.button:hover,
-	button:active,
-	.button:active {
+	button:where(:not(:disabled)):hover,
+	a.button:hover,
+	button:where(:not(:disabled)):active,
+	a.button:active {
 		transform: none;
 	}
 }
@@ -1479,6 +1497,10 @@ dd {
 	.heat-cell,
 	.meter-fill {
 		forced-color-adjust: auto;
+	}
+
+	.heat-selected-week {
+		border-width: 2px;
 	}
 
 	button[aria-pressed="true"] {
