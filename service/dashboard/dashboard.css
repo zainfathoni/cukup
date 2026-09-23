@@ -1232,17 +1232,6 @@ svg text {
 	}
 }
 
-@media (hover: none) {
-	.heat-cell:not(.heat-selected) + .heat-tip {
-		display: none;
-	}
-
-	.heat-selected + .heat-tip {
-		visibility: visible;
-		opacity: 1;
-	}
-}
-
 .heat-scale {
 	display: flex;
 	align-items: center;
