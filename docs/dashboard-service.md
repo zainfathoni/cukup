@@ -45,6 +45,10 @@ For each dashboard release:
 
 The `Origin: null` case matters because the `no-referrer` policy affects same-origin form navigation. Do not remove its fetch-site guard to fix logout.
 
+## How do week changes affect filters?
+
+Selecting a day in another ISO week clears both filter dimensions; selecting another day within the same week preserves them. Implicit Jakarta Sunday–Monday rollover also clears filters and reloads the report. Old-week options remain disabled during the transition, and superseded responses are not rendered.
+
 ## Where are implementation details defined?
 
 Read [routing and configuration](../service/dashboard/backend.ts), [OAuth and sessions](../service/dashboard/auth.ts), and [report contracts](../service/dashboard/report.ts). Read [ADR 0004](adr/0004-personal-dashboard-and-explicit-attribution.md) for rationale, and [service operations](service-operations.md) for recovery.
