@@ -1,6 +1,6 @@
 # Cukup: enough — transcript and text equivalent
 
-This is a text equivalent of the motion explainer. The video has no audio. Every line below also appears on screen. Descriptions in italics explain the visuals.
+This is a text equivalent of the motion explainer. A synthetic voice narrates every line below, and every line also appears on screen. Descriptions in italics explain the visuals.
 
 All data is synthetic. Illustrations marked *conceptual* show ideas, not Cukup features.
 
@@ -38,7 +38,7 @@ Let AI help with drafts, tests, and ideas.
 
 Keep the judgment: what matters, what is good enough, and who owns it.
 
-## Self-compassion (0:36.5–0:55.9)
+## Self-compassion (0:36.5–0:56.5)
 
 *Conceptual illustration. More cards crowd in. Then every card, tag, and agent drifts outward and fades. The person moves to the center, and their ring becomes a soft solid circle. Three labels grow from the person on short connectors: Notice, Remember, Be kind. The scene holds on space.*
 
@@ -50,13 +50,13 @@ Remember: struggling is not a private failure. Many people feel this.
 
 Be kind: choose a limit, as you would for a friend.
 
-## Cukup means enough (0:55.9–1:01.8)
+## Cukup means enough (0:56.5–1:02.4)
 
 *Title. The wordmark “Cukup” writes in beside the person, with an “enough” tag and a pronunciation line.*
 
 Tools that help us do more need a partner that helps us pause.
 
-## One prompt to pause (1:01.8–1:22.9)
+## One prompt to pause (1:02.4–1:25.0)
 
 *Product behavior · synthetic data. Three synthetic Amp turns draw on a 09:00–12:00 axis. Each grows a 15-minute extension. The bars drop into one Working Time row and merge. A note says the overlap counts once: 1h 22m. The axis zooms out to the full synthetic day, and the rest of the turns join the row. A connector carries the day total to the real Today card: 8h 7m, OVER, 7m over target. Last, a conceptual “Next task” card arrives at the person, and the person moves it to a “Tomorrow · your choice” slot. The chip changes to “Real Cukup view + conceptual choice”.*
 
@@ -70,7 +70,7 @@ It is one prompt to ask: is this enough for today?
 
 Cukup does not decide. You do.
 
-## Invitation (1:22.9–1:33.9)
+## Invitation (1:25.0–1:38.9)
 
 *Title. The closing line appears in large type. Then the end card shows cukup.dev and the current status: a personal dashboard, Amp only, and an open-source release in preparation.*
 
@@ -79,3 +79,5 @@ Let AI help you do the work.
 Keep the decision to say: cukup.
 
 *End card:* **cukup.dev**. Read why Cukup exists, and what it can and cannot tell you. A personal dashboard · Amp only · Open-source release in preparation.
+
+Read why Cukup exists, and what it can and cannot tell you, at cukup.dev.

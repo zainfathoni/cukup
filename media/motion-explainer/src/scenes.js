@@ -8,13 +8,24 @@
  * time before the first line, each line holds for `hold` seconds, and `tail`
  * is the time after the last line.
  *
+ * Narration: each line is spoken as `say`, or as `text` when `say` is absent.
+ * scripts/voice.ts measures every clip. A line then holds at least as long as
+ * its speech plus a short pause, so the captions and the voice stay in step.
+ *
  * `kind` separates what is invented for the story from what the product does:
  * - conceptual: an illustration of an idea. Cukup does not do or show this.
  * - product: the current Cukup Working Time rule or view, with synthetic data.
  * - title: words only.
  */
 
+import { narration } from './generated/narration.js'
+
 export const video = { width: 1920, height: 1080, fps: 30 }
+
+/** Speech starts this long after its line appears. */
+export const speechDelay = 0.2
+/** The minimum silence after a line's speech, before the next line. */
+const speechGap = 0.6
 
 export const audience =
 	'Developers and technical leads who use AI coding agents, and people who care about them. They may never install Cukup.'
@@ -47,7 +58,8 @@ export const scenes = [
 		transition: 'The connectors to the agents fade after each card arrives. The cards stay in place.',
 		lead: 0,
 		lines: [
-			{ text: 'An agent can write code in minutes.', hold: 3.3 },
+			// The comma keeps “in” audible.
+			{ text: 'An agent can write code in minutes.', say: 'An agent can write code, in minutes.', hold: 3.3 },
 			{ text: 'It can run many tasks at once.', hold: 3.4 },
 		],
 		tail: 0.2,
@@ -122,7 +134,11 @@ export const scenes = [
 		lead: 0.2,
 		lines: [
 			{ text: 'Cukup counts each Amp turn, plus 15 minutes after it.', hold: 4.4 },
-			{ text: 'Across this synthetic day, that gives 8h 7m. The target is 8h 0m.', hold: 5.0 },
+			{
+				text: 'Across this synthetic day, that gives 8h 7m. The target is 8h 0m.',
+				say: 'Across this synthetic day, that gives eight hours and seven minutes. The target is eight hours.',
+				hold: 5.0,
+			},
 			{ text: 'It is an estimate, not measured attention.', hold: 3.4 },
 			{ text: 'It is one prompt to ask: is this enough for today?', hold: 4.4 },
 			{ text: 'Cukup does not decide. You do.', hold: 3.4 },
@@ -151,7 +167,18 @@ export const endCard = {
 	url: 'cukup.dev',
 	invitation: 'Read why Cukup exists, and what it can and cannot tell you.',
 	status: 'A personal dashboard · Amp only · Open-source release in preparation',
+	// Spoken over the end card, which appears after the last line.
+	caption: 'Read why Cukup exists, and what it can and cannot tell you, at cukup.dev.',
+	say: 'Read why Cukup exists, and what it can and cannot tell you, at cukup dot dev.',
+	/** Seconds after the last line ends. */
+	speechAt: 0.6,
 }
+
+/** The narration key of a line. */
+export const lineKey = (sceneId, index) => `${sceneId}-${index + 1}`
+export const endKey = 'end-card'
+
+const spoken = (key) => narration.durations[key] ?? 0
 
 /** Scenes and lines with absolute start and end times, in seconds. */
 export function timeline() {
@@ -159,12 +186,16 @@ export function timeline() {
 	return scenes.map((scene) => {
 		const start = clock
 		let cursor = start + scene.lead
-		const lines = scene.lines.map((line) => {
-			const timed = { ...line, start: cursor, end: cursor + line.hold }
+		const lines = scene.lines.map((line, index) => {
+			const key = lineKey(scene.id, index)
+			const hold = Math.max(line.hold, speechDelay + spoken(key) + speechGap)
+			const timed = { ...line, key, hold, start: cursor, end: cursor + hold }
 			cursor = timed.end
 			return timed
 		})
-		clock = cursor + scene.tail
+		const last = scene.id === scenes.at(-1).id
+		const tail = last ? Math.max(scene.tail, endCard.speechAt + spoken(endKey) + 1.6) : scene.tail
+		clock = cursor + tail
 		return { ...scene, start, end: clock, lines }
 	})
 }

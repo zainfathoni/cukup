@@ -31,9 +31,11 @@
 !/media/motion-explainer/**/*.css
 !/media/motion-explainer/**/*.html
 !/media/motion-explainer/**/*.js
+!/media/motion-explainer/**/*.m4a
 !/media/motion-explainer/**/*.md
 !/media/motion-explainer/**/*.mp4
 !/media/motion-explainer/**/*.png
+!/media/motion-explainer/**/*.py
 !/media/motion-explainer/**/*.ts
 !/media/motion-explainer/**/*.vtt
 

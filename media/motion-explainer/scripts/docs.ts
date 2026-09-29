@@ -37,6 +37,9 @@ const allCopy = [
 	endCard.url,
 	endCard.invitation,
 	endCard.status,
+	endCard.caption,
+	endCard.say,
+	...scenes.flatMap((scene) => scene.lines.flatMap((line) => (line.say ? [line.say] : []))),
 ]
 for (const text of allCopy) {
 	for (const pattern of forbidden) if (pattern.test(text)) problems.push(`"${text}" matches ${pattern}`)
@@ -66,11 +69,11 @@ const close = scenes.at(-1)!
 const endStart = close.lines.at(-1)!.end
 const cues = [
 	...scenes.flatMap((scene) => scene.lines.map((line) => ({ start: line.start, end: line.end, text: line.text }))),
-	{ start: endStart, end: duration, text: `${endCard.url}\n${endCard.status}` },
+	{ start: endStart + endCard.speechAt, end: duration, text: endCard.caption },
 ]
 await Bun.write(
 	`${root}captions.en.vtt`,
-	`WEBVTT\n\nNOTE The video has no audio. These cues repeat the on-screen text. Generated from src/scenes.js.\n\n${cues
+	`WEBVTT\n\nNOTE Captions of the narration. The same words are on screen. Generated from src/scenes.js.\n\n${cues
 		.map((cue, index) => `${index + 1}\n${stamp(cue.start)} --> ${stamp(cue.end)}\n${cue.text}`)
 		.join('\n\n')}\n`,
 )
@@ -79,7 +82,7 @@ await Bun.write(
 
 const transcript = `# Cukup: enough — transcript and text equivalent
 
-This is a text equivalent of the motion explainer. The video has no audio. Every line below also appears on screen. Descriptions in italics explain the visuals.
+This is a text equivalent of the motion explainer. A synthetic voice narrates every line below, and every line also appears on screen. Descriptions in italics explain the visuals.
 
 All data is synthetic. Illustrations marked *conceptual* show ideas, not Cukup features.
 
@@ -91,6 +94,8 @@ ${scenes
 	.join('\n\n')}
 
 *End card:* **${endCard.url}**. ${endCard.invitation} ${endCard.status}.
+
+${endCard.caption}
 `
 await Bun.write(`${root}transcript.md`, transcript)
 
@@ -103,7 +108,7 @@ Generated from [\`src/scenes.js\`](src/scenes.js). Edit that file, then run \`bu
 
 - **Audience:** ${audience}
 - **The one idea to remember:** ${idea}
-- **Format:** ${video.width} × ${video.height}, ${video.fps} fps, ${duration.toFixed(1)} s, no audio. The story is told in on-screen text.
+- **Format:** ${video.width} × ${video.height}, ${video.fps} fps, ${duration.toFixed(1)} s. A synthetic voice narrates every line, and every line is also on screen, so the story works without sound.
 - **Kinds:** *Conceptual* scenes illustrate ideas. Cukup does not count, detect, or show them. *Product* scenes show the current Working Time rule and the real Today card, with synthetic data. *Title* scenes are words only.
 
 Review the whole sequence in the [contact sheet](contact-sheet.png) before rendering.

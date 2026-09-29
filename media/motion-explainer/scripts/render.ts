@@ -8,7 +8,8 @@
  *   bun media/motion-explainer/scripts/render.ts stills 12.5 40   # out/still-*.png
  *
  * Prerequisites: Chromium, Playwright, ffmpeg, ImageMagick, Noto Sans, and
- * Noto Sans Mono. See README.md.
+ * Noto Sans Mono. The video also needs narration.m4a from scripts/voice.ts.
+ * See README.md.
  */
 import { mkdirSync } from 'node:fs'
 import { duration, timeline, video } from '../src/scenes.js'
@@ -67,10 +68,18 @@ const mode = Bun.argv[2] ?? 'video'
 if (mode === 'video') {
 	const frames = Math.round(duration * video.fps)
 	const output = `${root}cukup-explainer.mp4`
+	// The narration is mixed against the same timeline. A length mismatch means it is stale.
+	const audio = `${root}narration.m4a`
+	const probe = Bun.spawnSync(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', audio])
+	const audioSeconds = Number(probe.stdout.toString().trim())
+	if (!(Math.abs(audioSeconds - duration) < 0.05)) {
+		throw new Error(`narration.m4a lasts ${audioSeconds} s, the timeline ${duration.toFixed(2)} s. Run scripts/voice.ts.`)
+	}
 	const ffmpeg = Bun.spawn(
 		[
 			'ffmpeg', '-y', '-loglevel', 'error',
 			'-f', 'image2pipe', '-framerate', String(video.fps), '-c:v', 'png', '-i', '-',
+			'-i', audio, '-map', '0:v', '-map', '1:a', '-c:a', 'copy',
 			'-c:v', 'libx264', '-preset', 'slow', '-crf', '20', '-tune', 'animation',
 			'-pix_fmt', 'yuv420p', '-r', String(video.fps), '-movflags', '+faststart',
 			'-metadata', 'title=Cukup: enough',
