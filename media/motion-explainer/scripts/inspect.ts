@@ -7,10 +7,12 @@
  *
  *   bun media/motion-explainer/scripts/inspect.ts
  */
+import { fileURLToPath } from 'node:url'
 import { mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { timeline } from '../src/scenes.js'
 
-const root = new URL('..', import.meta.url).pathname
+// fileURLToPath decodes the URL, so a checkout path with spaces works.
+const root = fileURLToPath(new URL('..', import.meta.url))
 const input = `${root}cukup-explainer.mp4`
 const out = `${root}out`
 mkdirSync(out, { recursive: true })

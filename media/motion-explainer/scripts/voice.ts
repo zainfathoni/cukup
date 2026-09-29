@@ -9,11 +9,13 @@
  * VOICE_PYTHON: a Python with kokoro-onnx and soundfile. Default: ~/.cache/cukup-voice/.venv/bin/python
  * KOKORO_DIR: holds kokoro-v1.0.onnx and voices-v1.0.bin. Default: ~/.cache/cukup-voice
  */
+import { fileURLToPath } from 'node:url'
 import { mkdirSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { endCard, endKey, lineKey, scenes } from '../src/scenes.js'
 
-const root = new URL('..', import.meta.url).pathname
+// fileURLToPath decodes the URL, so a checkout path with spaces works.
+const root = fileURLToPath(new URL('..', import.meta.url))
 const voiceDir = `${root}out/voice`
 rmSync(voiceDir, { recursive: true, force: true })
 mkdirSync(voiceDir, { recursive: true })

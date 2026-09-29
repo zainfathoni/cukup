@@ -3,11 +3,13 @@
  * - src/generated/data.js: every number, from the real aggregation code.
  * - src/generated/today-card.png: the real Today card, from the real renderer and CSS.
  */
+import { fileURLToPath } from 'node:url'
 import { mkdirSync } from 'node:fs'
 import { dashboardDocument, explainerData } from '../product/synthetic-day.ts'
 import { launchChromium } from './browser.ts'
 
-const root = new URL('..', import.meta.url).pathname
+// fileURLToPath decodes the URL, so a checkout path with spaces works.
+const root = fileURLToPath(new URL('..', import.meta.url))
 const generated = `${root}src/generated`
 mkdirSync(generated, { recursive: true })
 

@@ -11,13 +11,32 @@
  * Noto Sans Mono. The video also needs narration.m4a from scripts/voice.ts.
  * See README.md.
  */
+import { fileURLToPath } from 'node:url'
 import { mkdirSync } from 'node:fs'
 import { duration, timeline, video } from '../src/scenes.js'
+import { narration } from '../src/generated/narration.js'
+import { narrationFingerprint } from '../src/generated/narration-fingerprint.js'
 import { launchChromium } from './browser.ts'
+import { assertNarrationCurrent, narrationCues } from './narration-cues.ts'
 
-const root = new URL('..', import.meta.url).pathname
+// fileURLToPath decodes the URL, so a checkout path with spaces works.
+const root = fileURLToPath(new URL('..', import.meta.url))
 const outDir = `${root}out`
 mkdirSync(outDir, { recursive: true })
+
+const mode = Bun.argv[2] ?? 'video'
+const audio = `${root}narration.m4a`
+
+// Refuse stale narration before any rendering starts.
+if (mode === 'video') {
+	// The fingerprint catches changed words or timing, even at the same length.
+	assertNarrationCurrent(narrationFingerprint, narrationCues(), narration)
+	const probe = Bun.spawnSync(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', audio])
+	const audioSeconds = Number(probe.stdout.toString().trim())
+	if (!(Math.abs(audioSeconds - duration) < 0.05)) {
+		throw new Error(`narration.m4a lasts ${audioSeconds} s, the timeline ${duration.toFixed(2)} s. Run scripts/voice.ts.`)
+	}
+}
 
 const types: Record<string, string> = {
 	'.html': 'text/html',
@@ -63,18 +82,9 @@ async function run(command: string[]) {
 	if ((await process.exited) !== 0) throw new Error(`${command[0]} failed`)
 }
 
-const mode = Bun.argv[2] ?? 'video'
-
 if (mode === 'video') {
 	const frames = Math.round(duration * video.fps)
 	const output = `${root}cukup-explainer.mp4`
-	// The narration is mixed against the same timeline. A length mismatch means it is stale.
-	const audio = `${root}narration.m4a`
-	const probe = Bun.spawnSync(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', audio])
-	const audioSeconds = Number(probe.stdout.toString().trim())
-	if (!(Math.abs(audioSeconds - duration) < 0.05)) {
-		throw new Error(`narration.m4a lasts ${audioSeconds} s, the timeline ${duration.toFixed(2)} s. Run scripts/voice.ts.`)
-	}
 	const ffmpeg = Bun.spawn(
 		[
 			'ffmpeg', '-y', '-loglevel', 'error',
