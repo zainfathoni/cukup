@@ -11,6 +11,7 @@ import {
 } from './config.ts'
 import { DashboardBackend, type DashboardAssets } from './dashboard/backend.ts'
 import { loadExplainerAssets } from './dashboard/explainer.ts'
+import { loadSocialImage } from './dashboard/social-image.ts'
 import { ServiceLogger } from './logger.ts'
 import { ServiceStore } from './store.ts'
 
@@ -44,11 +45,15 @@ if (dashboardConfiguration) {
 			(await loadExplainerAssets(`${import.meta.dir}/explainer`)) ??
 			(await loadExplainerAssets(`${import.meta.dir}/../media/motion-explainer`))
 		if (!explainer) logger.error('explainer_unavailable', { error: 'assets_missing' })
+		const socialImage =
+			(await loadSocialImage(import.meta.dir)) ?? (await loadSocialImage(`${import.meta.dir}/../media/og-image`))
+		if (!socialImage) logger.error('social_image_unavailable', { error: 'asset_missing' })
 		dashboard = new DashboardBackend({
 			config: dashboardConfiguration,
 			store,
 			assets: await loadDashboardAssets(),
 			explainer,
+			socialImage,
 		})
 	} catch {
 		logger.error('dashboard_disabled', { error: 'initialization_failed' })

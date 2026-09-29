@@ -350,9 +350,14 @@ describe('dashboard HTTP contract', () => {
 			if (destination.startsWith('#')) {
 				expect(ids).toContain(destination.slice(1))
 			} else {
-				expect(['/auth/github', '/assets/favicon.svg', '/assets/dashboard.css', 'https://ampcode.com/']).toContain(
-					destination,
-				)
+				// The canonical link is the one absolute self-reference.
+				expect([
+					'/auth/github',
+					'/assets/favicon.svg',
+					'/assets/dashboard.css',
+					'https://ampcode.com/',
+					'https://cukup.dev/',
+				]).toContain(destination)
 			}
 		}
 

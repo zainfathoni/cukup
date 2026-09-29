@@ -38,6 +38,11 @@
 !/media/motion-explainer/**/*.py
 !/media/motion-explainer/**/*.ts
 !/media/motion-explainer/**/*.vtt
+!/media/og-image/**/*.css
+!/media/og-image/**/*.html
+!/media/og-image/**/*.md
+!/media/og-image/**/*.png
+!/media/og-image/**/*.ts
 
 # Generated output and portal metadata stay ignored explicitly for clarity.
 node_modules/
@@ -46,3 +51,4 @@ dist/
 .amp/portals/**
 /media/motion-explainer/frames/
 /media/motion-explainer/out/
+/media/og-image/out/
