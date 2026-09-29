@@ -94,15 +94,33 @@ const video = (page: Page) => page.locator('#explainer video')
 		await other.close()
 	}
 
-	// Narrow screen with 200% text.
+	// Narrow screen with 200% text, measured on the whole page after layout settles.
+	// Font metrics differ between machines, so a wide stress font runs too.
 	const narrow = await browser.newContext({ viewport: { width: 320, height: 800 }, colorScheme: 'light' })
 	const narrowPage = await narrow.newPage()
 	await narrowPage.goto(`${base}/signed-out`, { waitUntil: 'networkidle' })
-	// CSSOM, not a style tag: the page's CSP rightly blocks injected inline styles.
-	await narrowPage.evaluate(() => document.documentElement.style.setProperty('font-size', '200%', 'important'))
-	const narrowOverflow = await narrowPage.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
-	check('320px with 200% text: no horizontal overflow', narrowOverflow === 0, `overflow ${narrowOverflow}px`)
-	await narrowPage.locator('#explainer').screenshot({ path: `${assets}320-text-200.png` })
+	for (const font of [null, 'Noto Sans Mono']) {
+		// CSSOM, not a style tag: the page's CSP rightly blocks injected inline styles.
+		await narrowPage.evaluate((family) => {
+			document.documentElement.style.setProperty('font-size', '200%', 'important')
+			if (family) document.body.style.setProperty('font-family', family, 'important')
+		}, font)
+		await narrowPage.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+		await narrowPage.waitForTimeout(500)
+		const measured = await narrowPage.evaluate(() => {
+			const width = document.documentElement.clientWidth
+			const outside = [...document.querySelectorAll('body *')]
+				.filter((element) => element.getBoundingClientRect().right > width + 0.5)
+				.slice(0, 5)
+				.map((element) => `${element.tagName.toLowerCase()}.${element.className} to ${element.getBoundingClientRect().right.toFixed(1)}`)
+			return { overflow: document.documentElement.scrollWidth - width, outside }
+		})
+		const label = font ? `320px, 200% text, ${font}` : '320px, 200% text'
+		check(`${label}: no horizontal overflow on the whole page`, measured.overflow === 0 && measured.outside.length === 0, `overflow ${measured.overflow}px${measured.outside.length ? `; outside: ${measured.outside.join(', ')}` : ''}`)
+		const suffix = font ? '-wide-font' : ''
+		await narrowPage.locator('#explainer').screenshot({ path: `${assets}320-text-200${suffix}.png` })
+		await narrowPage.locator('#status').screenshot({ path: `${assets}320-text-200-status${suffix}.png` })
+	}
 	await narrow.close()
 
 	check('Default launch: no CSP violation or console error', problems.length === 0, problems.join(' | '))

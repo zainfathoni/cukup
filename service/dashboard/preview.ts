@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import type { AttributedStoredWorkEvent } from '../types.ts'
 import {
 	availableDashboardLabels,
@@ -99,7 +100,7 @@ const store: DashboardReportStore = {
 }
 
 const bundle = await Bun.build({
-	entrypoints: [new URL('./client.ts', import.meta.url).pathname],
+	entrypoints: [fileURLToPath(new URL('./client.ts', import.meta.url))],
 	minify: true,
 	target: 'browser',
 })
@@ -121,7 +122,7 @@ const signedOut = new DashboardBackend({
 	},
 	store,
 	assets: { css, javascript: client },
-	explainer: await loadExplainerAssets(new URL('../../media/motion-explainer', import.meta.url).pathname),
+	explainer: await loadExplainerAssets(fileURLToPath(new URL('../../media/motion-explainer', import.meta.url))),
 })
 const explainerPaths: ReadonlySet<string> = new Set(Object.values(EXPLAINER_ROUTES))
 

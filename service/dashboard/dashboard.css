@@ -1855,8 +1855,11 @@ dd {
 
 .landing-status {
 	display: grid;
+	/* minmax(0, …) lets rows shrink below their longest word at large text sizes. */
+	grid-template-columns: minmax(0, 1fr);
 	gap: 0.75rem;
 	margin: 0 0 1.5rem;
+	container: landing-status / inline-size;
 }
 
 .landing-status div {
@@ -1871,6 +1874,19 @@ dd {
 
 .landing-status dt {
 	font-weight: 700;
+}
+
+.landing-status dt,
+.landing-status dd {
+	overflow-wrap: anywhere;
+	hyphens: auto;
+}
+
+/* Only very narrow lists, such as 320px with 200% text, give up row padding for words. */
+@container landing-status (max-width: 14rem) {
+	.landing-status div {
+		padding: 0.5rem 0.55rem;
+	}
 }
 
 .landing-status dd {
@@ -1905,7 +1921,7 @@ dd {
 	}
 
 	.landing-status div {
-		grid-template-columns: 1fr;
+		grid-template-columns: minmax(0, 1fr);
 		gap: 0.2rem;
 	}
 

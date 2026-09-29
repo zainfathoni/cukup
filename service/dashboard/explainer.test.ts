@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createApp } from '../app.ts'
 import type { DashboardConfiguration } from '../config.ts'
 import { ServiceLogger } from '../logger.ts'
@@ -309,7 +310,7 @@ describe('signed-out player', () => {
 
 describe('shipped explainer files', () => {
 	test('load from the repository with the expected formats', async () => {
-		const assets = await loadExplainerAssets(new URL('../../media/motion-explainer', import.meta.url).pathname)
+		const assets = await loadExplainerAssets(fileURLToPath(new URL('../../media/motion-explainer', import.meta.url)))
 		expect(assets).toBeDefined()
 		expect(assets!.video.size).toBeGreaterThan(1_000_000)
 		expect(assets!.durationLabel).toBe('1 min 38 s')

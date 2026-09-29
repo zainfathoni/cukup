@@ -5,7 +5,7 @@
 - Candidate: branch `issue-29-motion-explainer`
 - Browser: system Chromium 152 through Playwright, headless. No other browser is installed.
 - Surface: `bun run service/dashboard/preview.ts`, route `/signed-out`. The preview sends that route, the explainer routes, and the favicon through the real `DashboardBackend`, so headers and CSP match production.
-- Checks: [`media/motion-explainer/scripts/verify-landing.ts`](../../../media/motion-explainer/scripts/verify-landing.ts). All 26 checks passed.
+- Checks: [`media/motion-explainer/scripts/verify-landing.ts`](../../../media/motion-explainer/scripts/verify-landing.ts). All 27 checks passed.
 
 ## Player
 
@@ -32,7 +32,8 @@ Headless Chromium refuses unmuted `play()` without a user gesture. The playback 
 | 390 × 844 mobile emulation, touch, 2× | light | Paused, 16:9, no horizontal overflow |
 | 390 × 844 mobile emulation, touch, 2× | dark | Paused, 16:9, no horizontal overflow |
 | 1280 × 900, reduced motion | light | Paused, poster shown, no overflow |
-| 320 wide, 200% root text | light | No horizontal overflow |
+| 320 wide, 200% root text | light | No horizontal overflow on the whole page, after layout settles |
+| 320 wide, 200% root text, Noto Sans Mono stress font | light | No horizontal overflow on the whole page, after layout settles |
 
 ![Explainer section at 1280px, light](./assets/desktop-light.png)
 
@@ -45,6 +46,18 @@ Headless Chromium refuses unmuted `play()` without a user gesture. The playback 
 ![Explainer section with reduced motion](./assets/reduced-motion.png)
 
 ![Explainer section at 320px with 200% text](./assets/320-text-200.png)
+
+### Large text: correction
+
+The first version of this evidence reported no overflow at 320 px with 200% text. That result was wrong. The check measured the page right after the text change, on this machine's fonts only, and the screenshot showed only the player. The review measured `scrollWidth` 339 against `clientWidth` 320. The source was the three Status rows, which could not shrink below their longest word.
+
+The check now waits two frames and 500 ms, and measures the whole page. It lists every element that extends past the viewport. It then repeats with Noto Sans Mono, because font widths differ between machines. Against the previous CSS, that stress run fails: overflow 52 px, with the Status `div`, `dt`, and `dd` reaching x = 372. With the fix, both runs report 0 px.
+
+The fix sets the Status list and its narrow rows to `minmax(0, 1fr)` and lets their text wrap anywhere. A container query trims the row padding only when the list is narrower than 14rem. That happens at large text sizes, not on normal phones. Full-page screenshots at 1280 px and 390 px, light and dark, match the previous CSS outside the video frame, apart from antialiasing noise.
+
+![Status at 320px with 200% text](./assets/320-text-200-status.png)
+
+![Status at 320px with 200% text and a wide stress font](./assets/320-text-200-status-wide-font.png)
 
 With the optional caption track turned on:
 
@@ -71,4 +84,5 @@ With the optional caption track turned on:
 - No screen reader test.
 - On mobile, Chromium shows its controls over the paused poster. They cover the invitation and status lines of the end card. The figcaption and the page text still give the same information.
 - At 320 px with 200% text, the player is small, like all content in that column. It keeps its 16:9 frame.
+- At 320 px with 200% text, about five characters fit on a line in the Status rows. Some words break mid-word. This Chromium has no English hyphenation dictionary, so `hyphens: auto` adds no hyphens here.
 - This is a local check. Deployment and live playback are not verified.
