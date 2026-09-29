@@ -7,21 +7,21 @@
 | File | [`cukup-explainer.mp4`](cukup-explainer.mp4) |
 | Codec | H.264, yuv420p, `+faststart` |
 | Dimensions | 1920 × 1080 |
-| Frame rate | 30 fps, 2817 frames |
-| Duration | 93.9 s |
-| Size | 4.97 MiB |
-| Audio | None. One video stream. |
+| Frame rate | 30 fps, 2967 frames |
+| Duration | 98.9 s |
+| Size | 6.07 MiB |
+| Audio | AAC, 48 kHz, mono, 128 kb/s, 98.9 s. Narration only. |
 | Poster | [`poster.png`](poster.png), 1920 × 1080, the last frame |
 
-`scripts/inspect.ts` reported these values with ffprobe from the final file.
+`scripts/inspect.ts` and ffprobe reported these values from the final file.
 
-The duration is 93.9 s, not 60–90 s. Each caption line needs 0.3 s per word, plus 1 s. The product scene also needs time to show how the rule works. Cutting to 90 s would drop a caption line or crowd the reading time. The scene file can make that trade if the owner prefers a shorter cut.
+The duration is 98.9 s, not 60–90 s. Each caption line needs 0.3 s per word, plus 1 s. Narration added 5 s: two lines needed more time for speech, and the spoken end card needed more. The product scene also needs time to show how the rule works. Cutting to 90 s would drop lines or crowd them. The scene file can make that trade if the owner prefers a shorter cut.
 
 ## Method
 
 I inspected frames decoded from the final MP4, not source renders:
 
-- Eight sheets at 2 fps: 188 frames, the full video.
+- Nine sheets at 2 fps: 198 frames, the full video.
 - Ten frames per second across ±0.5 s of each of the seven scene boundaries.
 - Full-resolution frames of the Today card and the end card.
 - An ffmpeg `scene` filter with a threshold of 0.12. It found no abrupt change. The video has no hard cuts, so any hit would have been a jump.
@@ -46,7 +46,7 @@ Earlier renders had these faults. The final render has none of them.
 
 ## Pacing and legibility
 
-- `docs.ts` checks that each line holds for at least 0.3 s per word, plus 1 s. All 22 lines pass. The shortest hold is 3.1 s.
+- `docs.ts` checks that each line holds for at least 0.3 s per word, plus 1 s. All 21 lines pass. The shortest hold is 3.1 s.
 - Captions are 45–50 px at 1080p. Stage labels are 25–42 px. The closing lines are 84 px, and the URL is 132 px.
 - The Today card is 720 px wide. Its figure, “8h 7m”, is about 60 px high. Its target line is about 17 px. The caption says the same numbers: “8h 7m” and “8h 0m”.
 - The compassion scene resolves density into space. Only the person remains, with a slowly breathing circle and 1.3 s without a new line.
@@ -80,9 +80,24 @@ The synthetic day is Tuesday 2026-09-15 in Asia/Jakarta, with the weekday target
 - The video shows no Cukup control that stops agents, approves work, or enforces limits. The person moves the next task.
 - Status matches today: cukup.dev serves the public landing page, the dashboard is personal, support is Amp only, and the open-source release is in preparation. The repository is private.
 
+## Narration
+
+| Check | Result |
+| --- | --- |
+| Voice | Kokoro-82M v1.0, voice `af_heart`, speed 0.94, synthesized locally |
+| Script | Each spoken line is its caption line. Only the spoken forms of “8h 7m”, “8h 0m”, and “cukup.dev” differ. One comma was added (“write code, in minutes”) so that “in” stays audible. |
+| “Cukup” | Spoken as /tʃˈuːkʊp/ (“CHOO-koop”), not the English “kyoo-kup”. `voice.py` fails if it cannot make that replacement. |
+| Loudness | −16.3 LUFS integrated, 4.1 LU range, −1.4 dBTP true peak |
+| Timing | `mix.ts` fails if any clip runs past its line or overlaps the next clip. Each clip starts 0.2 s after its line appears. |
+| Content and sync | Whisper `medium.en` transcribed the MP4's audio inside each caption's own start and end time. All 22 windows contain their full line. Whisper hears “Cukup” as “Chukup”, the intended sound. |
+
+The first mix check found a real fault: `small.en` and `medium.en` both heard “write code a minutes”. A comma in the spoken form fixed it. `small.en` also misheard “Tools” and “Let AI” in the mix. `medium.en` heard both clips correctly, alone and in the mix, so those were transcription errors.
+
 ## Limits
 
-- The video has no audio. The captions file repeats the on-screen text for players and screen readers. It is not a narration track.
+- Nobody listened to the narration. I checked it by transcription, loudness, and timing, not by ear. Tone, warmth, and naturalness need a human review.
+- The voice is synthetic. It is not a person's voice and does not claim to be.
+- No music or sound effects.
 - The poster is the static alternative. The transcript is the text equivalent. The website player, controls, and reduced-motion behavior belong to the later embedding work.
 - The Today card uses the dashboard's system font stack, as resolved on the render machine. Other machines can render the card with other fonts.
 - The small brand tag in the corner is about 14 px high. It is decorative. The name is also in the brand text and the closing scenes.
