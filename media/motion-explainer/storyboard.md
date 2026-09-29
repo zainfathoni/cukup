@@ -1,6 +1,6 @@
 # Storyboard: Cukup motion explainer
 
-Generated from [`src/scenes.js`](src/scenes.js). Edit that file, then run `bun media/motion-explainer/scripts/docs.ts`.
+Generated from [`src/scenes.js`](src/scenes.js). Edit that file. Then, from the repository root, run `scripts/voice.ts`, `scripts/docs.ts`, and `scripts/render.ts` under `media/motion-explainer/`, in that order. Speech durations change the timeline, so the voice comes first.
 
 - **Audience:** Developers and technical leads who use AI coding agents, and people who care about them. They may never install Cukup.
 - **The one idea to remember:** AI can do more work. People still decide what is enough.

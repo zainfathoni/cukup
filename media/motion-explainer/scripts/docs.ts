@@ -1,50 +1,20 @@
 /**
  * Generates the storyboard, captions, and transcript from src/scenes.js, and
- * checks the copy. Run it after every change to the story.
+ * checks the copy. Run it after scripts/voice.ts, which sets speech durations.
  *
  *   bun media/motion-explainer/scripts/docs.ts
  */
+import { fileURLToPath } from 'node:url'
 import { audience, duration, endCard, idea, timeline, video } from '../src/scenes.js'
+import { copyProblems } from './copy-checks.ts'
 
-const root = new URL('..', import.meta.url).pathname
+// fileURLToPath decodes the URL, so a checkout path with spaces works.
+const root = fileURLToPath(new URL('..', import.meta.url))
 const scenes = timeline()
 
 /* ---------- Checks ---------- */
 
-const problems: string[] = []
-const words = (text: string) => text.split(/\s+/).filter((word) => /\w/.test(word)).length
-
-for (const scene of scenes) {
-	for (const line of scene.lines) {
-		// Reading time: 0.3 s per word, plus 1 s to find the line.
-		const needed = words(line.text) * 0.3 + 1
-		if (line.hold + 1e-9 < needed) {
-			problems.push(`"${line.text}" holds ${line.hold}s; it needs ${needed.toFixed(1)}s`)
-		}
-		if (words(line.text) > 14) problems.push(`"${line.text}" has more than 14 words`)
-	}
-}
-
-// Claims the explainer must not make. Adapted from the landing-page tests.
-const forbidden = [
-	/sign up|join the|get started|download|install cukup|clone|self-host now|try it/i,
-	/measures? (your )?(attention|focus|productivity|wellbeing|quality)/i,
-	/(reduces|prevents|cures) (burnout|stress)|improves? (your )?(wellbeing|productivity)/i,
-	/open[- ]source (now|today)|now open source|available to everyone/i,
-]
-const allCopy = [
-	...scenes.flatMap((scene) => scene.lines.map((line) => line.text)),
-	endCard.url,
-	endCard.invitation,
-	endCard.status,
-	endCard.caption,
-	endCard.say,
-	...scenes.flatMap((scene) => scene.lines.flatMap((line) => (line.say ? [line.say] : []))),
-]
-for (const text of allCopy) {
-	for (const pattern of forbidden) if (pattern.test(text)) problems.push(`"${text}" matches ${pattern}`)
-}
-
+const problems = copyProblems()
 if (problems.length > 0) {
 	console.error(problems.join('\n'))
 	process.exit(1)
@@ -104,7 +74,7 @@ await Bun.write(`${root}transcript.md`, transcript)
 const escape = (text: string) => text.replaceAll('|', '\\|')
 const storyboard = `# Storyboard: Cukup motion explainer
 
-Generated from [\`src/scenes.js\`](src/scenes.js). Edit that file, then run \`bun media/motion-explainer/scripts/docs.ts\`.
+Generated from [\`src/scenes.js\`](src/scenes.js). Edit that file. Then, from the repository root, run \`scripts/voice.ts\`, \`scripts/docs.ts\`, and \`scripts/render.ts\` under \`media/motion-explainer/\`, in that order. Speech durations change the timeline, so the voice comes first.
 
 - **Audience:** ${audience}
 - **The one idea to remember:** ${idea}

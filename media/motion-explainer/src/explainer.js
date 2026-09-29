@@ -574,14 +574,15 @@ function seek(t) {
 	})
 
 	/* Close and end card */
-	const end = ramp(t, E('close', 1) + 0.1, 0.8)
+	const endReveal = (item) => ramp(t, E('close', 1) + endCard.reveal[item].at, endCard.reveal[item].fade)
+	const end = endReveal('url')
 	const one = ramp(t, L('close', 0), 0.5)
 	const two = ramp(t, L('close', 1), 0.5)
 	place(closeOne, 960, mix(420, 400, one) - end * 70, { o: one })
 	place(closeTwo, 960, mix(540, 520, two) - end * 70, { o: two })
 	place(url, 960, mix(680, 660, end), { o: end })
-	place(invitation, 960, 765, { o: ramp(t, E('close', 1) + 0.4, 0.6) })
-	place(status, 960, 850, { o: ramp(t, E('close', 1) + 0.7, 0.6) })
+	place(invitation, 960, 765, { o: endReveal('invitation') })
+	place(status, 960, 850, { o: endReveal('status') })
 
 	/* Kind chips */
 	for (const kind of kinds) {

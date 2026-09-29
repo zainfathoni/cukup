@@ -2,7 +2,9 @@
  * The single source of truth for the explainer's story and timing.
  *
  * The animation, captions, transcript, storyboard, and contact sheet all read
- * this file. Change copy or timing here, then run `bun run docs` and render.
+ * this file. Change copy or timing here. Then, from the repository root, run
+ * scripts/voice.ts, scripts/docs.ts, and scripts/render.ts, in that order.
+ * Speech durations change the timeline, so the voice comes first.
  *
  * Each scene starts where the previous one ends. Within a scene, `lead` is the
  * time before the first line, each line holds for `hold` seconds, and `tail`
@@ -172,6 +174,12 @@ export const endCard = {
 	say: 'Read why Cukup exists, and what it can and cannot tell you, at cukup dot dev.',
 	/** Seconds after the last line ends. */
 	speechAt: 0.6,
+	/** When each end-card element starts to fade in, after the last line ends, and for how long. */
+	reveal: {
+		url: { at: 0.1, fade: 0.8 },
+		invitation: { at: 0.4, fade: 0.6 },
+		status: { at: 0.7, fade: 0.6 },
+	},
 }
 
 /** The narration key of a line. */
@@ -180,10 +188,13 @@ export const endKey = 'end-card'
 
 const spoken = (key) => narration.durations[key] ?? 0
 
-/** Scenes and lines with absolute start and end times, in seconds. */
-export function timeline() {
+/**
+ * Scenes and lines with absolute start and end times, in seconds.
+ * `source` defaults to the scenes above. Tests pass an edited copy.
+ */
+export function timeline(source = scenes) {
 	let clock = 0
-	return scenes.map((scene) => {
+	return source.map((scene) => {
 		const start = clock
 		let cursor = start + scene.lead
 		const lines = scene.lines.map((line, index) => {
@@ -193,7 +204,7 @@ export function timeline() {
 			cursor = timed.end
 			return timed
 		})
-		const last = scene.id === scenes.at(-1).id
+		const last = scene.id === source.at(-1).id
 		const tail = last ? Math.max(scene.tail, endCard.speechAt + spoken(endKey) + 1.6) : scene.tail
 		clock = cursor + tail
 		return { ...scene, start, end: clock, lines }
