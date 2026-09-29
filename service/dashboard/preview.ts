@@ -9,6 +9,7 @@ import {
 import type { DashboardSelection } from './report.ts'
 import { DashboardBackend } from './backend.ts'
 import { EXPLAINER_ROUTES, loadExplainerAssets } from './explainer.ts'
+import { SOCIAL_IMAGE_ROUTE, loadSocialImage } from './social-image.ts'
 import { renderDashboardDocument } from './render.ts'
 
 const minute = 60_000
@@ -123,6 +124,7 @@ const signedOut = new DashboardBackend({
 	store,
 	assets: { css, javascript: client },
 	explainer: await loadExplainerAssets(fileURLToPath(new URL('../../media/motion-explainer', import.meta.url))),
+	socialImage: await loadSocialImage(fileURLToPath(new URL('../../media/og-image', import.meta.url))),
 })
 const explainerPaths: ReadonlySet<string> = new Set(Object.values(EXPLAINER_ROUTES))
 
@@ -141,7 +143,7 @@ Bun.serve({
 		if (pathname === '/signed-out') {
 			return signedOut.fetch(new Request(new URL('/', request.url), request), new URL('/', request.url))
 		}
-		if (explainerPaths.has(pathname) || pathname === '/assets/favicon.svg') {
+		if (explainerPaths.has(pathname) || pathname === '/assets/favicon.svg' || pathname === SOCIAL_IMAGE_ROUTE) {
 			return signedOut.fetch(request, new URL(request.url))
 		}
 		if (pathname === '/assets/dashboard.css') {

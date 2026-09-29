@@ -15,6 +15,7 @@ on:
       - media/motion-explainer/poster.png
       - media/motion-explainer/captions.en.vtt
       - media/motion-explainer/transcript.md
+      - media/og-image/og-image.png
 
 permissions:
   contents: read

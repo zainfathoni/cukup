@@ -3,6 +3,7 @@ import { isBearerToken, type OidcVerifier } from './auth.ts'
 import { DEFAULT_API_HOSTNAME, DEFAULT_DASHBOARD_HOSTNAME } from './config.ts'
 import type { DashboardBackend } from './dashboard/backend.ts'
 import { EXPLAINER_ROUTES } from './dashboard/explainer.ts'
+import { SOCIAL_IMAGE_ROUTE } from './dashboard/social-image.ts'
 import { ServiceLogger } from './logger.ts'
 import {
 	MAX_REQUEST_BYTES,
@@ -249,6 +250,7 @@ function logPath(pathname: string): string {
 		pathname === '/assets/dashboard.css' ||
 		pathname === '/assets/dashboard.js' ||
 		pathname === '/assets/favicon.svg' ||
+		pathname === SOCIAL_IMAGE_ROUTE ||
 		explainerPaths.has(pathname)
 	) {
 		return pathname
