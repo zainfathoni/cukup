@@ -3,6 +3,7 @@
  *
  * Set PLAYWRIGHT_MODULE to a Playwright package directory and CHROMIUM_PATH to
  * a Chromium binary when the defaults do not match your machine.
+ * CHROMIUM_EXTRA_ARGS adds space-separated launch flags.
  */
 import { existsSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -25,5 +26,6 @@ function playwrightModule(): string {
 export async function launchChromium() {
 	const { chromium } = createRequire(import.meta.url)(playwrightModule()) as { chromium: Chromium }
 	const executablePath = process.env.CHROMIUM_PATH ?? Bun.which('chromium') ?? undefined
-	return chromium.launch({ executablePath, args: ['--font-render-hinting=none', '--disable-lcd-text'] })
+	const extra = process.env.CHROMIUM_EXTRA_ARGS?.split(' ').filter(Boolean) ?? []
+	return chromium.launch({ executablePath, args: ['--font-render-hinting=none', '--disable-lcd-text', ...extra] })
 }

@@ -1,6 +1,6 @@
 # Cukup motion explainer
 
-A narrated motion explainer about human attention, delegation, self-compassion, and enough. It is a review candidate for [issue #29](https://github.com/zainfathoni/cukup/issues/29). It is not published, and it is not embedded in the website.
+A narrated motion explainer about human attention, delegation, self-compassion, and enough. It is for [issue #29](https://github.com/zainfathoni/cukup/issues/29). The owner has accepted this cut. The signed-out page embeds it on this branch; see [dashboard service](../../docs/dashboard-service.md#what-does-a-signed-out-visitor-see) and the [browser evidence](../../docs/tests/landing-explainer/e2e-evidence.md). It is not deployed yet.
 
 | File | Purpose |
 | --- | --- |
@@ -57,6 +57,7 @@ bun media/motion-explainer/scripts/render.ts contact   # contact-sheet.png
 bun media/motion-explainer/scripts/render.ts video     # cukup-explainer.mp4, about 5 minutes
 bun media/motion-explainer/scripts/render.ts poster    # poster.png
 bun media/motion-explainer/scripts/inspect.ts          # out/inspect-*.png and a frame report
+bun media/motion-explainer/scripts/verify-landing.ts   # player checks against a running preview; see the file
 ```
 
 Run `voice.ts` before `docs.ts` and `render.ts`, because speech durations change the timeline. `render.ts video` fails if `narration.m4a` does not match the timeline.

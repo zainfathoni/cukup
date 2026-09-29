@@ -6,7 +6,8 @@ import {
 	type DashboardReportStore,
 } from './report-builder.ts'
 import type { DashboardSelection } from './report.ts'
-import { renderLandingPage } from './landing.ts'
+import { DashboardBackend } from './backend.ts'
+import { EXPLAINER_ROUTES, loadExplainerAssets } from './explainer.ts'
 import { renderDashboardDocument } from './render.ts'
 
 const minute = 60_000
@@ -108,6 +109,22 @@ const client = await bundle.outputs[0]!.text()
 const css = await Bun.file(new URL('./dashboard.css', import.meta.url)).text()
 const labels = availableDashboardLabels(store)
 
+// The signed-out surface runs through the real backend, so its headers and CSP match production.
+const signedOut = new DashboardBackend({
+	config: {
+		hostname: 'localhost',
+		callbackUrl: 'http://localhost/auth/github/callback',
+		githubClientId: 'preview',
+		githubClientSecret: 'preview',
+		allowedGithubUserId: '0',
+		sessionKeys: [Buffer.alloc(32, 1)],
+	},
+	store,
+	assets: { css, javascript: client },
+	explainer: await loadExplainerAssets(new URL('../../media/motion-explainer', import.meta.url).pathname),
+})
+const explainerPaths: ReadonlySet<string> = new Set(Object.values(EXPLAINER_ROUTES))
+
 function document(): string {
 	return renderDashboardDocument(buildDashboardReport(store, initialSelection, now), initialSelection).replace(
 		'<main>',
@@ -121,7 +138,10 @@ Bun.serve({
 		const pathname = new URL(request.url).pathname
 		if (pathname === '/up') return new Response('ok')
 		if (pathname === '/signed-out') {
-			return new Response(renderLandingPage(), { headers: { 'content-type': 'text/html' } })
+			return signedOut.fetch(new Request(new URL('/', request.url), request), new URL('/', request.url))
+		}
+		if (explainerPaths.has(pathname) || pathname === '/assets/favicon.svg') {
+			return signedOut.fetch(request, new URL(request.url))
 		}
 		if (pathname === '/assets/dashboard.css') {
 			return new Response(css, { headers: { 'content-type': 'text/css' } })
