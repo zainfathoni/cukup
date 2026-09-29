@@ -9,6 +9,7 @@ import {
 } from './report-builder.ts'
 import { EXPLAINER_ROUTES, parseByteRange, type ExplainerAssets } from './explainer.ts'
 import { renderLandingPage } from './landing.ts'
+import { SOCIAL_IMAGE_ROUTE } from './social-image.ts'
 import { renderDashboardDocument } from './render.ts'
 import type { DashboardSelection } from './report.ts'
 
@@ -37,6 +38,7 @@ export class DashboardBackend {
 	readonly #auth: DashboardAuth
 	readonly #now: () => number
 	readonly #explainer: ExplainerAssets | undefined
+	readonly #socialImage: Blob | undefined
 
 	constructor(options: {
 		config: DashboardConfiguration
@@ -44,6 +46,8 @@ export class DashboardBackend {
 		assets: DashboardAssets
 		/** The public explainer. Without it, the signed-out page shows no player. */
 		explainer?: ExplainerAssets
+		/** The link-preview image. Without it, the signed-out page names no image. */
+		socialImage?: Blob
 		githubFetch?: typeof globalThis.fetch
 		now?: () => number
 	}) {
@@ -52,6 +56,7 @@ export class DashboardBackend {
 		this.#assets = options.assets
 		this.#now = options.now ?? Date.now
 		this.#explainer = options.explainer
+		this.#socialImage = options.socialImage
 		this.#auth = new DashboardAuth(options.config, {
 			fetch: options.githubFetch,
 			now: this.#now,
@@ -73,6 +78,10 @@ export class DashboardBackend {
 			return request.method === 'GET'
 				? response(FAVICON, 200, 'image/svg+xml; charset=utf-8')
 				: methodNotAllowed('GET')
+		}
+		if (url.pathname === SOCIAL_IMAGE_ROUTE && this.#socialImage) {
+			// Other sites embed this image in their link previews, so it alone allows cross-origin loads.
+			return media(request, this.#socialImage, 'image/png', { 'cross-origin-resource-policy': 'cross-origin' })
 		}
 		const explainer = this.#explainer
 		if (explainer) {
@@ -119,7 +128,12 @@ export class DashboardBackend {
 			if (request.method !== 'GET') return methodNotAllowed('GET')
 			if (!this.#auth.hasValidSession(request.headers.get('cookie'))) {
 				// Only this page embeds media, so only it may load same-origin media.
-				return html(renderLandingPage({ explainer: this.#explainer }), 200, [], undefined, {
+				const page = renderLandingPage({
+					origin: `https://${this.#config.hostname}`,
+					explainer: this.#explainer,
+					socialImage: Boolean(this.#socialImage),
+				})
+				return html(page, 200, [], undefined, {
 					'content-security-policy': contentSecurityPolicy(undefined, { media: Boolean(this.#explainer) }),
 				})
 			}
@@ -215,10 +229,15 @@ function html(
  * A public, fixed media file with byte-range support, so browsers can seek.
  * Media may be cached briefly; it changes only with a new service image.
  */
-function media(request: Request, file: Blob, contentType: string): Response {
+function media(
+	request: Request,
+	file: Blob,
+	contentType: string,
+	extraHeaders: Record<string, string> = {},
+): Response {
 	if (request.method !== 'GET' && request.method !== 'HEAD') return methodNotAllowed('GET, HEAD')
 	const size = file.size
-	const common = { 'accept-ranges': 'bytes', 'cache-control': 'public, max-age=3600' }
+	const common = { 'accept-ranges': 'bytes', 'cache-control': 'public, max-age=3600', ...extraHeaders }
 	const range = parseByteRange(request.headers.get('range'), size)
 	if (range === 'unsatisfiable') {
 		return response('', 416, contentType, [], undefined, { ...common, 'content-range': `bytes */${size}` })
