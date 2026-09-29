@@ -1,0 +1,353 @@
+/* Cukup motion explainer. Tokens mirror the light scheme of
+   service/dashboard/dashboard.css: paper and ink, hard shadows, pastel fills.
+   Fonts are pinned to installed Noto families so every render matches. */
+
+@font-face { font-family: 'Explainer Sans'; font-weight: 400; src: local('Noto Sans'), local('NotoSans-Regular'); }
+@font-face { font-family: 'Explainer Sans'; font-weight: 700; src: local('Noto Sans Bold'), local('NotoSans-Bold'); }
+@font-face { font-family: 'Explainer Sans'; font-weight: 900; src: local('Noto Sans Black'), local('NotoSans-Black'); }
+@font-face { font-family: 'Explainer Mono'; font-weight: 400; src: local('Noto Sans Mono'), local('NotoSansMono-Regular'); }
+@font-face { font-family: 'Explainer Mono'; font-weight: 700; src: local('Noto Sans Mono Bold'), local('NotoSansMono-Bold'); }
+
+:root {
+	--paper: #fff4dd;
+	--card: #fffdf7;
+	--ink: #26201a;
+	--ink-2: #5c5347;
+	--ink-3: #6f6455;
+	--dot-ink: #26201a1a;
+	--accent: #d8400f;
+	--accent-fill: #ff5c2b;
+	--sun: #ffd84d;
+	--rose: #ffb9cc;
+	--sky: #a5dcff;
+	--mint: #b9e6a6;
+	--peach: #ffb07a;
+	--empty: #f1e3c4;
+	--over-fill: #b48bf0;
+	--border: 3px solid var(--ink);
+	--shadow: 5px 5px 0 var(--ink);
+	--shadow-sm: 4px 4px 0 var(--ink);
+	--sans: 'Explainer Sans', system-ui, sans-serif;
+	--mono: 'Explainer Mono', ui-monospace, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+	margin: 0;
+	height: 100%;
+	background: #1c1814;
+	overflow: hidden;
+}
+
+#viewport {
+	position: fixed;
+	inset: 0;
+	display: grid;
+	place-items: center;
+}
+
+#stage {
+	position: relative;
+	width: 1920px;
+	height: 1080px;
+	flex: none;
+	overflow: hidden;
+	transform-origin: center;
+	background-color: var(--paper);
+	background-image: radial-gradient(var(--dot-ink) 2px, transparent 2px);
+	background-size: 30px 30px;
+	color: var(--ink);
+	font-family: var(--sans);
+	-webkit-font-smoothing: antialiased;
+}
+
+.layer, .wires {
+	position: absolute;
+	inset: 0;
+}
+
+.wires { overflow: visible; pointer-events: none; }
+.wires path, .wires line { fill: none; stroke: var(--ink); stroke-width: 3; stroke-linecap: round; }
+.wires .soft { stroke: var(--ink-3); stroke-width: 2.5; }
+.wires .ring { fill: none; stroke: var(--ink); stroke-width: 3; stroke-dasharray: 10 12; }
+.wires .disc { fill: var(--mint); stroke: var(--ink); stroke-width: 3; }
+
+.node {
+	position: absolute;
+	left: 0;
+	top: 0;
+	will-change: transform, opacity;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	text-align: center;
+}
+
+/* People and agents */
+
+.you {
+	width: 132px;
+	height: 132px;
+	border: var(--border);
+	border-radius: 50%;
+	background: var(--sun);
+	box-shadow: var(--shadow);
+	font-size: 38px;
+	font-weight: 900;
+}
+
+.agent {
+	width: 136px;
+	height: 136px;
+	flex-direction: column;
+	gap: 6px;
+	border: var(--border);
+	border-radius: 30px;
+	background: var(--accent-fill);
+	box-shadow: var(--shadow);
+	color: var(--card);
+	font-size: 30px;
+	font-weight: 900;
+}
+
+.agent-dots { display: flex; gap: 8px; height: 14px; }
+.agent-dots span { width: 12px; height: 12px; border-radius: 50%; background: var(--card); }
+
+/* Work items */
+
+.prompt, .result, .ghost, .next-task {
+	border: var(--border);
+	border-radius: 14px;
+	background: var(--card);
+	box-shadow: var(--shadow-sm);
+	font-weight: 700;
+}
+
+.prompt { width: 300px; height: 88px; font-size: 32px; }
+
+.result, .ghost {
+	width: 200px;
+	height: 76px;
+	padding: 0 12px 0 22px;
+	font-size: 25px;
+	line-height: 1.1;
+	overflow: hidden;
+}
+
+.result::before, .ghost::before {
+	content: '';
+	position: absolute;
+	left: 0;
+	top: 0;
+	bottom: 0;
+	width: 12px;
+	background: var(--stripe, var(--sky));
+	border-right: var(--border);
+}
+
+.tag {
+	width: 176px;
+	height: 50px;
+	border: var(--border);
+	border-radius: 25px;
+	background: var(--card);
+	font-size: 25px;
+	font-weight: 700;
+	overflow: hidden;
+}
+
+.tag-fill {
+	position: absolute;
+	inset: 0;
+	background: var(--sun);
+}
+
+.tag span { position: relative; }
+
+.pill {
+	width: 250px;
+	height: 76px;
+	border: var(--border);
+	border-radius: 38px;
+	box-shadow: var(--shadow-sm);
+	font-size: 36px;
+	font-weight: 900;
+}
+
+/* Labels */
+
+.heading { font-size: 42px; font-weight: 900; white-space: nowrap; }
+
+.note {
+	font-family: var(--mono);
+	font-size: 27px;
+	color: var(--ink-2);
+	white-space: nowrap;
+}
+
+.ring-label { font-size: 28px; font-weight: 700; color: var(--ink-2); white-space: nowrap; }
+
+.divider { width: 3px; height: 660px; background: var(--ink); border-radius: 2px; transform-origin: top; }
+
+.kind {
+	left: 80px;
+	top: 44px;
+	height: 50px;
+	padding: 0 22px;
+	border: var(--border);
+	border-radius: 25px;
+	background: var(--card);
+	font-family: var(--mono);
+	font-size: 24px;
+	font-weight: 700;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	white-space: nowrap;
+	justify-content: flex-start;
+}
+
+/* Wordmark */
+
+.wordmark {
+	display: flex;
+	align-items: center;
+	gap: 36px;
+	transform-origin: left center;
+	white-space: nowrap;
+	justify-content: flex-start;
+}
+
+.wordmark-word { font-size: 240px; font-weight: 900; letter-spacing: -0.02em; line-height: 1; }
+
+.wordmark-tag {
+	padding: 10px 34px 14px;
+	border: 5px solid var(--ink);
+	border-radius: 60px;
+	background: var(--mint);
+	font-family: var(--mono);
+	font-size: 58px;
+	font-weight: 700;
+}
+
+.subline { font-size: 44px; color: var(--ink-2); white-space: nowrap; justify-content: flex-start; }
+
+/* Working Time panel */
+
+.panel {
+	width: 1500px;
+	height: 490px;
+	border: var(--border);
+	border-radius: 20px;
+	background: var(--card);
+	box-shadow: 7px 7px 0 var(--ink);
+	display: block;
+	text-align: left;
+}
+
+.panel > * { position: absolute; }
+.row-label { left: 34px; font-size: 30px; font-weight: 700; transform: translateY(-50%); white-space: nowrap; }
+.row-label.total-label { font-weight: 900; }
+.bar { height: 36px; border: 3px solid var(--ink); border-radius: 8px; transform: translateY(-50%); }
+.bar.turn { background: var(--sky); }
+.bar.grace {
+	background: repeating-linear-gradient(135deg, var(--peach) 0 10px, #ffd4b3 10px 20px);
+}
+.bar.union { height: 48px; background: var(--over-fill); border-radius: 10px; }
+.track { height: 56px; border: 2px dashed var(--ink-3); border-radius: 12px; transform: translateY(-50%); }
+.tick { font-family: var(--mono); font-size: 26px; color: var(--ink-2); transform: translate(-50%, -50%); white-space: nowrap; }
+.tick::before { content: ''; position: absolute; left: 50%; top: -24px; width: 2px; height: 14px; background: var(--ink-3); }
+.total { font-size: 40px; font-weight: 900; transform: translateY(-50%); white-space: nowrap; }
+.legend { left: 260px; top: 452px; display: flex; gap: 40px; font-size: 25px; color: var(--ink-2); transform: translateY(-50%); }
+.legend span { display: inline-flex; align-items: center; gap: 12px; }
+.legend i { display: inline-block; width: 34px; height: 22px; border: 3px solid var(--ink); border-radius: 5px; }
+.bracket {
+	height: 22px;
+	border: 3px solid var(--ink);
+	border-bottom: 0;
+	border-radius: 6px 6px 0 0;
+}
+.bracket-label { font-size: 26px; font-weight: 700; white-space: nowrap; transform: translate(-50%, -50%); }
+
+.today-card { width: 720px; height: auto; display: block; }
+.card-wrap { display: block; }
+
+.next-task { width: 300px; height: 80px; border-style: dashed; font-size: 32px; box-shadow: none; }
+.slot {
+	width: 380px;
+	height: 140px;
+	border: 3px dashed var(--ink-3);
+	border-radius: 20px;
+	align-items: flex-start;
+	justify-content: flex-start;
+	padding: 10px 18px;
+	font-family: var(--mono);
+	font-size: 25px;
+	font-weight: 700;
+	color: var(--ink-2);
+}
+
+/* Captions */
+
+.caption {
+	width: 1680px;
+	height: 116px;
+	border: var(--border);
+	border-radius: 20px;
+	background: var(--card);
+	box-shadow: var(--shadow);
+}
+
+.caption-line {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0 40px;
+	font-size: 50px;
+	font-weight: 700;
+	line-height: 1.15;
+}
+
+/* Closing */
+
+.close-line { font-size: 84px; font-weight: 900; white-space: nowrap; }
+.close-line mark {
+	display: inline-block;
+	padding: 0 22px 8px;
+	margin-left: 8px;
+	border: 4px solid var(--ink);
+	border-radius: 18px;
+	background: var(--sun);
+	color: var(--ink);
+	transform: rotate(-2deg);
+}
+.url { font-size: 132px; font-weight: 900; letter-spacing: -0.01em; white-space: nowrap; color: var(--accent); }
+.invitation { font-size: 42px; color: var(--ink); white-space: nowrap; }
+.status {
+	height: 60px;
+	padding: 0 28px;
+	border: var(--border);
+	border-radius: 30px;
+	background: var(--card);
+	font-family: var(--mono);
+	font-size: 28px;
+	white-space: nowrap;
+}
+
+/* Scrubber for editing: ?controls */
+
+.controls {
+	position: fixed;
+	left: 16px;
+	right: 16px;
+	bottom: 12px;
+	display: flex;
+	gap: 12px;
+	align-items: center;
+	color: #f5e7d2;
+	font: 14px ui-monospace, monospace;
+}
+
+.controls input { flex: 1; }

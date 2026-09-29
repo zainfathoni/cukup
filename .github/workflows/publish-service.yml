@@ -11,6 +11,10 @@ on:
       - package.json
       - bun.lock
       - tsconfig.json
+      - media/motion-explainer/cukup-explainer.mp4
+      - media/motion-explainer/poster.png
+      - media/motion-explainer/captions.en.vtt
+      - media/motion-explainer/transcript.md
 
 permissions:
   contents: read

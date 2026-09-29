@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width,initial-scale=1" />
+		<title>Cukup motion explainer · source</title>
+		<link rel="stylesheet" href="explainer.css" />
+	</head>
+	<!--
+		Editable source of the explainer. Every frame is a pure function of time:
+		window.seek(seconds) draws that frame. Open with ?controls to scrub.
+		scripts/render.ts serves this page and captures each frame.
+	-->
+	<body>
+		<div id="viewport"><div id="stage" aria-hidden="true"></div></div>
+		<script type="module" src="explainer.js"></script>
+	</body>
+</html>

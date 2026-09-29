@@ -7,6 +7,7 @@ import {
 	parseDashboardSelection,
 	type DashboardReportStore,
 } from './report-builder.ts'
+import { EXPLAINER_ROUTES, parseByteRange, type ExplainerAssets } from './explainer.ts'
 import { renderLandingPage } from './landing.ts'
 import { renderDashboardDocument } from './render.ts'
 import type { DashboardSelection } from './report.ts'
@@ -35,11 +36,14 @@ export class DashboardBackend {
 	readonly #assets: DashboardAssets
 	readonly #auth: DashboardAuth
 	readonly #now: () => number
+	readonly #explainer: ExplainerAssets | undefined
 
 	constructor(options: {
 		config: DashboardConfiguration
 		store: DashboardReportStore
 		assets: DashboardAssets
+		/** The public explainer. Without it, the signed-out page shows no player. */
+		explainer?: ExplainerAssets
 		githubFetch?: typeof globalThis.fetch
 		now?: () => number
 	}) {
@@ -47,6 +51,7 @@ export class DashboardBackend {
 		this.#store = options.store
 		this.#assets = options.assets
 		this.#now = options.now ?? Date.now
+		this.#explainer = options.explainer
 		this.#auth = new DashboardAuth(options.config, {
 			fetch: options.githubFetch,
 			now: this.#now,
@@ -68,6 +73,17 @@ export class DashboardBackend {
 			return request.method === 'GET'
 				? response(FAVICON, 200, 'image/svg+xml; charset=utf-8')
 				: methodNotAllowed('GET')
+		}
+		const explainer = this.#explainer
+		if (explainer) {
+			if (url.pathname === EXPLAINER_ROUTES.video) return media(request, explainer.video, 'video/mp4')
+			if (url.pathname === EXPLAINER_ROUTES.poster) return media(request, explainer.poster, 'image/png')
+			if (url.pathname === EXPLAINER_ROUTES.captions) {
+				return media(request, new Blob([explainer.captions]), 'text/vtt; charset=utf-8')
+			}
+			if (url.pathname === EXPLAINER_ROUTES.transcript) {
+				return request.method === 'GET' ? html(explainer.transcriptHtml) : methodNotAllowed('GET')
+			}
 		}
 		if (url.pathname === '/auth/github') {
 			if (request.method !== 'GET') return methodNotAllowed('GET')
@@ -102,7 +118,10 @@ export class DashboardBackend {
 		if (url.pathname === '/') {
 			if (request.method !== 'GET') return methodNotAllowed('GET')
 			if (!this.#auth.hasValidSession(request.headers.get('cookie'))) {
-				return html(renderLandingPage())
+				// Only this page embeds media, so only it may load same-origin media.
+				return html(renderLandingPage({ explainer: this.#explainer }), 200, [], undefined, {
+					'content-security-policy': contentSecurityPolicy(undefined, { media: Boolean(this.#explainer) }),
+				})
 			}
 			const nonce = randomBytes(18).toString('base64url')
 			const report = buildDashboardReport(this.#store, initialSelection, this.#now())
@@ -182,8 +201,38 @@ function redirect(location: string, cookies: readonly string[]): Response {
 	return response('', 303, 'text/plain; charset=utf-8', cookies, undefined, { location })
 }
 
-function html(body: string, status = 200, cookies: readonly string[] = [], nonce?: string): Response {
-	return response(body, status, 'text/html; charset=utf-8', cookies, nonce)
+function html(
+	body: string,
+	status = 200,
+	cookies: readonly string[] = [],
+	nonce?: string,
+	extraHeaders: Record<string, string> = {},
+): Response {
+	return response(body, status, 'text/html; charset=utf-8', cookies, nonce, extraHeaders)
+}
+
+/**
+ * A public, fixed media file with byte-range support, so browsers can seek.
+ * Media may be cached briefly; it changes only with a new service image.
+ */
+function media(request: Request, file: Blob, contentType: string): Response {
+	if (request.method !== 'GET' && request.method !== 'HEAD') return methodNotAllowed('GET, HEAD')
+	const size = file.size
+	const common = { 'accept-ranges': 'bytes', 'cache-control': 'public, max-age=3600' }
+	const range = parseByteRange(request.headers.get('range'), size)
+	if (range === 'unsatisfiable') {
+		return response('', 416, contentType, [], undefined, { ...common, 'content-range': `bytes */${size}` })
+	}
+	const head = request.method === 'HEAD'
+	if (!range) {
+		return response(head ? '' : file, 200, contentType, [], undefined, { ...common, 'content-length': String(size) })
+	}
+	const length = range.end - range.start + 1
+	return response(head ? '' : file.slice(range.start, range.end + 1), 206, contentType, [], undefined, {
+		...common,
+		'content-length': String(length),
+		'content-range': `bytes ${range.start}-${range.end}/${size}`,
+	})
 }
 
 function json(body: unknown, status = 200): Response {
@@ -225,7 +274,7 @@ function response(
 	return new Response(body, { status, headers })
 }
 
-function contentSecurityPolicy(nonce?: string): string {
+function contentSecurityPolicy(nonce?: string, options: { media?: boolean } = {}): string {
 	const scripts = nonce ? `'self' 'nonce-${nonce}'` : "'self'"
 	return [
 		"default-src 'none'",
@@ -233,6 +282,7 @@ function contentSecurityPolicy(nonce?: string): string {
 		"style-src 'self'",
 		"connect-src 'self'",
 		"img-src 'self'",
+		...(options.media ? ["media-src 'self'"] : []),
 		"base-uri 'none'",
 		"form-action 'self'",
 		"frame-ancestors 'none'",
