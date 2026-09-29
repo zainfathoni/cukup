@@ -226,7 +226,7 @@ verify_public_once() {
 	code="$(curl --silent --show-error --connect-timeout 10 --max-time 20 \
 		--output "$body" --write-out '%{http_code}' "https://$CUKUP_DASHBOARD_HOSTNAME/")" || return 1
 	[[ "$code" == 200 ]] || return 1
-	grep -Fq '<title>Sign in · Cukup</title>' "$body" || return 1
+	grep -Fq 'href="/auth/github"' "$body" || return 1
 
 	for asset in dashboard.css dashboard.js favicon.svg; do
 		code="$(curl --silent --show-error --connect-timeout 10 --max-time 20 \

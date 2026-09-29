@@ -1429,6 +1429,424 @@ dd {
 	font-size: 0.75rem;
 }
 
+/* Public landing page. Scoped to body.landing so the dashboard is untouched. */
+
+.skip-link {
+	position: absolute;
+	top: 0.75rem;
+	left: 0.75rem;
+	z-index: 10;
+	border: var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--card);
+	color: var(--ink);
+	padding: 0.5rem 0.85rem;
+	font-weight: 650;
+	transform: translateY(-200%);
+}
+
+.skip-link:focus {
+	transform: none;
+}
+
+.landing .landing-top,
+.landing main,
+.landing .page-footer {
+	width: min(54rem, calc(100% - 2rem));
+}
+
+.landing main {
+	gap: 1.5rem;
+}
+
+.landing main:focus {
+	outline: none;
+}
+
+.landing-top {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem 1.5rem;
+	margin-inline: auto;
+	padding-block: 1.5rem 1.25rem;
+}
+
+.landing-brand {
+	display: flex;
+	align-items: baseline;
+	gap: 0.5rem;
+	margin: 0;
+}
+
+.landing-brand-name {
+	font-family: var(--font-display);
+	font-size: 1.5rem;
+	font-weight: 750;
+	letter-spacing: -0.02em;
+}
+
+.landing-top ul {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.25rem 1.1rem;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.landing-top a {
+	color: var(--ink);
+	font-weight: 600;
+}
+
+.landing-top a.landing-owner-link {
+	color: var(--accent);
+}
+
+.landing section {
+	padding: clamp(1.25rem, 4vw, 2.25rem);
+}
+
+.landing h2 {
+	margin-bottom: 1rem;
+	line-height: 1.2;
+}
+
+.landing h3 {
+	margin-top: 1.4rem;
+}
+
+.landing-hero {
+	background-image: radial-gradient(var(--dot-ink) 1.5px, transparent 1.5px);
+	background-size: 18px 18px;
+	box-shadow: var(--shadow-lg);
+}
+
+.landing-hero h1 {
+	margin-block: 0.4rem 1.25rem;
+	font-size: clamp(2rem, 6.5vw, 3.4rem);
+	line-height: 1.08;
+}
+
+.landing-lead {
+	max-width: var(--measure);
+	font-size: clamp(1.05rem, 2.4vw, 1.2rem);
+}
+
+.landing-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.75rem 1.25rem;
+	margin: 1.5rem 0 0;
+}
+
+.landing-secondary {
+	font-weight: 650;
+}
+
+.landing-prose {
+	max-width: var(--measure);
+}
+
+.landing-prose > :first-child {
+	margin-top: 0;
+}
+
+.landing-prose ul,
+.landing-split ul {
+	padding-left: 1.2rem;
+}
+
+.landing-prose li,
+.landing-split li {
+	margin-bottom: 0.35rem;
+}
+
+.landing-note {
+	margin-bottom: 0;
+	color: var(--ink-2);
+	font-size: 0.92rem;
+}
+
+.landing-cards {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 1rem;
+	margin-block: 0.5rem 1.25rem;
+	padding: 0;
+	list-style: none;
+}
+
+.landing-cards li {
+	border: var(--border);
+	border-radius: var(--radius-sm);
+	padding: 1rem;
+}
+
+.landing-cards li:nth-child(1) {
+	background: var(--sky);
+	color: var(--on-sun);
+}
+
+.landing-cards li:nth-child(2) {
+	background: var(--mint);
+	color: var(--on-sun);
+}
+
+.landing-cards li:nth-child(3) {
+	background: var(--rose);
+	color: var(--on-sun);
+}
+
+.landing-cards h3 {
+	margin-top: 0;
+}
+
+.landing-cards p {
+	margin-bottom: 0;
+}
+
+.landing-figure {
+	margin: 1.5rem 0;
+	border: var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--paper);
+	padding: 1rem;
+}
+
+.landing-timeline {
+	display: grid;
+	gap: 0.45rem;
+}
+
+.landing-row {
+	display: grid;
+	grid-template-columns: 7.5rem minmax(0, 1fr);
+	align-items: center;
+	gap: 0.75rem;
+}
+
+.landing-row-label {
+	color: var(--ink-2);
+	font-family: var(--font-mono);
+	font-size: 0.75rem;
+}
+
+.landing-row-total .landing-row-label {
+	color: var(--ink);
+	font-weight: 700;
+}
+
+.landing-row-total {
+	margin-top: 0.35rem;
+	border-top: 2px dashed var(--ink-3);
+	padding-top: 0.6rem;
+}
+
+.landing-track {
+	position: relative;
+	height: 1.1rem;
+}
+
+.landing-row-total .landing-track {
+	height: 1.5rem;
+}
+
+.landing-bar {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	border: 2px solid var(--ink);
+	border-radius: 4px;
+}
+
+.landing-turn {
+	background: var(--accent-fill);
+}
+
+.landing-grace {
+	background: repeating-linear-gradient(135deg, var(--sun) 0 4px, var(--card) 4px 8px);
+}
+
+.landing-union {
+	background: var(--complete-fill);
+}
+
+/* Synthetic day on a 09:00–12:00 axis: 1% is 1.8 minutes. */
+.turn-1 {
+	left: 5.556%;
+	width: 8.333%;
+}
+
+.grace-1 {
+	left: 13.889%;
+	width: 8.333%;
+}
+
+.turn-2 {
+	left: 17.778%;
+	width: 10%;
+}
+
+.grace-2 {
+	left: 27.778%;
+	width: 8.333%;
+}
+
+.turn-3 {
+	left: 55.556%;
+	width: 6.667%;
+}
+
+.grace-3 {
+	left: 62.222%;
+	width: 8.333%;
+}
+
+.union-1 {
+	left: 5.556%;
+	width: 30.556%;
+}
+
+.union-2 {
+	left: 55.556%;
+	width: 15%;
+}
+
+.landing-axis .landing-track {
+	height: 1.2rem;
+	border-top: 2px solid var(--ink);
+}
+
+.tick {
+	position: absolute;
+	top: 0.15rem;
+	color: var(--ink-2);
+	font-family: var(--font-mono);
+	font-size: 0.7rem;
+	transform: translateX(-50%);
+}
+
+.tick-0 {
+	left: 0;
+	transform: none;
+}
+
+.tick-1 {
+	left: 33.333%;
+}
+
+.tick-2 {
+	left: 66.667%;
+}
+
+.tick-3 {
+	right: 0;
+	transform: none;
+}
+
+.landing-legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.4rem 1.1rem;
+	margin: 1rem 0 0.75rem;
+	font-size: 0.85rem;
+}
+
+.legend-item {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+}
+
+.legend-swatch {
+	display: inline-block;
+	width: 1.4rem;
+	height: 0.8rem;
+	border: 2px solid var(--ink);
+	border-radius: 3px;
+}
+
+.landing-figure figcaption {
+	color: var(--ink-2);
+	font-size: 0.9rem;
+}
+
+.landing-split {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 1.5rem;
+}
+
+.landing-split h3:first-child {
+	margin-top: 0;
+}
+
+.landing-status {
+	display: grid;
+	gap: 0.75rem;
+	margin: 0 0 1.5rem;
+}
+
+.landing-status div {
+	display: grid;
+	grid-template-columns: 9rem minmax(0, 1fr);
+	gap: 1rem;
+	border: var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--paper);
+	padding: 0.85rem 1rem;
+}
+
+.landing-status dt {
+	font-weight: 700;
+}
+
+.landing-status dd {
+	margin: 0;
+}
+
+.landing-owner {
+	margin-top: 1.75rem;
+	border: var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--warning-bg);
+	color: var(--warning-ink);
+	padding: 1rem 1.25rem;
+}
+
+.landing-owner h3 {
+	margin-top: 0;
+}
+
+.landing-owner p:last-child {
+	margin-bottom: 0;
+}
+
+.landing-footer p {
+	max-width: var(--measure);
+}
+
+@media (max-width: 40rem) {
+	.landing-cards,
+	.landing-split {
+		grid-template-columns: 1fr;
+	}
+
+	.landing-status div {
+		grid-template-columns: 1fr;
+		gap: 0.2rem;
+	}
+
+	.landing-row {
+		grid-template-columns: 5.5rem minmax(0, 1fr);
+		gap: 0.5rem;
+	}
+}
+
 @media (max-width: 48rem) {
 	.masthead,
 	.section-heading {

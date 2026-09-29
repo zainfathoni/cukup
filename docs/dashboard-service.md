@@ -45,6 +45,12 @@ For each dashboard release:
 
 The `Origin: null` case matters because the `no-referrer` policy affects same-origin form navigation. Do not remove its fetch-site guard to fix logout.
 
+## What does a signed-out visitor see?
+
+A visitor without a session sees a static public page. It explains why Cukup exists, what turn-based Working Time can and cannot show, and the current release status. It keeps owner sign-in, but it does not change access: only the configured owner account can sign in. The page uses no script and no report data. Its illustration is synthetic.
+
+The deployment smoke check looks for the `/auth/github` link, not a page title. Old and new images both pass it, so a rollback does not fail the check. Preview the page at `/signed-out` with `bun run service/dashboard/preview.ts`.
+
 ## How do week changes affect filters?
 
 Selecting a day in another ISO week clears both filter dimensions; selecting another day within the same week preserves them. Implicit Jakarta Sunday–Monday rollover also clears filters and reloads the report. Old-week options remain disabled during the transition, and superseded responses are not rendered.

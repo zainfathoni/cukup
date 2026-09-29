@@ -8,7 +8,9 @@ The intended distinction is human collaboration versus autonomous execution. Tim
 
 ## Who is it for now?
 
-Cukup serves the owner's personal Amp workflow. External adoption, other harnesses, a stable SDK, and multi-user support are paused indefinitely.
+Cukup serves the owner's personal Amp workflow. An Amp-first open-source release is intended so that others can inspect, adapt, and host it; that release is not yet available. Other harnesses, a stable SDK, and multi-user support are paused indefinitely.
+
+Cukup means “enough” in Indonesian. AI can produce more work, but people still choose, review, and own the results. Working Time is one prompt to pause and consider enough. It does not decide for the user.
 
 Production remains Amp-only v1/v2. Its turn-based Working Time is not measured attention. The [roadmap](../../ROADMAP.md) records priorities and conditions for resuming broader work.
 
