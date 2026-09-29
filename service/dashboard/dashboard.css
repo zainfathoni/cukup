@@ -1483,6 +1483,7 @@ dd {
 
 .landing main {
 	gap: 1.5rem;
+	overflow-wrap: break-word;
 }
 
 .landing main:focus {
@@ -1501,6 +1502,7 @@ dd {
 
 .landing-brand {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: baseline;
 	gap: 0.5rem;
 	margin: 0;
@@ -1636,6 +1638,7 @@ dd {
 }
 
 .landing-figure {
+	container: landing-figure / inline-size;
 	margin: 1.5rem 0;
 	border: var(--border);
 	border-radius: var(--radius-sm);
@@ -1747,7 +1750,7 @@ dd {
 	border-top: 2px solid var(--ink);
 }
 
-.tick {
+.landing-tick {
 	position: absolute;
 	top: 0.15rem;
 	color: var(--ink-2);
@@ -1756,20 +1759,20 @@ dd {
 	transform: translateX(-50%);
 }
 
-.tick-0 {
+.landing-tick-0 {
 	left: 0;
 	transform: none;
 }
 
-.tick-1 {
+.landing-tick-1 {
 	left: 33.333%;
 }
 
-.tick-2 {
+.landing-tick-2 {
 	left: 66.667%;
 }
 
-.tick-3 {
+.landing-tick-3 {
 	right: 0;
 	transform: none;
 }
@@ -1782,13 +1785,19 @@ dd {
 	font-size: 0.85rem;
 }
 
-.legend-item {
+.landing-legend-item {
 	display: inline-flex;
 	align-items: center;
+	flex-wrap: wrap;
 	gap: 0.4rem;
+	max-width: 100%;
 }
 
-.legend-swatch {
+.landing-swatch {
+	flex: none;
+}
+
+.landing-swatch {
 	display: inline-block;
 	width: 1.4rem;
 	height: 0.8rem;
@@ -1859,7 +1868,7 @@ dd {
 @media (max-width: 40rem) {
 	.landing-cards,
 	.landing-split {
-		grid-template-columns: 1fr;
+		grid-template-columns: minmax(0, 1fr);
 	}
 
 	.landing-status div {
@@ -1867,9 +1876,44 @@ dd {
 		gap: 0.2rem;
 	}
 
+	.landing-figure {
+		padding: 0.75rem;
+	}
+}
+
+/* The figure's own width decides the illustration layout, so narrow screens and
+   large text both stack each label above a full-width track. */
+@container landing-figure (max-width: 30rem) {
 	.landing-row {
-		grid-template-columns: 5.5rem minmax(0, 1fr);
-		gap: 0.5rem;
+		grid-template-columns: minmax(0, 1fr);
+		gap: 0.15rem;
+	}
+
+	.landing-axis .landing-row-label {
+		display: none;
+	}
+}
+
+/* Keep only the end ticks when four time labels no longer fit side by side.
+   They flow instead of sitting absolutely, so large text wraps rather than overlaps. */
+@container landing-figure (max-width: 24rem) {
+	.landing-tick-1,
+	.landing-tick-2 {
+		display: none;
+	}
+
+	.landing-axis .landing-track {
+		display: flex;
+		flex-wrap: wrap;
+		height: auto;
+	}
+
+	.landing-tick {
+		position: static;
+	}
+
+	.landing-tick-3 {
+		margin-left: auto;
 	}
 }
 
