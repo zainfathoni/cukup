@@ -145,7 +145,7 @@ case "$url" in
 		printf 200
 		;;
 	*/)
-		printf '<title>Sign in · Cukup</title>' > "$output"
+		printf '<a class="button" href="/auth/github">Sign in with GitHub</a>' > "$output"
 		printf 200
 		;;
 	*) exit 1 ;;
