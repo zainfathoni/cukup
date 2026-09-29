@@ -10,6 +10,7 @@ import {
 	defaultServiceDatabasePath,
 } from './config.ts'
 import { DashboardBackend, type DashboardAssets } from './dashboard/backend.ts'
+import { loadExplainerAssets } from './dashboard/explainer.ts'
 import { ServiceLogger } from './logger.ts'
 import { ServiceStore } from './store.ts'
 
@@ -39,10 +40,15 @@ const logger = new ServiceLogger()
 let dashboard: DashboardBackend | undefined
 if (dashboardConfiguration) {
 	try {
+		const explainer =
+			(await loadExplainerAssets(`${import.meta.dir}/explainer`)) ??
+			(await loadExplainerAssets(`${import.meta.dir}/../media/motion-explainer`))
+		if (!explainer) logger.error('explainer_unavailable', { error: 'assets_missing' })
 		dashboard = new DashboardBackend({
 			config: dashboardConfiguration,
 			store,
 			assets: await loadDashboardAssets(),
+			explainer,
 		})
 	} catch {
 		logger.error('dashboard_disabled', { error: 'initialization_failed' })

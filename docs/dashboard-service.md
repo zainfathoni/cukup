@@ -49,6 +49,8 @@ The `Origin: null` case matters because the `no-referrer` policy affects same-or
 
 A visitor without a session sees a static public page. It explains why Cukup exists, what turn-based Working Time can and cannot show, and the current release status. It keeps owner sign-in, but it does not change access: only the configured owner account can sign in. The page uses no script and no report data. Its illustration is synthetic.
 
+The page can also embed the [motion explainer](../media/motion-explainer/README.md). The service loads its video, poster, captions, and transcript at start-up and serves each from one fixed public route: `/assets/explainer/*` and `/explainer/transcript`. The video supports byte ranges for seeking. Only the signed-out page's CSP adds `media-src 'self'`. If a file is missing or malformed, the service logs `explainer_unavailable` and shows the page without a player. The image ships those four files only. The service never synthesizes or renders media. A change to any of them triggers a new image through the publication path filter.
+
 The deployment smoke check looks for the `/auth/github` link, not a page title. Old and new images both pass it, so a rollback does not fail the check. Preview the page at `/signed-out` with `bun run service/dashboard/preview.ts`.
 
 ## How do week changes affect filters?

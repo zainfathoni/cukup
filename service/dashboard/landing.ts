@@ -1,12 +1,17 @@
+import { EXPLAINER_ROUTES, type ExplainerAssets } from './explainer.ts'
+
 /**
  * The signed-out page at the dashboard host. It explains why Cukup exists
  * before it offers the restricted owner sign-in.
  *
  * It uses no script, no inline style, and no remote asset, so it works under
  * the dashboard's nonce-free CSP. Its illustration is fixed synthetic data.
+ * The optional explainer video repeats the page's argument; the page does not
+ * depend on it.
  */
-export function renderLandingPage(): string {
-	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="Cukup means “enough” in Indonesian. AI can produce more work, but people still choose, review, and take responsibility. Cukup is a small prompt to pause and consider what is enough."><title>Cukup · Decide what is enough</title><link rel="icon" href="/assets/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/dashboard.css"></head><body class="landing"><a class="skip-link" href="#content">Skip to content</a>${header}<main id="content" tabindex="-1">${hero}${concern}${response}${why}${workingTime}${status}</main>${footer}</body></html>`
+export function renderLandingPage(options: { explainer?: Pick<ExplainerAssets, 'durationLabel'> } = {}): string {
+	const video = options.explainer ? explainerSection(options.explainer.durationLabel) : ''
+	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="Cukup means “enough” in Indonesian. AI can produce more work, but people still choose, review, and take responsibility. Cukup is a small prompt to pause and consider what is enough."><title>Cukup · Decide what is enough</title><link rel="icon" href="/assets/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/dashboard.css"></head><body class="landing"><a class="skip-link" href="#content">Skip to content</a>${header}<main id="content" tabindex="-1">${hero}${video}${concern}${response}${why}${workingTime}${status}</main>${options.explainer ? footerWithVideo : footer}</body></html>`
 }
 
 const header = `<header class="landing-top"><p class="landing-brand"><span class="landing-brand-name">Cukup</span> <span class="wordmark-tag">enough</span></p><nav aria-label="Page"><ul><li><a href="#why">Why Cukup</a></li><li><a href="#working-time">Working Time</a></li><li><a href="#status">Status</a></li><li><a class="landing-owner-link" href="/auth/github">Owner sign-in</a></li></ul></nav></header>`
@@ -37,3 +42,13 @@ const workingTime = `<section id="working-time" aria-labelledby="working-time-ti
 const status = `<section id="status" aria-labelledby="status-title"><p class="eyebrow">Status</p><h2 id="status-title">What is available now?</h2><dl class="landing-status"><div><dt>This website</dt><dd>A personal dashboard for one owner. There is no public signup and no waitlist.</dd></div><div><dt>Supported tools</dt><dd>Amp only. Other AI agents are not supported.</dd></div><div><dt>Open source</dt><dd>A release is in preparation, starting with Amp support. The source code is not public yet, and there are no self-hosting instructions yet. There is no release date.</dd></div></dl><div class="landing-prose"><h3>Why open source?</h3><p>A tool that estimates your time should be open to inspection. You should be able to read its rules, change them to fit your life, and host your own copy with your own data. Open source makes that possible. It does not make a dashboard enough on its own.</p><h3>What can you do now?</h3><ul><li>Ask yourself one question before you start the next task: is this enough for today?</li><li>Before you delegate, decide which judgment stays with you.</li><li>When the work gets heavy, notice it, remember that you are not alone, and be kind to yourself.</li></ul></div><aside class="landing-owner" aria-labelledby="owner-title"><h3 id="owner-title">Owner sign-in</h3><p>Only the owner's GitHub account can open this dashboard. Other accounts are refused. Signing in does not create an account.</p><p><a class="button" href="/auth/github">Sign in with GitHub</a></p></aside></section>`
 
 const footer = `<footer class="page-footer landing-footer"><p>Cukup · Indonesian for “enough”. The dashboard never shows prompts or source code. The illustration on this page uses synthetic data.</p></footer>`
+
+const footerWithVideo = `<footer class="page-footer landing-footer"><p>Cukup · Indonesian for “enough”. The dashboard never shows prompts or source code. The illustration and the video on this page use synthetic data.</p></footer>`
+
+/**
+ * No autoplay, loop, or muted start: the visitor chooses to play. Captions are
+ * available but off by default, because the video already shows every line.
+ */
+function explainerSection(durationLabel: string): string {
+	return `<section id="explainer" aria-labelledby="explainer-title"><p class="eyebrow">Watch · ${durationLabel}</p><h2 id="explainer-title">Prefer to watch?</h2><div class="landing-prose"><p>A short narrated video tells the same story as this page. Every spoken line is also on screen. The data is synthetic, and the illustrations show ideas, not Cukup features.</p></div><figure class="landing-video"><video controls playsinline preload="metadata" width="1920" height="1080" poster="${EXPLAINER_ROUTES.poster}" aria-describedby="explainer-caption"><source src="${EXPLAINER_ROUTES.video}" type="video/mp4"><track kind="captions" srclang="en" label="English" src="${EXPLAINER_ROUTES.captions}"><p>Your browser cannot play this video. <a href="${EXPLAINER_ROUTES.transcript}">Read the transcript</a>.</p></video><figcaption id="explainer-caption">Cukup: enough · ${durationLabel} · narrated, with English captions. <a href="${EXPLAINER_ROUTES.transcript}">Read the transcript</a>.</figcaption></figure></section>`
+}
