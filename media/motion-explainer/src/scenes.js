@@ -106,7 +106,7 @@ export const scenes = [
 		kind: 'title',
 		purpose: 'Introduce the name and why the tool exists.',
 		action: 'The wordmark “Cukup” writes in beside the person, with an “enough” tag and a pronunciation line.',
-		transition: 'The wordmark moves to the top-left corner and stays as a small label.',
+		transition: 'The wordmark moves to the top-right corner and stays as a small label.',
 		lead: 0.2,
 		lines: [{ text: 'Tools that help us do more need a partner that helps us pause.', hold: 5.2 }],
 		tail: 0.5,
@@ -117,7 +117,7 @@ export const scenes = [
 		kind: 'product',
 		purpose: 'Show the verified Working Time rule and view, briefly and accurately.',
 		action:
-			'Three synthetic Amp turns draw on a 09:00–12:00 axis. Each grows a 15-minute extension. The bars drop into one Working Time row and merge. A note says the overlap counts once: 1h 22m. The axis zooms out to the full synthetic day, and the rest of the turns join the row. A connector carries the day total to the real Today card: 8h 7m, OVER, 7m over target. Last, a conceptual “Next task” card arrives at the person, and the person moves it to “Tomorrow”.',
+			'Three synthetic Amp turns draw on a 09:00–12:00 axis. Each grows a 15-minute extension. The bars drop into one Working Time row and merge. A note says the overlap counts once: 1h 22m. The axis zooms out to the full synthetic day, and the rest of the turns join the row. A connector carries the day total to the real Today card: 8h 7m, OVER, 7m over target. Last, a conceptual “Next task” card arrives at the person, and the person moves it to a “Tomorrow · your choice” slot. The chip changes to “Real Cukup view + conceptual choice”.',
 		transition: 'Everything but the person clears.',
 		lead: 0.2,
 		lines: [

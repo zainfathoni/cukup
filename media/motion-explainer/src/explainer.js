@@ -282,7 +282,7 @@ const todayCard = node('card-wrap', '<img class="today-card" src="generated/toda
 const estimateNote = node('note', 'Estimate from Amp turns · not measured attention')
 const nextTask = node('next-task', 'Next task')
 const nextLabel = node('note', 'Your choice · conceptual')
-const slot = node('slot', 'Tomorrow')
+const slot = node('slot', 'Tomorrow · your choice')
 
 const closeOne = node('close-line', 'Let AI help you do the work.')
 const closeTwo = node('close-line', 'Keep the decision to say: <mark>cukup.</mark>')
@@ -301,7 +301,9 @@ const cardAt = L1 + 3.6
 const kinds = [
 	[0.3, S.compassion.end, 'Conceptual illustration'],
 	[S['working-time'].start + 0.2, cardAt, 'Working Time rule · synthetic data'],
-	[cardAt, S['working-time'].end, 'Real Cukup view · synthetic data'],
+	[cardAt, L('working-time', 3) + 0.2, 'Real Cukup view · synthetic data'],
+	// The decision that follows is the person's, not a Cukup feature.
+	[L('working-time', 3) + 0.2, S['working-time'].end, 'Real Cukup view + conceptual choice'],
 ].map(([from, to, text]) => ({ chip: node('kind', text), from, to }))
 for (const kind of kinds) kind.chip.style.transform = 'none'
 
