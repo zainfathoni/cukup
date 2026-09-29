@@ -9,7 +9,7 @@
 | Dimensions | 1920 × 1080 |
 | Frame rate | 30 fps, 2817 frames |
 | Duration | 93.9 s |
-| Size | 4.95 MiB |
+| Size | 4.97 MiB |
 | Audio | None. One video stream. |
 | Poster | [`poster.png`](poster.png), 1920 × 1080, the last frame |
 
@@ -76,7 +76,7 @@ The synthetic day is Tuesday 2026-09-15 in Asia/Jakarta, with the weekday target
 ## Claims
 
 - `docs.ts` rejects signup, download, install, clone, self-host, and “try it” language. It also rejects claims that Cukup measures attention, productivity, wellbeing, or quality, reduces stress or burnout, or is open source now.
-- The kind chip labels every conceptual scene. Product scenes say “synthetic data”. The “Next task” card is labelled “Your choice · conceptual”.
+- The kind chip labels every conceptual scene. Product scenes say “synthetic data”. The “Next task” card arrives labelled “Your choice · conceptual”, and lands in a “Tomorrow · your choice” slot. From then on the chip reads “Real Cukup view + conceptual choice”.
 - The video shows no Cukup control that stops agents, approves work, or enforces limits. The person moves the next task.
 - Status matches today: cukup.dev serves the public landing page, the dashboard is personal, support is Amp only, and the open-source release is in preparation. The repository is private.
 

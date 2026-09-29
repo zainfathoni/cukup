@@ -58,7 +58,7 @@ Tools that help us do more need a partner that helps us pause.
 
 ## One prompt to pause (1:01.8–1:22.9)
 
-*Product behavior · synthetic data. Three synthetic Amp turns draw on a 09:00–12:00 axis. Each grows a 15-minute extension. The bars drop into one Working Time row and merge. A note says the overlap counts once: 1h 22m. The axis zooms out to the full synthetic day, and the rest of the turns join the row. A connector carries the day total to the real Today card: 8h 7m, OVER, 7m over target. Last, a conceptual “Next task” card arrives at the person, and the person moves it to “Tomorrow”.*
+*Product behavior · synthetic data. Three synthetic Amp turns draw on a 09:00–12:00 axis. Each grows a 15-minute extension. The bars drop into one Working Time row and merge. A note says the overlap counts once: 1h 22m. The axis zooms out to the full synthetic day, and the rest of the turns join the row. A connector carries the day total to the real Today card: 8h 7m, OVER, 7m over target. Last, a conceptual “Next task” card arrives at the person, and the person moves it to a “Tomorrow · your choice” slot. The chip changes to “Real Cukup view + conceptual choice”.*
 
 Cukup counts each Amp turn, plus 15 minutes after it.
 
