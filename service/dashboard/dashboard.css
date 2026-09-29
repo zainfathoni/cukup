@@ -1646,6 +1646,39 @@ dd {
 	padding: 1rem;
 }
 
+/* The explainer keeps its 16:9 frame at any width, so the poster is never cropped. */
+.landing-video {
+	margin: 1.5rem 0 0;
+}
+
+.landing-video video {
+	display: block;
+	width: 100%;
+	height: auto;
+	aspect-ratio: 16 / 9;
+	border: var(--border);
+	border-radius: var(--radius-sm);
+	box-shadow: var(--shadow);
+	background: var(--paper);
+}
+
+.landing-video figcaption {
+	margin-top: 0.75rem;
+	color: var(--ink-2);
+	font-size: 0.92rem;
+}
+
+.landing-transcript h1 {
+	margin-bottom: 1.25rem;
+	font-size: clamp(1.75rem, 4vw, 2.4rem);
+	line-height: 1.15;
+}
+
+.landing-transcript h2 {
+	margin-top: 1.75rem;
+	font-size: 1.2rem;
+}
+
 .landing-timeline {
 	display: grid;
 	gap: 0.45rem;
@@ -1822,8 +1855,11 @@ dd {
 
 .landing-status {
 	display: grid;
+	/* minmax(0, …) lets rows shrink below their longest word at large text sizes. */
+	grid-template-columns: minmax(0, 1fr);
 	gap: 0.75rem;
 	margin: 0 0 1.5rem;
+	container: landing-status / inline-size;
 }
 
 .landing-status div {
@@ -1838,6 +1874,19 @@ dd {
 
 .landing-status dt {
 	font-weight: 700;
+}
+
+.landing-status dt,
+.landing-status dd {
+	overflow-wrap: anywhere;
+	hyphens: auto;
+}
+
+/* Only very narrow lists, such as 320px with 200% text, give up row padding for words. */
+@container landing-status (max-width: 14rem) {
+	.landing-status div {
+		padding: 0.5rem 0.55rem;
+	}
 }
 
 .landing-status dd {
@@ -1872,7 +1921,7 @@ dd {
 	}
 
 	.landing-status div {
-		grid-template-columns: 1fr;
+		grid-template-columns: minmax(0, 1fr);
 		gap: 0.2rem;
 	}
 

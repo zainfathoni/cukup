@@ -2,6 +2,7 @@ import { summarizeWork } from './aggregation.ts'
 import { isBearerToken, type OidcVerifier } from './auth.ts'
 import { DEFAULT_API_HOSTNAME, DEFAULT_DASHBOARD_HOSTNAME } from './config.ts'
 import type { DashboardBackend } from './dashboard/backend.ts'
+import { EXPLAINER_ROUTES } from './dashboard/explainer.ts'
 import { ServiceLogger } from './logger.ts'
 import {
 	MAX_REQUEST_BYTES,
@@ -226,6 +227,8 @@ function originalHostname(request: Request, url: URL): string {
 	return request.headers.get('host') ?? url.host
 }
 
+const explainerPaths: ReadonlySet<string> = new Set(Object.values(EXPLAINER_ROUTES))
+
 function logPath(pathname: string): string {
 	if (pathname.startsWith('/v1/target-overrides/')) {
 		return '/v1/target-overrides/:date'
@@ -245,7 +248,8 @@ function logPath(pathname: string): string {
 		pathname === '/dashboard/report' ||
 		pathname === '/assets/dashboard.css' ||
 		pathname === '/assets/dashboard.js' ||
-		pathname === '/assets/favicon.svg'
+		pathname === '/assets/favicon.svg' ||
+		explainerPaths.has(pathname)
 	) {
 		return pathname
 	}
