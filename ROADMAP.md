@@ -1,6 +1,10 @@
 # Cukup roadmap
 
-**Current scope: personal Amp maintenance.** Other harnesses, external adoption, stable SDK work, and multi-user support are paused indefinitely. Production remains Amp-only v1/v2.
+**Current scope: personal Amp maintenance and public-release preparation.** Other harnesses, stable SDK work, and multi-user support are paused indefinitely. Production remains Amp-only v1/v2.
+
+## What does public-release preparation mean?
+
+[Issue #27](https://github.com/zainfathoni/cukup/issues/27) sets the intended direction: an Amp-first open-source release that others can inspect, adapt, and host. This is intended adoption, not current capability. The repository stays private, the hosted dashboard stays restricted to its owner, and independent self-hosting is not verified. The public page at `cukup.dev` must describe that status until a release is complete and verified.
 
 GitHub issues own scoped work and acceptance criteria. ADRs own durable decisions. Review priorities monthly; retained plans do not authorize implementation or deployment.
 

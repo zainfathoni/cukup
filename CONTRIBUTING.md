@@ -2,7 +2,7 @@
 
 Zain Fathoni owns domain, privacy, protocol, and production decisions. Contributions use the [MIT License](LICENSE). Upstream projects set their own contribution terms.
 
-External adoption is [paused](ROADMAP.md). Discuss a scoped issue before implementation. A contribution does not grant production access or deployment authority.
+A public release is [in preparation](ROADMAP.md), not yet available. Discuss a scoped issue before implementation. A contribution does not grant production access or deployment authority.
 
 ## What must a change preserve?
 
