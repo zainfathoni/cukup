@@ -29,7 +29,7 @@
 
 ![300 px preview](assets/preview-300.png)
 
-The headline and the address stay legible. The “enough” tag is the smallest text, and it is still readable.
+The headline and the address stay legible. The “enough” tag is about 6 px tall here and hard to read. It is decorative: the headline repeats the word.
 
 ### Center-square crop, 200 × 200
 
@@ -75,5 +75,6 @@ The `<head>` of the signed-out page, one tag per line:
 ## Limits
 
 - The previews are local resizes and crops. No real platform preview was checked, because the change is not deployed. After an approved deployment, check the public HTML, the image URL, and a real share preview. Platforms cache previews, so a stale card does not prove a failed deployment.
-- `HEAD /` still returns 405, as before. Link-preview crawlers use `GET`. This change does not alter that route's methods.
+- `HEAD /` still returns 405, as before. This change does not alter that route's methods. No real crawler was tested against it.
+- The deployment smoke check does not request the image. An older image has no such route, so the check would fail a rollback.
 - The image is light only. Link cards do not follow the viewer's color scheme.
