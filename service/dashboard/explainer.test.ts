@@ -282,6 +282,8 @@ describe('signed-out player', () => {
 					'/assets/favicon.svg',
 					'/assets/dashboard.css',
 					'https://ampcode.com/',
+					// The canonical link, which must be absolute.
+					'https://cukup.dev/',
 					...Object.values(EXPLAINER_ROUTES),
 				]).toContain(value!)
 			}

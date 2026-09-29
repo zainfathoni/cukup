@@ -1,4 +1,5 @@
 import { EXPLAINER_ROUTES, type ExplainerAssets } from './explainer.ts'
+import { SOCIAL_IMAGE_ALT, SOCIAL_IMAGE_HEIGHT, SOCIAL_IMAGE_ROUTE, SOCIAL_IMAGE_WIDTH } from './social-image.ts'
 
 /**
  * The signed-out page at the dashboard host. It explains why Cukup exists
@@ -9,9 +10,53 @@ import { EXPLAINER_ROUTES, type ExplainerAssets } from './explainer.ts'
  * The optional explainer video repeats the page's argument; the page does not
  * depend on it.
  */
-export function renderLandingPage(options: { explainer?: Pick<ExplainerAssets, 'durationLabel'> } = {}): string {
+export function renderLandingPage(options: {
+	/** The public origin, for example `https://cukup.dev`. Link previews need absolute URLs. */
+	origin: string
+	explainer?: Pick<ExplainerAssets, 'durationLabel'>
+	/** Whether the link-preview image is served. Without it, the page names no image. */
+	socialImage?: boolean
+}): string {
 	const video = options.explainer ? explainerSection(options.explainer.durationLabel) : ''
-	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="Cukup means “enough” in Indonesian. AI can produce more work, but people still choose, review, and take responsibility. Cukup is a small prompt to pause and consider what is enough."><title>Cukup · Decide what is enough</title><link rel="icon" href="/assets/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/dashboard.css"></head><body class="landing"><a class="skip-link" href="#content">Skip to content</a>${header}<main id="content" tabindex="-1">${hero}${video}${concern}${response}${why}${workingTime}${status}</main>${options.explainer ? footerWithVideo : footer}</body></html>`
+	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="${DESCRIPTION}"><title>${TITLE}</title>${shareMetadata(options.origin, Boolean(options.socialImage))}<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/dashboard.css"></head><body class="landing"><a class="skip-link" href="#content">Skip to content</a>${header}<main id="content" tabindex="-1">${hero}${video}${concern}${response}${why}${workingTime}${status}</main>${options.explainer ? footerWithVideo : footer}</body></html>`
+}
+
+const TITLE = 'Cukup · Decide what is enough'
+const DESCRIPTION =
+	'Cukup means “enough” in Indonesian. AI can produce more work, but people still choose, review, and take responsibility. Cukup is a small prompt to pause and consider what is enough.'
+
+/**
+ * Canonical, Open Graph, and Twitter/X metadata, in the initial HTML so link
+ * previews work without script. Open Graph and Twitter/X share one title and
+ * description. Every URL is absolute and built from the configured origin,
+ * never from a request header. None of it depends on who is signed in.
+ */
+function shareMetadata(origin: string, socialImage: boolean): string {
+	const page = `${origin}/`
+	const tags = [
+		`<link rel="canonical" href="${page}">`,
+		'<meta property="og:type" content="website">',
+		'<meta property="og:site_name" content="Cukup">',
+		`<meta property="og:title" content="${TITLE}">`,
+		`<meta property="og:description" content="${DESCRIPTION}">`,
+		`<meta property="og:url" content="${page}">`,
+		`<meta name="twitter:card" content="${socialImage ? 'summary_large_image' : 'summary'}">`,
+		`<meta name="twitter:title" content="${TITLE}">`,
+		`<meta name="twitter:description" content="${DESCRIPTION}">`,
+	]
+	if (socialImage) {
+		const image = `${origin}${SOCIAL_IMAGE_ROUTE}`
+		tags.push(
+			`<meta property="og:image" content="${image}">`,
+			'<meta property="og:image:type" content="image/png">',
+			`<meta property="og:image:width" content="${SOCIAL_IMAGE_WIDTH}">`,
+			`<meta property="og:image:height" content="${SOCIAL_IMAGE_HEIGHT}">`,
+			`<meta property="og:image:alt" content="${SOCIAL_IMAGE_ALT}">`,
+			`<meta name="twitter:image" content="${image}">`,
+			`<meta name="twitter:image:alt" content="${SOCIAL_IMAGE_ALT}">`,
+		)
+	}
+	return tags.join('')
 }
 
 const header = `<header class="landing-top"><p class="landing-brand"><span class="landing-brand-name">Cukup</span> <span class="wordmark-tag">enough</span></p><nav aria-label="Page"><ul><li><a href="#why">Why Cukup</a></li><li><a href="#working-time">Working Time</a></li><li><a href="#status">Status</a></li><li><a class="landing-owner-link" href="/auth/github">Owner sign-in</a></li></ul></nav></header>`

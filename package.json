@@ -7,7 +7,7 @@
     "test": "bun test plugin service experimental media && scripts/deploy-service.test.sh && scripts/deploy-service-workflow.test.sh",
     "typecheck": "tsc --noEmit",
     "build:plugin": "bun build plugin/index.ts --target=bun --external @ampcode/plugin --outfile dist/plugin.js",
-    "build:service": "bun build service/index.ts service/database-ops.ts service/token-admin.ts --target=bun --outdir dist/service && bun build service/dashboard/client.ts --target=browser --minify --outfile dist/service/dashboard.js && cp service/dashboard/dashboard.css dist/service/dashboard.css && mkdir -p dist/service/explainer && cp media/motion-explainer/cukup-explainer.mp4 media/motion-explainer/poster.png media/motion-explainer/captions.en.vtt media/motion-explainer/transcript.md dist/service/explainer/",
+    "build:service": "bun build service/index.ts service/database-ops.ts service/token-admin.ts --target=bun --outdir dist/service && bun build service/dashboard/client.ts --target=browser --minify --outfile dist/service/dashboard.js && cp service/dashboard/dashboard.css dist/service/dashboard.css && mkdir -p dist/service/explainer && cp media/motion-explainer/cukup-explainer.mp4 media/motion-explainer/poster.png media/motion-explainer/captions.en.vtt media/motion-explainer/transcript.md dist/service/explainer/ && cp media/og-image/og-image.png dist/service/og-image.png",
     "build": "bun run build:plugin && bun run build:service",
     "start:service": "bun run service/index.ts",
     "service:db": "bun run service/database-ops.ts",

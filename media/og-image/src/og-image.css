@@ -1,0 +1,88 @@
+/* Cukup Open Graph image, 1200 × 630. Tokens and fonts match the motion
+   explainer's end card (media/motion-explainer/src/explainer.css), which
+   mirrors the dashboard's light scheme. Fonts are pinned to installed Noto
+   families so every render matches. */
+
+@font-face { font-family: 'Card Sans'; font-weight: 900; src: local('Noto Sans Black'), local('NotoSans-Black'); }
+@font-face { font-family: 'Card Mono'; font-weight: 700; src: local('Noto Sans Mono Bold'), local('NotoSansMono-Bold'); }
+
+:root {
+	--paper: #fff4dd;
+	--ink: #26201a;
+	--dot-ink: #26201a1a;
+	--accent: #d8400f;
+	--sun: #ffd84d;
+	--mint: #b9e6a6;
+	--sans: 'Card Sans', sans-serif;
+	--mono: 'Card Mono', monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; }
+
+/* Text stays at least 80 px from the side edges and 48 px from the top and bottom.
+   The headline also fits the center 630 × 630 square that some apps crop to. */
+#card {
+	width: 1200px;
+	height: 630px;
+	padding: 56px 80px;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: space-between;
+	overflow: hidden;
+	background-color: var(--paper);
+	background-image: radial-gradient(var(--dot-ink) 2px, transparent 2px);
+	background-size: 30px 30px;
+	color: var(--ink);
+	font-family: var(--sans);
+	text-align: center;
+}
+
+.brand {
+	margin: 0;
+	display: flex;
+	align-items: center;
+	gap: 16px;
+}
+
+.brand-name { font-size: 56px; font-weight: 900; line-height: 1; letter-spacing: -0.01em; }
+
+.brand-tag {
+	padding: 4px 16px 6px;
+	border: 3px solid var(--ink);
+	border-radius: 30px;
+	background: var(--mint);
+	font-family: var(--mono);
+	font-size: 26px;
+	font-weight: 700;
+}
+
+h1 {
+	margin: 0;
+	font-size: 68px;
+	font-weight: 900;
+	line-height: 1.12;
+	letter-spacing: -0.01em;
+}
+
+h1 mark {
+	display: inline-block;
+	padding: 0 16px 6px;
+	border: 4px solid var(--ink);
+	border-radius: 16px;
+	box-shadow: 5px 5px 0 var(--ink);
+	background: var(--sun);
+	color: var(--ink);
+	line-height: 1.05;
+	transform: rotate(-2deg);
+}
+
+.url {
+	margin: 0;
+	font-size: 48px;
+	font-weight: 900;
+	line-height: 1;
+	color: var(--accent);
+}
