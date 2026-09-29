@@ -7,6 +7,7 @@ import {
 	parseDashboardSelection,
 	type DashboardReportStore,
 } from './report-builder.ts'
+import { renderLandingPage } from './landing.ts'
 import { renderDashboardDocument } from './render.ts'
 import type { DashboardSelection } from './report.ts'
 
@@ -101,7 +102,7 @@ export class DashboardBackend {
 		if (url.pathname === '/') {
 			if (request.method !== 'GET') return methodNotAllowed('GET')
 			if (!this.#auth.hasValidSession(request.headers.get('cookie'))) {
-				return html(renderSignInPage())
+				return html(renderLandingPage())
 			}
 			const nonce = randomBytes(18).toString('base64url')
 			const report = buildDashboardReport(this.#store, initialSelection, this.#now())
@@ -171,10 +172,6 @@ async function readJson(
 
 function mediaType(value: string | null): string | undefined {
 	return value?.split(';', 1)[0]?.trim().toLowerCase()
-}
-
-function renderSignInPage(): string {
-	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>Sign in · Cukup</title><link rel="icon" href="/assets/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/dashboard.css"></head><body><main class="centered"><section><p class="eyebrow">Personal dashboard</p><div class="wordmark"><h1>Cukup</h1><span class="wordmark-tag">Asia/Jakarta</span></div><p class="guidance">Under, complete, or over the hours due — one authoritative view of Amp-backed working time.</p><p><a class="button" href="/auth/github">Sign in with GitHub</a></p><p class="verdict-target">One account is authorized. Nothing else is.</p></section></main></body></html>`
 }
 
 function renderMessagePage(title: string, message: string): string {

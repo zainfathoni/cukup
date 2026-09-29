@@ -2,7 +2,7 @@
 
 Cukup helps its owner understand time spent on AI-assisted work without collecting prompts or source code. It is not a productivity score.
 
-**Current scope: personal Amp use.** Other harnesses, external adoption, a stable SDK, and multi-user support are paused indefinitely. Experimental code is not a support promise. See the [roadmap](ROADMAP.md).
+**Current scope: personal Amp use.** An Amp-first open-source release is in preparation. It is not available yet: the repository is private, and independent self-hosting is not verified. Other harnesses, a stable SDK, and multi-user support are paused indefinitely. Experimental code is not a support promise. See the [roadmap](ROADMAP.md).
 
 ## Who owns this project?
 

@@ -6,6 +6,7 @@ import {
 	type DashboardReportStore,
 } from './report-builder.ts'
 import type { DashboardSelection } from './report.ts'
+import { renderLandingPage } from './landing.ts'
 import { renderDashboardDocument } from './render.ts'
 
 const minute = 60_000
@@ -119,6 +120,9 @@ Bun.serve({
 	async fetch(request) {
 		const pathname = new URL(request.url).pathname
 		if (pathname === '/up') return new Response('ok')
+		if (pathname === '/signed-out') {
+			return new Response(renderLandingPage(), { headers: { 'content-type': 'text/html' } })
+		}
 		if (pathname === '/assets/dashboard.css') {
 			return new Response(css, { headers: { 'content-type': 'text/css' } })
 		}

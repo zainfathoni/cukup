@@ -308,6 +308,63 @@ describe('dashboard HTTP contract', () => {
 		value.store.close()
 	})
 
+	test('explains Cukup to signed-out visitors before the restricted owner sign-in', async () => {
+		const value = fixture()
+		const landing = await value.app.fetch(request('cukup.dev', '/'))
+		expect(landing.status).toBe(200)
+		expect(landing.headers.get('content-security-policy')).toContain("script-src 'self'")
+		expect(landing.headers.get('content-security-policy')).not.toContain('nonce-')
+		const page = await landing.text()
+
+		// Why Cukup exists, what Working Time is and is not, and the release status.
+		expect(page).toContain('means “enough” in Indonesian')
+		expect(page).toContain('It is not measured attention.')
+		expect(page).toContain('It is not a productivity score, a burnout signal, or a measure of your worth.')
+		expect(page).toContain('Prompts, agent replies, or source code.')
+		expect(page).toContain('Amp only.')
+		expect(page).toContain('There is no public signup and no waitlist.')
+		expect(page).toContain('The source code is not public yet')
+		expect(page).toContain('Synthetic example, not real activity.')
+
+		// Owner sign-in stays findable and is labelled as restricted.
+		expect(page).toContain('<a class="button" href="/auth/github">Sign in with GitHub</a>')
+		expect(page).toContain("Only the owner's GitHub account can open this dashboard.")
+
+		// It promises no access, measurement, or outcome that does not exist.
+		expect(page).not.toMatch(/sign up now|join the|get started|download|install cukup|clone/i)
+		expect(page).not.toMatch(/measures (your )?(attention|focus|productivity|wellbeing)/i)
+		expect(page).not.toMatch(/(reduces|prevents|cures) burnout|improves? (your )?wellbeing/i)
+		value.store.close()
+	})
+
+	test('keeps the signed-out page static, local, and navigable', async () => {
+		const value = fixture()
+		const page = await (await value.app.fetch(request('cukup.dev', '/'))).text()
+		expect(page).not.toMatch(/<script|<form|<iframe|<video|<img|style=/i)
+		expect(page).not.toContain('/dashboard/report')
+
+		const ids = new Set([...page.matchAll(/ id="([^"]+)"/g)].map((match) => match[1]))
+		const destinations = [...page.matchAll(/ href="([^"]+)"/g)].map((match) => match[1]!)
+		expect(destinations.length).toBeGreaterThan(0)
+		for (const destination of destinations) {
+			if (destination.startsWith('#')) {
+				expect(ids).toContain(destination.slice(1))
+			} else {
+				expect(['/auth/github', '/assets/favicon.svg', '/assets/dashboard.css', 'https://ampcode.com/']).toContain(
+					destination,
+				)
+			}
+		}
+
+		const levels = [...page.matchAll(/<h([1-6])[\s>]/g)].map((match) => Number(match[1]))
+		expect(levels.filter((level) => level === 1)).toHaveLength(1)
+		expect(levels[0]).toBe(1)
+		for (let index = 1; index < levels.length; index++) {
+			expect(levels[index]!).toBeLessThanOrEqual(levels[index - 1]! + 1)
+		}
+		value.store.close()
+	})
+
 	test('serves a local favicon and links it from every dashboard document', async () => {
 		const value = fixture()
 		const favicon = await value.app.fetch(request('cukup.dev', '/assets/favicon.svg'))
