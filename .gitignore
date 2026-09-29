@@ -28,9 +28,19 @@
 !/scripts/deploy-service
 !/service/**/*.css
 !/service/**/*.ts
+!/media/motion-explainer/**/*.css
+!/media/motion-explainer/**/*.html
+!/media/motion-explainer/**/*.js
+!/media/motion-explainer/**/*.md
+!/media/motion-explainer/**/*.mp4
+!/media/motion-explainer/**/*.png
+!/media/motion-explainer/**/*.ts
+!/media/motion-explainer/**/*.vtt
 
 # Generated output and portal metadata stay ignored explicitly for clarity.
 node_modules/
 dist/
 .amp/portals/
 .amp/portals/**
+/media/motion-explainer/frames/
+/media/motion-explainer/out/
