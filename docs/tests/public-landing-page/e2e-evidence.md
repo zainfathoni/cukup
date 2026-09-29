@@ -21,6 +21,24 @@
 - Headings passed. There is one `h1`, and no level is skipped. The backend test checks this.
 - Links passed. Every destination is an in-page anchor, `/auth/github`, a local asset, or `https://ampcode.com/`. The backend test checks this.
 
+## Contrast
+
+Computed text color against the nearest opaque background, at 1280px. Every pair meets 4.5:1.
+
+| Element | Light | Dark |
+| --- | --- | --- |
+| Body text | 15.83 | 13.84 |
+| Prose and secondary links | 6.11 | 6.54 |
+| Owner sign-in link (header) | 5.69 | 7.17 |
+| Orange buttons | 5.23 | 6.00 |
+| Notes and eyebrows | 7.42 | 8.41 |
+| Caption, axis, and row labels | 6.91 | 9.21 |
+| Self-compassion cards | 10.95 | 9.09 |
+| Owner sign-in panel | 7.99 | 9.19 |
+| Footer | 6.91 | 9.21 |
+
+The shared light accent measured 4.13–4.43:1 on paper and card, and light button text measured 3.03:1. The page darkens both under `body.landing` only. The authenticated dashboard keeps its tokens.
+
 ## Desktop
 
 ![Landing page at 1280px in light mode](./assets/landing-desktop-light.png)
@@ -39,6 +57,10 @@ The synthetic Working Time illustration at 390px, 2× scale:
 
 ![Illustration at 390px in dark mode](./assets/landing-mobile-dark-illustration.png)
 
+In forced colors:
+
+![Illustration in forced colors](./assets/landing-forced-colors-illustration.png)
+
 ## Focus
 
 ![Skip link focused after the first Tab](./assets/landing-skip-link-focus.png)
@@ -47,6 +69,6 @@ The synthetic Working Time illustration at 390px, 2× scale:
 
 ## Limits
 
-- The test did not use a screen reader or forced-colors mode. In forced colors, the illustration bars keep their borders and lose their fills.
-- The test did not measure contrast with a tool. The page uses the existing dashboard color tokens.
+- The test did not use a screen reader.
+- In forced colors, the illustration bars keep their borders and lose their fills, so the legend swatches look the same. The caption states the full synthetic data in text.
 - The test did not cover GitHub OAuth or production routing. Backend HTTP tests cover the signed-out response and headers.

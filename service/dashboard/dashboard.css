@@ -1449,6 +1449,32 @@ dd {
 	transform: none;
 }
 
+/* The shared light accent is under 4.5:1 for body-size text on paper, and so is
+   light button text on the accent fill. Darken both on this page only. */
+.landing {
+	--landing-link: #b0360b;
+	--landing-on-accent: var(--ink);
+}
+
+@media (prefers-color-scheme: dark) {
+	.landing {
+		--landing-link: var(--accent);
+		--landing-on-accent: var(--on-accent);
+	}
+}
+
+.landing a {
+	color: var(--landing-link);
+}
+
+.landing a.button {
+	color: var(--landing-on-accent);
+}
+
+.landing a.skip-link {
+	color: var(--ink);
+}
+
 .landing .landing-top,
 .landing main,
 .landing .page-footer {
@@ -1502,7 +1528,7 @@ dd {
 }
 
 .landing-top a.landing-owner-link {
-	color: var(--accent);
+	color: var(--landing-link);
 }
 
 .landing section {
