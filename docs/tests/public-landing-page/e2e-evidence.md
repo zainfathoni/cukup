@@ -57,6 +57,16 @@ The synthetic Working Time illustration at 390px, 2× scale:
 
 ![Illustration at 390px in dark mode](./assets/landing-mobile-dark-illustration.png)
 
+### Narrow and zoomed illustration
+
+At 320px, and at 320px with 200% root text size, the page has no horizontal overflow (`scrollWidth` 320 = 320). No label overlaps its track and nothing extends outside the figure. At 1280px, 400% browser zoom also gives a 320 CSS px viewport. Container queries stack each label above a full-width track, keep only the 09:00 and 12:00 ticks, and let those two wrap instead of overlapping.
+
+Before this fix, 200% text left the track 0px wide and the page 367px wide. At 320px, adjacent tick labels overlapped.
+
+![Illustration at 320px](./assets/landing-320-illustration.png)
+
+![Illustration at 320px with 200% text](./assets/landing-320-text-200-illustration.png)
+
 In forced colors:
 
 ![Illustration in forced colors](./assets/landing-forced-colors-illustration.png)
@@ -70,5 +80,6 @@ In forced colors:
 ## Limits
 
 - The test did not use a screen reader.
+- At 320px with 200% text, the caption breaks one long word ("Synthetic") across lines. The text stays readable and nothing is clipped.
 - In forced colors, the illustration bars keep their borders and lose their fills, so the legend swatches look the same. The caption states the full synthetic data in text.
 - The test did not cover GitHub OAuth or production routing. Backend HTTP tests cover the signed-out response and headers.
