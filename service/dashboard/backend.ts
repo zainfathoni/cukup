@@ -127,7 +127,7 @@ export class DashboardBackend {
 		if (url.pathname === '/') {
 			if (request.method !== 'GET') return methodNotAllowed('GET')
 			if (!this.#auth.hasValidSession(request.headers.get('cookie'))) {
-				// Only this page embeds media, so only it may load same-origin media.
+				// This page embeds media, so it may load same-origin media.
 				const page = renderLandingPage({
 					origin: `https://${this.#config.hostname}`,
 					explainer: this.#explainer,
@@ -237,7 +237,13 @@ function media(
 ): Response {
 	if (request.method !== 'GET' && request.method !== 'HEAD') return methodNotAllowed('GET, HEAD')
 	const size = file.size
-	const common = { 'accept-ranges': 'bytes', 'cache-control': 'public, max-age=3600', ...extraHeaders }
+	const common = {
+		'accept-ranges': 'bytes',
+		'cache-control': 'public, max-age=3600',
+		// Direct video navigation creates a media document that loads its own URL.
+		'content-security-policy': contentSecurityPolicy(undefined, { media: contentType === 'video/mp4' }),
+		...extraHeaders,
+	}
 	const range = parseByteRange(request.headers.get('range'), size)
 	if (range === 'unsatisfiable') {
 		return response('', 416, contentType, [], undefined, { ...common, 'content-range': `bytes */${size}` })
