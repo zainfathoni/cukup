@@ -8,6 +8,7 @@ import { ServiceLogger } from '../logger.ts'
 import { ServiceStore } from '../store.ts'
 import { DashboardBackend } from './backend.ts'
 import { OAUTH_COOKIE_NAME, SESSION_COOKIE_NAME } from './auth.ts'
+import { EXPLAINER_ROUTES, type ExplainerAssets } from './explainer.ts'
 
 const now = Date.parse('2026-08-31T05:00:00.000Z')
 const temporaryDirectories: string[] = []
@@ -46,7 +47,7 @@ function githubFetch(): typeof fetch {
 	}) as typeof fetch
 }
 
-function fixture(options: { dashboard?: boolean; trustTlsProxy?: boolean } = {}) {
+function fixture(options: { dashboard?: boolean; trustTlsProxy?: boolean; explainer?: ExplainerAssets } = {}) {
 	const serviceStore = store()
 	const issued = serviceStore.issueBearer(now)
 	const logs: string[] = []
@@ -56,6 +57,7 @@ function fixture(options: { dashboard?: boolean; trustTlsProxy?: boolean } = {})
 				config: configuration(),
 				store: serviceStore,
 				assets: { css: 'body { color: CanvasText; }', javascript: 'export {}' },
+				explainer: options.explainer,
 				githubFetch: githubFetch(),
 				now: () => now,
 			})
@@ -179,6 +181,61 @@ describe('host and authentication boundaries', () => {
 })
 
 describe('dashboard HTTP contract', () => {
+	test('allows standalone MP4 media only on media-bearing responses and preserves range headers', async () => {
+		const value = fixture({ explainer: {
+			video: new Blob(['0123456789']),
+			poster: new Blob(['poster']),
+			captions: 'WEBVTT',
+			transcriptHtml: '<h1>Transcript</h1>',
+			durationLabel: '1 s',
+		} })
+		try {
+			for (const [method, range, status, body, length, contentRange] of [
+				['GET', undefined, 200, '0123456789', '10', null],
+				['HEAD', undefined, 200, '', '10', null],
+				['GET', 'bytes=2-5', 206, '2345', '4', 'bytes 2-5/10'],
+				['HEAD', 'bytes=2-5', 206, '', '4', 'bytes 2-5/10'],
+				['GET', 'bytes=10-', 416, '', null, 'bytes */10'],
+			] as const) {
+				const response = await value.app.fetch(request('cukup.dev', EXPLAINER_ROUTES.video, {
+					method, headers: range ? { range } : {},
+				}))
+				expect(response.status).toBe(status)
+				const policy = response.headers.get('content-security-policy')!
+				expect(policy.split('; ')).toContain("media-src 'self'")
+				expect(policy).toContain("default-src 'none'")
+				expect(policy).toContain("object-src 'none'")
+				expect(policy).toContain("frame-ancestors 'none'")
+				expect(policy).not.toMatch(/unsafe-inline|blob:|data:|\*/)
+				expect(response.headers.get('content-type')).toBe('video/mp4')
+				expect(response.headers.get('accept-ranges')).toBe('bytes')
+				expect(response.headers.get('cache-control')).toBe('public, max-age=3600')
+				expect(response.headers.get('cross-origin-resource-policy')).toBe('same-origin')
+				expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+				expect(response.headers.get('content-length')).toBe(length)
+				expect(response.headers.get('content-range')).toBe(contentRange)
+				expect(await response.text()).toBe(body)
+			}
+			const landing = await value.app.fetch(request('cukup.dev', '/'))
+			expect(landing.headers.get('content-security-policy')).toContain("media-src 'self'")
+			const session = await dashboardSession(value.app)
+			for (const [path, init] of [
+				[EXPLAINER_ROUTES.poster, {}],
+				[EXPLAINER_ROUTES.captions, {}],
+				[EXPLAINER_ROUTES.transcript, {}],
+				['/assets/dashboard.css', {}],
+				['/', { headers: { cookie: session } }],
+				[EXPLAINER_ROUTES.video, { method: 'POST' }],
+			] as const) {
+				const response = await value.app.fetch(request('cukup.dev', path, init))
+				expect(response.status).toBe(path === EXPLAINER_ROUTES.video ? 405 : 200)
+				expect(response.headers.get('content-security-policy')).not.toContain('media-src')
+			}
+		} finally {
+			value.store.close()
+		}
+	})
+
 	test('serves authenticated same-origin reports, rejects malformed selections, and logs no body values', async () => {
 		const value = fixture()
 		const session = await dashboardSession(value.app)
