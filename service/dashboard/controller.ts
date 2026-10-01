@@ -6,6 +6,7 @@ import {
 	type DashboardSelection,
 	type DashboardTransport,
 	type Panel,
+	type Track,
 } from './report.ts'
 
 export interface DashboardView {
@@ -118,7 +119,9 @@ export class DashboardController {
 				return
 			}
 			this.report = preserveReportAsStale(this.report)
-			this.view.announce('Dashboard refresh failed; last successful values remain visible')
+			this.view.announce((this.report.track ?? 'all') === (this.selection.track ?? 'all')
+				? 'Dashboard refresh failed; last successful values remain visible'
+				: 'Selected track could not be loaded. Retry or select another track.')
 		} finally {
 			this.refreshing = false
 			this.view.render(this.report, this.selection, false, this.filtersBlocked)
@@ -142,6 +145,13 @@ export class DashboardController {
 		if (checked) values.add(value)
 		else values.delete(value)
 		this.selection = { ...this.selection, [kind]: [...values] }
+		await this.refresh()
+	}
+
+	async setTrack(track: Track): Promise<void> {
+		if (track === (this.selection.track ?? 'all')) return
+		this.selection = { ...this.selection, track, projects: [], executors: [] }
+		this.filtersBlocked = true
 		await this.refresh()
 	}
 

@@ -12,9 +12,21 @@ export type TargetPeriod = {
 	difference_minutes: number
 }
 
+export type LimitPeriod = {
+	status: 'WITHIN' | 'TOLERANCE' | 'EXCEEDED'
+	worked_minutes: number
+	target_minutes: number
+	upper_limit_minutes: number
+	difference_minutes: number
+}
+
+export type ActivityPeriod = TargetPeriod | LimitPeriod
+
+export type Track = 'work' | 'play' | 'all'
+
 export type OverallSummary = {
-	today: TargetPeriod
-	week: TargetPeriod
+	today: ActivityPeriod
+	week: ActivityPeriod
 }
 
 export type ActivityInterval = {
@@ -41,8 +53,8 @@ export type Timeline = {
 	week: string
 	minutes: number
 	week_minutes: number
-	day_period: TargetPeriod
-	week_period: TargetPeriod
+	day_period: ActivityPeriod
+	week_period: ActivityPeriod
 	intervals: ActivityInterval[]
 	lanes: TimelineLane[]
 }
@@ -64,13 +76,12 @@ export type DayBreakdown = {
 }
 
 /**
- * Globally unioned detail behind one heatmap cell. `period` is target-bearing
- * because it describes Overall Working Time; the breakdowns are Project and
- * Executor Activity and are intentionally non-additive.
+ * Unioned detail for one track and day. Work has a goal; Play and All have
+ * limits. Project and Executor Activity can overlap and must not be added.
  */
 export type DayDetail = {
 	date: string
-	period: TargetPeriod
+	period: ActivityPeriod
 	interval_count: number
 	first_activity_at: string | null
 	last_activity_at: string | null
@@ -94,6 +105,7 @@ export type ExecutorSummary = {
 
 export type DashboardReport = {
 	schema_version: 1
+	track?: Track
 	as_of: string
 	timezone: string
 	timeline_date: string
@@ -106,6 +118,7 @@ export type DashboardReport = {
 }
 
 export type DashboardSelection = {
+	track?: Track
 	projects: string[]
 	executors: string[]
 	timeline_date?: string

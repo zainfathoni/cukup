@@ -1,13 +1,14 @@
 import type {
+	ActivityPeriod,
 	DashboardReport,
 	DashboardSelection,
 	DayBreakdown,
 	DayDetail,
 	ExecutorSummary,
 	Panel,
-	TargetPeriod,
 	Timeline,
 	TimelineLane,
+	Track,
 	Trend,
 } from './report.ts'
 import { effectiveTimelineDate, isoWeekStart, reportTimelineDate, sameIsoWeek } from './report.ts'
@@ -120,31 +121,58 @@ function weekdayIndex(date: string): number | null {
  * Worked-versus-target meter drawn as SVG geometry. The Content Security Policy
  * forbids inline style attributes, so proportions become element attributes.
  */
-function verdictMeter(
-	period: Pick<TargetPeriod, 'worked_minutes' | 'target_minutes'>,
-	label: string,
-): string {
-	const scale = Math.max(period.worked_minutes, period.target_minutes, 1) * 1.1
+function verdictMeter(period: ActivityPeriod, label: string): string {
+	const upper = 'upper_limit_minutes' in period ? period.upper_limit_minutes : undefined
+	if (period.target_minutes === 0 && upper === undefined) return ''
+	const scale = Math.max(period.worked_minutes, upper ?? period.target_minutes, 1) * 1.1
 	const inner = meterWidth - 4
 	const worked = Math.max(0, Math.min(inner, (period.worked_minutes / scale) * inner))
 	const targetX = 2 + (period.target_minutes / scale) * inner
-	const description = `${formatMinutes(period.worked_minutes)} worked against target ${formatMinutes(period.target_minutes)}`
-	return `<svg class="verdict-meter" viewBox="0 0 ${meterWidth} ${meterHeight}" role="img" aria-label="${escapeHtml(`${label}: ${description}`)}" preserveAspectRatio="none"><rect class="meter-track" x="1" y="1" width="${meterWidth - 2}" height="${meterHeight - 2}" rx="8" vector-effect="non-scaling-stroke"></rect><rect class="meter-fill" x="2" y="2" width="${worked.toFixed(2)}" height="${meterHeight - 4}" rx="7" vector-effect="non-scaling-stroke"></rect><line class="meter-target" x1="${targetX.toFixed(2)}" y1="0" x2="${targetX.toFixed(2)}" y2="${meterHeight}" vector-effect="non-scaling-stroke"></line></svg>`
+	const upperX = upper === undefined ? undefined : 2 + (upper / scale) * inner
+	const description = `${formatMinutes(period.worked_minutes)} recorded; ${periodPresentation(period).policy}`
+	const upperMark = upperX === undefined ? '' : `<line class="meter-upper" x1="${upperX.toFixed(2)}" y1="0" x2="${upperX.toFixed(2)}" y2="${meterHeight}" vector-effect="non-scaling-stroke"></line>`
+	return `<svg class="verdict-meter" viewBox="0 0 ${meterWidth} ${meterHeight}" role="img" aria-label="${escapeHtml(`${label}: ${description}`)}" preserveAspectRatio="none"><rect class="meter-track" x="1" y="1" width="${meterWidth - 2}" height="${meterHeight - 2}" rx="8" vector-effect="non-scaling-stroke"></rect><rect class="meter-fill" x="2" y="2" width="${worked.toFixed(2)}" height="${meterHeight - 4}" rx="7" vector-effect="non-scaling-stroke"></rect><line class="meter-target" x1="${targetX.toFixed(2)}" y1="0" x2="${targetX.toFixed(2)}" y2="${meterHeight}" vector-effect="non-scaling-stroke"></line>${upperMark}</svg>`
 }
 
-function verdictCard(label: string, period: TargetPeriod): string {
-	const caption =
-		period.status === 'UNDER'
-			? `${formatMinutes(period.difference_minutes)} remaining`
-			: period.status === 'OVER'
-				? `${formatMinutes(period.difference_minutes)} over target`
-				: 'Target met'
-	return `<article class="verdict status-${period.status.toLowerCase()}">
-		<p class="verdict-label"><span>${escapeHtml(label)}</span><span class="verdict-stamp"><span class="status-mark" aria-hidden="true"></span>${period.status}</span></p>
+function periodPresentation(period: ActivityPeriod): { tone: string; label: string; caption: string; policy: string } {
+	if ('upper_limit_minutes' in period) {
+		const exceeded = period.status === 'EXCEEDED'
+		const tolerance = period.status === 'TOLERANCE'
+		return {
+			tone: exceeded ? 'over' : tolerance ? 'under' : 'complete',
+			label: exceeded ? 'OVER LIMIT' : tolerance ? 'TOLERANCE' : 'WITHIN LIMIT',
+			caption: exceeded
+				? `${formatMinutes(period.difference_minutes)} over the upper limit`
+				: tolerance
+					? `${formatMinutes(period.difference_minutes)} past the soft limit`
+					: `${formatMinutes(period.difference_minutes)} before the soft limit`,
+			policy: `Soft limit ${formatMinutes(period.target_minutes)} · upper limit ${formatMinutes(period.upper_limit_minutes)}`,
+		}
+	}
+	if (period.target_minutes === 0) {
+		return {
+			tone: period.worked_minutes > 0 ? 'under' : 'complete',
+			label: period.worked_minutes > 0 ? 'UNPLANNED' : 'NO GOAL',
+			caption: 'No Work scheduled for this period.',
+			policy: 'Goal 0m',
+		}
+	}
+	return {
+		tone: period.status === 'UNDER' ? 'under' : 'complete',
+		label: period.status === 'UNDER' ? 'UNDER GOAL' : 'GOAL MET',
+		caption: period.status === 'UNDER' ? `${formatMinutes(period.difference_minutes)} remaining` : 'Goal met',
+		policy: `Goal ${formatMinutes(period.target_minutes)}`,
+	}
+}
+
+function verdictCard(label: string, period: ActivityPeriod): string {
+	const display = periodPresentation(period)
+	return `<article class="verdict status-${display.tone}">
+		<p class="verdict-label"><span>${escapeHtml(label)}</span><span class="verdict-stamp"><span class="status-mark" aria-hidden="true"></span>${display.label}</span></p>
 		<p><span class="verdict-figure">${formatMinutes(period.worked_minutes)}</span></p>
 		${verdictMeter(period, label)}
-		<p class="verdict-caption">${caption}</p>
-		<p class="verdict-target">Target ${formatMinutes(period.target_minutes)} · dashed mark on the meter</p>
+		<p class="verdict-caption">${display.caption}</p>
+		<p class="verdict-target">${display.policy}</p>
 	</article>`
 }
 
@@ -156,15 +184,24 @@ function panelNotice<T>(panel: Panel<T>): string {
 	return `<div class="panel-notice stale" role="status"><strong>Stale data.</strong> ${escapeHtml(panel.message)} Last successful update <time datetime="${escapeHtml(panel.last_successful_at)}">${escapeHtml(panel.last_successful_at)}</time>.</div>`
 }
 
-function renderOverall(panel: DashboardReport['overall']): string {
+function renderOverall(panel: DashboardReport['overall'], track: Track): string {
 	return `<section class="hero" aria-labelledby="summary-title">
-		<div class="section-heading"><div><p class="eyebrow">Authoritative, globally unioned</p><h2 id="summary-title">Working time</h2></div></div>
+		<div class="section-heading"><div><p class="eyebrow">${track === 'all' ? 'Authoritative, globally unioned' : 'Overlaps merged within this track'}</p><h2 id="summary-title">${track === 'all' ? 'Working time' : track === 'work' ? 'Work activity' : 'Play activity'}</h2></div></div>
 		${panelNotice(panel)}
 		${panel.state === 'unavailable' ? '' : `<div class="verdict-grid">${verdictCard('Today', panel.data.today)}${verdictCard('Current week', panel.data.week)}</div>`}
+		<p class="guidance">${track === 'work' ? 'Work goal: 8 hours Monday–Friday, none on weekends. Date overrides adjust the goal.' : track === 'play' ? 'Play is optional: 1 hour each day, with tolerance up to 2 hours, including weekends.' : 'All has limits, not a goal to reach. Play cannot fill a Work shortfall.'} Weekly totals do not carry unused daily allowance forward.</p>
 	</section>`
 }
 
 /* ---------- Filters ---------- */
+
+function renderTrackSelector(track: Track): string {
+	const options = (['work', 'play', 'all'] as const).map((value) =>
+		`<label><input class="sr-only" type="radio" name="track" value="${value}" data-focus-key="track:${value}"${track === value ? ' checked' : ''}><span>${value === 'work' ? 'Work' : value === 'play' ? 'Play' : 'All'}<span class="track-check" aria-hidden="true">✓</span></span></label>`,
+	).join('')
+	const description = track === 'work' ? 'Work includes bta and bta-notes.' : track === 'play' ? 'Play includes every other project and Unassigned activity.' : 'All includes Work and Play. Overlapping time counts once.'
+	return `<div class="track-selector"><fieldset class="track-switch" aria-describedby="track-description"><legend>Track</legend><div class="track-options">${options}</div></fieldset><p id="track-description" class="guidance">${description}</p></div>`
+}
 
 function filterGroup(
 	legend: string,
@@ -189,7 +226,7 @@ function renderFilters(
 	const disabled = forceDisabled || !sameIsoWeek(effectiveTimelineDate(report, selection), reportTimelineDate(report))
 	return `<section class="filters" aria-labelledby="filters-title">
 		<div class="section-heading"><div><p class="eyebrow">Filtered activity view</p><h2 id="filters-title">Filters</h2></div><button type="button" class="button" data-action="refresh" data-focus-key="refresh" ${refreshing ? 'disabled aria-disabled="true"' : ''}>${refreshing ? 'Refreshing…' : 'Refresh now'}</button></div>
-		<p class="guidance"><strong>Options reflect activity in the selected ISO week.</strong> Choosing a day in another week clears filters. Activity is non-additive: concurrent project and executor values overlap and must not be added. Multiple values within a filter use OR; project and executor filters combine with AND. Overall Working Time above never changes.</p>
+		<p class="guidance"><strong>Options reflect activity in the selected ISO week.</strong> Choosing a day in another week clears filters. Activity is non-additive: concurrent project and executor values overlap and must not be added. Multiple values within a filter use OR; project and executor filters combine with AND. These filters do not change the track summary or its day-by-day totals.</p>
 		<div class="filter-grid">${filterGroup('Projects', 'projects', report.available_projects, selection.projects, disabled)}${filterGroup('Executors', 'executors', report.available_executors, selection.executors, disabled)}</div>
 	</section>`
 }
@@ -362,7 +399,8 @@ function renderTimelineData(timeline: Timeline, timezone: string, asOf: string):
 	const equivalents = timeline.intervals.length
 		? `<ol class="text-equivalent">${timeline.intervals.map((interval) => `<li>${formatTimestamp(interval.start, timezone)}–${formatTimestamp(interval.end, timezone)}; concurrency ${interval.concurrency}</li>`).join('')}</ol>`
 		: '<p>No activity intervals recorded today.</p>'
-	return `<div class="verdict-grid activity-period-grid">${verdictCard('Selected day', timeline.day_period)}${verdictCard('Selected ISO week', timeline.week_period)}</div><p class="guidance">Timeline worked totals follow the Project and Executor filters. The targets are the overall configured targets for ${escapeHtml(timeline.date)} and its full Monday–Sunday ${escapeHtml(timeline.week)} week, not separate project or executor quotas.</p><ul class="chart-legend"><li><span class="block-swatch" aria-hidden="true"></span>Single-source evidence</li><li><span class="block-swatch concurrent" aria-hidden="true"></span>Concurrent evidence</li><li><span class="block-swatch project" aria-hidden="true"></span>Project lane</li><li><span class="block-swatch executor" aria-hidden="true"></span>Executor lane</li></ul><p class="guidance">Lanes share one clock. Bars are unioned inside a lane, so a project lane and an executor lane that line up vertically describe the same minutes and must not be added.</p><p class="scroll-hint">Scroll the chart horizontally to see the full day.</p><div class="chart-scroll" tabindex="0" role="region" aria-label="Scrollable current-day timeline">${renderGantt(timeline, timezone, asOf)}</div><details><summary>Timeline text equivalent</summary><h4>All selected activity</h4>${equivalents}${laneEquivalent(timeline.lanes, 'project', timezone)}${laneEquivalent(timeline.lanes, 'executor', timezone)}</details>`
+	const guidance = `Goals and limits apply to the selected track for ${escapeHtml(timeline.date)} and its full Monday–Sunday ${escapeHtml(timeline.week)} week, not separate project or executor quotas.`
+	return `<div class="verdict-grid activity-period-grid">${verdictCard('Selected day', timeline.day_period)}${verdictCard('Selected ISO week', timeline.week_period)}</div><p class="guidance">Timeline worked totals follow the Project and Executor filters. ${guidance}</p><ul class="chart-legend"><li><span class="block-swatch" aria-hidden="true"></span>Single-source evidence</li><li><span class="block-swatch concurrent" aria-hidden="true"></span>Concurrent evidence</li><li><span class="block-swatch project" aria-hidden="true"></span>Project lane</li><li><span class="block-swatch executor" aria-hidden="true"></span>Executor lane</li></ul><p class="guidance">Lanes share one clock. Bars are unioned inside a lane, so a project lane and an executor lane that line up vertically describe the same minutes and must not be added.</p><p class="scroll-hint">Scroll the chart horizontally to see the full day.</p><div class="chart-scroll" tabindex="0" role="region" aria-label="Scrollable current-day timeline">${renderGantt(timeline, timezone, asOf)}</div><details><summary>Timeline text equivalent</summary><h4>All selected activity</h4>${equivalents}${laneEquivalent(timeline.lanes, 'project', timezone)}${laneEquivalent(timeline.lanes, 'executor', timezone)}</details>`
 }
 
 function renderTimeline(panel: DashboardReport['timeline'], timezone: string, asOf: string): string {
@@ -403,18 +441,13 @@ function activitySpan(day: DayDetail, timezone: string): string | null {
 /** Inspectable detail for one heatmap cell: the day's verdict, then what it was made of. */
 function dayCard(day: DayDetail, timezone: string): string {
 	const period = day.period
-	const caption =
-		period.status === 'UNDER'
-			? `${formatMinutes(period.difference_minutes)} remaining`
-			: period.status === 'OVER'
-				? `${formatMinutes(period.difference_minutes)} over`
-				: 'target met'
+	const display = periodPresentation(period)
 	const span = activitySpan(day, timezone)
 	const body =
 		period.worked_minutes === 0
 			? '<p class="tip-empty">No working time recorded.</p>'
 			: `<dl class="tip-breakdown"><div><dt>Projects</dt><dd>${breakdownLine(day.projects)}</dd></div><div><dt>Executors</dt><dd>${breakdownLine(day.executors)}</dd></div></dl><p class="tip-meta">${day.interval_count} interval${day.interval_count === 1 ? '' : 's'}${span === null ? '' : ` · ${escapeHtml(span)}`}</p><p class="tip-note">Activity overlaps; never add it up.</p>`
-	return `<p class="tip-date">${escapeHtml(formatCivilDay(day.date))}</p><p class="tip-total"><span class="tip-figure">${formatMinutes(period.worked_minutes)}</span><span class="tip-stamp">${period.status}</span></p><p class="tip-target">Target ${formatMinutes(period.target_minutes)} · ${caption}</p>${body}`
+	return `<p class="tip-date">${escapeHtml(formatCivilDay(day.date))}</p><p class="tip-total"><span class="tip-figure">${formatMinutes(period.worked_minutes)}</span><span class="tip-stamp">${display.label}</span></p><p class="tip-target">${display.policy} · ${display.caption}</p>${body}`
 }
 
 /**
@@ -423,7 +456,7 @@ function dayCard(day: DayDetail, timezone: string): string {
  * timeline. Columns are Monday-started weeks and intensity is quartered against
  * the busiest day. The daily values table carries the same numbers.
  */
-function renderHeatmap(days: readonly DayDetail[], timezone: string, selectedDate?: string): string {
+function renderHeatmap(days: readonly DayDetail[], timezone: string, selectedDate?: string, track: Track = 'all'): string {
 	if (days.length === 0) return ''
 	const first = weekdayIndex(days[0]!.date)
 	if (first === null) return ''
@@ -454,7 +487,7 @@ function renderHeatmap(days: readonly DayDetail[], timezone: string, selectedDat
 			const level = minutes === 0 ? 0 : Math.min(4, Math.ceil((minutes / busiest) * 4))
 			const selected = day.date === selectedDate
 			const inSelectedWeek = selectedWeek !== undefined && isoWeekStart(day.date) === selectedWeek
-			return `<li><button type="button" class="heat-cell heat-${level}${inSelectedWeek ? ' heat-selected-week' : ''}${selected ? ' heat-selected' : ''}" data-timeline-date="${escapeHtml(day.date)}" data-focus-key="timeline:${escapeHtml(day.date)}" aria-pressed="${selected}" aria-label="Inspect ${escapeHtml(formatCivilDay(day.date))} in the activity timeline"></button><div class="heat-tip status-${day.period.status.toLowerCase()}${anchor}" aria-hidden="true">${dayCard(day, timezone)}</div></li>`
+			return `<li><button type="button" class="heat-cell heat-${level}${inSelectedWeek ? ' heat-selected-week' : ''}${selected ? ' heat-selected' : ''}" data-timeline-date="${escapeHtml(day.date)}" data-focus-key="timeline:${escapeHtml(day.date)}" aria-pressed="${selected}" aria-label="Inspect ${escapeHtml(formatCivilDay(day.date))} in the activity timeline"></button><div class="heat-tip status-${periodPresentation(day.period).tone}${anchor}" aria-hidden="true">${dayCard(day, timezone)}</div></li>`
 		})
 		.join('')
 	const monthLabels: string[] = []
@@ -468,11 +501,12 @@ function renderHeatmap(days: readonly DayDetail[], timezone: string, selectedDat
 	const weekdays = ['Mon', '', 'Wed', '', 'Fri', '', '']
 		.map((label) => `<li>${label}</li>`)
 		.join('')
-	const summary = `Calendar heatmap of globally unioned overall working minutes from ${days[0]!.date} to ${days.at(-1)!.date}. Busiest day ${formatMinutes(busiest)}. Every value is listed in the daily values table below.`
-	return `<div class="heatmap"><div class="heatmap-heading"><h3 id="heatmap-title">Overall day-by-day</h3><p class="heatmap-hint">Hover for detail · select a day to inspect its timeline · outlined cells mark the selected week.</p></div><div class="heat-scroll"><div class="heat-board ${density}"><div class="heat-corner"></div><ol class="heat-months" aria-hidden="true">${monthLabels.join('')}</ol><ul class="heat-weekdays" aria-hidden="true">${weekdays}</ul><ol class="heat-grid" aria-label="${escapeHtml(summary)}">${pads}${cells}</ol></div></div><ul class="heat-scale"><li>Less</li><li><span class="heat-swatch heat-0" aria-hidden="true"></span></li><li><span class="heat-swatch heat-1" aria-hidden="true"></span></li><li><span class="heat-swatch heat-2" aria-hidden="true"></span></li><li><span class="heat-swatch heat-3" aria-hidden="true"></span></li><li><span class="heat-swatch heat-4" aria-hidden="true"></span></li><li>More · busiest ${formatMinutes(busiest)}</li></ul></div>`
+	const scope = track === 'all' ? 'Overall' : track === 'work' ? 'Work' : 'Play'
+	const summary = `Calendar heatmap of ${scope.toLowerCase()} minutes with overlaps merged from ${days[0]!.date} to ${days.at(-1)!.date}. Busiest day ${formatMinutes(busiest)}. Every value is listed in the daily values table below.`
+	return `<div class="heatmap"><div class="heatmap-heading"><h3 id="heatmap-title">${scope} day-by-day</h3><p class="heatmap-hint">Hover for detail · select a day to inspect its timeline · outlined cells mark the selected week.</p></div><div class="heat-scroll"><div class="heat-board ${density}"><div class="heat-corner"></div><ol class="heat-months" aria-hidden="true">${monthLabels.join('')}</ol><ul class="heat-weekdays" aria-hidden="true">${weekdays}</ul><ol class="heat-grid" aria-label="${escapeHtml(summary)}">${pads}${cells}</ol></div></div><ul class="heat-scale"><li>Less</li><li><span class="heat-swatch heat-0" aria-hidden="true"></span></li><li><span class="heat-swatch heat-1" aria-hidden="true"></span></li><li><span class="heat-swatch heat-2" aria-hidden="true"></span></li><li><span class="heat-swatch heat-3" aria-hidden="true"></span></li><li><span class="heat-swatch heat-4" aria-hidden="true"></span></li><li>More · busiest ${formatMinutes(busiest)}</li></ul></div>`
 }
 
-function renderTrendData(trend: Trend, timezone: string, selectedDate?: string): string {
+function renderTrendData(trend: Trend, timezone: string, selectedDate?: string, track: Track = 'all'): string {
 	const plotTop = 20
 	const plotBottom = chartHeight - 60
 	const plotLeft = 62
@@ -559,11 +593,11 @@ function renderTrendData(trend: Trend, timezone: string, selectedDate?: string):
 			const detailCells =
 				day === undefined
 					? '<td>No data</td><td>No data</td><td>No data</td><td>No data</td><td>No data</td><td>No data</td>'
-					: `<td>${formatMinutes(day.period.target_minutes)}</td><td>${day.period.status}</td><td>${day.interval_count}</td><td>${escapeHtml(activitySpan(day, timezone) ?? 'No activity')}</td><td>${breakdownText(day.projects)}</td><td>${breakdownText(day.executors)}</td>`
+					: `<td>${periodPresentation(day.period).policy}</td><td>${periodPresentation(day.period).label}</td><td>${day.interval_count}</td><td>${escapeHtml(activitySpan(day, timezone) ?? 'No activity')}</td><td>${breakdownText(day.projects)}</td><td>${breakdownText(day.executors)}</td>`
 			return `<tr><th scope="row">${escapeHtml(date)}</th>${valuesBySeries.map((values) => `<td>${values.has(date) ? formatMinutes(values.get(date)!) : 'No data'}</td>`).join('')}${detailCells}</tr>`
 		})
 		.join('')
-	return `<ul class="chart-legend">${legend}</ul><p class="scroll-hint">Scroll the chart horizontally to see the full range.</p><div class="chart-scroll" tabindex="0" role="region" aria-label="Scrollable daily activity trend"><svg class="trend-chart" viewBox="0 0 ${chartWidth} ${chartHeight}" role="img" aria-labelledby="trend-svg-title trend-svg-desc"><title id="trend-svg-title">Daily activity trend</title><desc id="trend-svg-desc">Separate, non-stacked lines. Series overlap and are not additive. Hover or focus a day to see that day’s value on every line. The labelled dot on each line is its most recent day.</desc>${axes}${dateLabels}${lines}${endpoints}${hoverTargets}</svg></div>${renderHeatmap(trend.days, timezone, selectedDate)}<details><summary>View daily values</summary><p class="guidance">Exact values behind the chart, provided for comparison and as a text alternative. Target, status, intervals, and the activity breakdown describe the globally unioned Overall series; project and executor activity overlap and must not be added.</p><div class="table-scroll"><table><caption>Daily working time by date and series</caption><thead><tr><th scope="col">Date</th>${headings}<th scope="col">Target</th><th scope="col">Status</th><th scope="col">Intervals</th><th scope="col">First–last</th><th scope="col">Project activity</th><th scope="col">Executor activity</th></tr></thead><tbody>${rows}</tbody></table></div></details>`
+	return `<ul class="chart-legend">${legend}</ul><p class="scroll-hint">Scroll the chart horizontally to see the full range.</p><div class="chart-scroll" tabindex="0" role="region" aria-label="Scrollable daily activity trend"><svg class="trend-chart" viewBox="0 0 ${chartWidth} ${chartHeight}" role="img" aria-labelledby="trend-svg-title trend-svg-desc"><title id="trend-svg-title">Daily activity trend</title><desc id="trend-svg-desc">Separate, non-stacked lines. Series overlap and are not additive. Hover or focus a day to see that day’s value on every line. The labelled dot on each line is its most recent day.</desc>${axes}${dateLabels}${lines}${endpoints}${hoverTargets}</svg></div>${renderHeatmap(trend.days, timezone, selectedDate, track)}<details><summary>View daily values</summary><p class="guidance">Exact values behind the chart, provided for comparison and as a text alternative. Day details describe the selected track with overlaps merged. Work has a goal; Play and All have limits. Project and executor activity overlap and must not be added.</p><div class="table-scroll"><table><caption>Daily working time by date and series</caption><thead><tr><th scope="col">Date</th>${headings}<th scope="col">Goal or limits</th><th scope="col">Status</th><th scope="col">Intervals</th><th scope="col">First–last</th><th scope="col">Project activity</th><th scope="col">Executor activity</th></tr></thead><tbody>${rows}</tbody></table></div></details>`
 }
 
 function renderTrend(
@@ -572,7 +606,7 @@ function renderTrend(
 	timezone: string,
 	selectedDate?: string,
 ): string {
-	return `<section aria-labelledby="trend-title"><div class="section-heading"><div><p class="eyebrow">Independent, non-stacked series</p><h2 id="trend-title">Activity trend</h2></div>${renderRange(selection)}</div>${panelNotice(panel)}${panel.state === 'unavailable' ? '' : renderTrendData(panel.data, timezone, selectedDate)}</section>`
+	return `<section aria-labelledby="trend-title"><div class="section-heading"><div><p class="eyebrow">Independent, non-stacked series</p><h2 id="trend-title">Activity trend</h2></div>${renderRange(selection)}</div>${panelNotice(panel)}${panel.state === 'unavailable' ? '' : renderTrendData(panel.data, timezone, selectedDate, selection.track)}</section>`
 }
 
 /* ---------- Executors ---------- */
@@ -601,7 +635,12 @@ export function renderDashboardContent(
 		(panel) => panel.state !== 'ready',
 	)
 	const selectedDate = effectiveTimelineDate(report, selection)
-	return `<header class="masthead"><div><p class="eyebrow">Personal dashboard</p><div class="wordmark"><h1>Cukup</h1><span class="wordmark-tag">${escapeHtml(report.timezone)}</span></div></div><div class="freshness ${partial ? 'freshness-partial' : ''}"><span class="freshness-mark" aria-hidden="true"></span><span>${partial ? '<strong>Partial report.</strong> ' : ''}Authoritative as of <time datetime="${escapeHtml(report.as_of)}">${formatTimestamp(report.as_of, report.timezone)}</time></span><span class="sr-only" role="status" aria-live="polite">${refreshing ? 'Refreshing dashboard' : partial ? 'Dashboard has stale or unavailable panels' : 'Dashboard up to date'}</span></div></header><main>${renderOverall(report.overall)}${renderTrend(report.trend, selection, report.timezone, selectedDate)}${renderFilters(report, selection, refreshing, filtersDisabled)}${renderTimeline(report.timeline, report.timezone, report.as_of)}${renderExecutors(report.executors, report.timezone)}</main><footer class="page-footer"><p>Cukup reports Working Time, never prompts or content. Filtered activity is non-additive; timeline targets are overall configured benchmarks, not filtered quotas.</p></footer>`
+	const track = selection.track ?? 'all'
+	const matchingTrack = track === (report.track ?? 'all')
+	const panels = matchingTrack
+		? `${renderOverall(report.overall, track)}${renderTrend(report.trend, selection, report.timezone, selectedDate)}${renderFilters(report, selection, refreshing, filtersDisabled)}${renderTimeline(report.timeline, report.timezone, report.as_of)}${renderExecutors(report.executors, report.timezone)}`
+		: `<div class="panel-notice" role="status" aria-busy="${refreshing}">${refreshing ? 'Loading selected track…' : 'Selected track could not be loaded. <button type="button" class="button" data-action="refresh" data-focus-key="retry-track">Retry</button>'}</div>`
+	return `<header class="masthead"><div><p class="eyebrow">Personal dashboard</p><div class="wordmark"><h1>Cukup</h1><span class="wordmark-tag">${escapeHtml(report.timezone)}</span></div></div><div class="freshness ${partial ? 'freshness-partial' : ''}"><span class="freshness-mark" aria-hidden="true"></span><span>${partial ? '<strong>Partial report.</strong> ' : ''}Authoritative as of <time datetime="${escapeHtml(report.as_of)}">${formatTimestamp(report.as_of, report.timezone)}</time></span><span class="sr-only" role="status" aria-live="polite">${refreshing ? 'Refreshing dashboard' : partial ? 'Dashboard has stale or unavailable panels' : 'Dashboard up to date'}</span></div></header><main>${renderTrackSelector(track)}${panels}</main><footer class="page-footer"><p>Cukup reports Working Time, never prompts or content. Work and Play can overlap; their totals must not be added. Work has a weekday goal. Play is optional, including on weekends.</p></footer>`
 }
 
 export function renderDashboardDocument(

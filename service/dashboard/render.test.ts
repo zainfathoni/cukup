@@ -1,11 +1,67 @@
 import { describe, expect, test } from 'bun:test'
 import { mockDashboardReport } from './fixture.ts'
 import { renderDashboardContent, renderDashboardDocument } from './render.ts'
+import { trackPeriod } from './report-builder.ts'
 import type { DashboardSelection } from './report.ts'
 
 const selection: DashboardSelection = { projects: [], executors: [], range: { preset: 7 } }
 
 describe('dashboard rendering', () => {
+	test('renders one native radio selection, with All as the default', () => {
+		const html = renderDashboardContent(mockDashboardReport, selection)
+		expect(html.match(/type="radio" name="track"/g)).toHaveLength(3)
+		expect(html).toContain('data-focus-key="track:all" checked')
+		expect(html).not.toContain('data-focus-key="track:work" checked')
+		expect(html).not.toContain('data-focus-key="track:play" checked')
+		expect(html).toContain('aria-describedby="track-description"')
+	})
+
+	test('renders Work goals and Play allowances across summaries, timeline, and heatmap', () => {
+		for (const track of ['work', 'play'] as const) {
+			const report = structuredClone(mockDashboardReport)
+			report.track = track
+			if (report.overall.state === 'unavailable' || report.timeline.state === 'unavailable' || report.trend.state === 'unavailable') throw new Error('Expected ready panels')
+			const monday = { year: 2026, month: 8, day: 31 }
+			report.overall.data = { today: trackPeriod(track, 72, monday, new Map()), week: trackPeriod(track, 123, monday, new Map(), 7) }
+			report.timeline.data.day_period = report.overall.data.today
+			report.timeline.data.week_period = report.overall.data.week
+			for (const day of report.trend.data.days) {
+				day.period = trackPeriod(track, day.period.worked_minutes, { year: 2026, month: 8, day: Number(day.date.slice(-2)) }, new Map())
+			}
+			const html = renderDashboardContent(report, { ...selection, track })
+			expect(html).toContain(`data-focus-key="track:${track}" checked`)
+			expect(html).toContain(track === 'work' ? 'Work day-by-day' : 'Play day-by-day')
+			expect(html).toContain(track === 'work' ? 'Goal 8h 0m' : 'Soft limit 1h 0m · upper limit 2h 0m')
+			expect(html).toContain(track === 'work' ? '6h 48m remaining' : '12m past the soft limit')
+			expect(html).toContain(track === 'work' ? 'NO GOAL' : 'TOLERANCE')
+			expect(html).toContain('verdict-meter')
+			expect(html).not.toContain('undefined')
+		}
+	})
+
+	test('treats Work beyond its goal as met, and distinguishes unplanned weekend work', () => {
+		for (const [day, minutes, label] of [[31, 481, 'GOAL MET'], [30, 0, 'NO GOAL'], [30, 20, 'UNPLANNED']] as const) {
+			const report = structuredClone(mockDashboardReport)
+			report.track = 'work'
+			if (report.overall.state === 'unavailable') throw new Error('Expected summary')
+			report.overall.data.today = trackPeriod('work', minutes, { year: 2026, month: 8, day }, new Map())
+			const html = renderDashboardContent(report, { ...selection, track: 'work' })
+			expect(html).toContain(label)
+			expect(html).not.toContain('over target')
+		}
+	})
+
+	test('does not present the previous track values as the selected track during loading or failure', () => {
+		for (const refreshing of [true, false]) {
+			const html = renderDashboardContent(mockDashboardReport, { ...selection, track: 'work' }, refreshing)
+			expect(html).toContain(refreshing ? 'Loading selected track' : 'Selected track could not be loaded')
+			expect(html).not.toContain('verdict-figure')
+			if (refreshing) expect(html).not.toContain('data-action="refresh"')
+			else expect(html).toContain('data-action="refresh"')
+			expect(html).toContain('data-focus-key="track:work" checked')
+		}
+	})
+
 	test('renders the semantic hierarchy, accessible chart equivalents, and non-additive guidance', () => {
 		const html = renderDashboardDocument(mockDashboardReport, selection)
 		expect(html).toStartWith('<!doctype html><html lang="en">')
@@ -27,9 +83,9 @@ describe('dashboard rendering', () => {
 		expect(html).toContain('Exact values behind the chart, provided for comparison and as a text alternative.')
 		expect(html).toContain('<thead><tr><th scope="col">Date</th>')
 		expect(html).toContain(
-			'<tr><th scope="row">2026-08-25</th><td>6h 50m</td><td>2h 0m</td><td>8h 0m</td><td>UNDER</td><td>4</td><td>08:30–18:10</td>',
+			'<tr><th scope="row">2026-08-25</th><td>6h 50m</td><td>2h 0m</td><td>Soft limit 9h 0m · upper limit 10h 0m</td><td>WITHIN LIMIT</td><td>4</td><td>08:30–18:10</td>',
 		)
-		expect(html).toContain('<th scope="col">Target</th><th scope="col">Status</th>')
+		expect(html).toContain('<th scope="col">Goal or limits</th><th scope="col">Status</th>')
 		expect(html).toContain('class="chart-grid"')
 		expect(html).toContain('aria-label="Scrollable daily activity trend"')
 		expect(html).toContain('class="trend-hover" tabindex="0" aria-label="2026-08-25: overall Overall working time: 6h 50m, project cukup: 2h 0m"')
@@ -56,10 +112,10 @@ describe('dashboard rendering', () => {
 		expect(html).toContain('class="verdict-grid activity-period-grid"')
 		expect(html).toContain('<span>Selected day</span>')
 		expect(html).toContain('<span class="verdict-figure">6h 20m</span>')
-		expect(html).toContain('Selected day: 6h 20m worked against target 8h 0m')
-		expect(html).toContain('<p class="verdict-caption">1h 40m remaining</p>')
+		expect(html).toContain('Selected day: 6h 20m recorded; Soft limit 9h 0m · upper limit 10h 0m')
+		expect(html).toContain('<p class="verdict-caption">2h 40m before the soft limit</p>')
 		expect(html).toContain('<span>Selected ISO week</span>')
-		expect(html).toContain('Selected ISO week: 6h 20m worked against target 40h 0m')
+		expect(html).toContain('Selected ISO week: 6h 20m recorded; Soft limit 47h 0m · upper limit 54h 0m')
 		expect(html).toContain('its full Monday–Sunday 2026-W36 week, not separate project or executor quotas')
 		expect(html).not.toContain('Time by project and executor')
 		expect(html).not.toContain('period-breakdown')
@@ -81,10 +137,10 @@ describe('dashboard rendering', () => {
 		expect(html).toContain('class="heat-cell heat-3 heat-selected-week heat-selected" data-timeline-date="2026-08-31"')
 		expect(html.match(/heat-selected-week/g)).toHaveLength(1)
 		expect(html).toContain('outlined cells mark the selected week')
-		expect(html).toContain('class="heat-tip status-under tip-start"')
+		expect(html).toContain('class="heat-tip status-complete tip-start"')
 		expect(html).toContain('<p class="tip-date">Mon, Aug 31, 2026</p>')
-		expect(html).toContain('<span class="tip-figure">6h 20m</span><span class="tip-stamp">UNDER</span>')
-		expect(html).toContain('Target 8h 0m · 1h 40m remaining')
+		expect(html).toContain('<span class="tip-figure">6h 20m</span><span class="tip-stamp">WITHIN LIMIT</span>')
+		expect(html).toContain('Soft limit 9h 0m · upper limit 10h 0m · 2h 40m before the soft limit')
 		expect(html).toContain('<dt>Projects</dt><dd>cukup 4h 20m · personal-site 1h 36m · deep-work')
 		expect(html).toContain('7 intervals · 08:15–16:30')
 		expect(html).toContain('Activity overlaps; never add it up.')
@@ -103,16 +159,18 @@ describe('dashboard rendering', () => {
 		report.timeline.data.week = '2026-W35'
 		report.timeline.data.week_minutes = 0
 		report.timeline.data.day_period = {
-			status: 'COMPLETE',
+			status: 'WITHIN',
 			worked_minutes: 0,
-			target_minutes: 0,
-			difference_minutes: 0,
+			target_minutes: 60,
+			upper_limit_minutes: 120,
+			difference_minutes: 60,
 		}
 		report.timeline.data.week_period = {
-			status: 'UNDER',
+			status: 'WITHIN',
 			worked_minutes: 0,
-			target_minutes: 2_400,
-			difference_minutes: 2_400,
+			target_minutes: 2_820,
+			upper_limit_minutes: 3_240,
+			difference_minutes: 2_820,
 		}
 		report.timeline.data.intervals = []
 		report.timeline.data.lanes = []
@@ -120,27 +178,28 @@ describe('dashboard rendering', () => {
 		expect(html).toContain('class="heat-cell heat-3 heat-selected-week heat-selected" data-timeline-date="2026-08-29"')
 		expect(html.match(/heat-selected-week/g)).toHaveLength(6)
 		expect(html).toContain('<span>Selected day</span>')
-		expect(html).toContain('<p class="verdict-caption">Target met</p>')
+		expect(html).toContain('<p class="verdict-caption">1h 0m before the soft limit</p>')
 	})
 
-	test('shows over-target status and duration for a selected historical week', () => {
+	test('shows over-limit status and duration for a selected historical week', () => {
 		const report = structuredClone(mockDashboardReport)
 		if (report.timeline.state === 'unavailable') throw new Error('Expected timeline')
 		report.timeline.data.date = '2026-08-28'
 		report.timeline.data.week = '2026-W35'
 		report.timeline.data.week_period = {
-			status: 'OVER',
+			status: 'EXCEEDED',
 			worked_minutes: 4_264,
-			target_minutes: 2_400,
-			difference_minutes: 1_864,
+			target_minutes: 2_820,
+			upper_limit_minutes: 3_240,
+			difference_minutes: 1_024,
 		}
 		const html = renderDashboardContent(report, {
 			...selection,
 			timeline_date: '2026-08-28',
 		})
 		expect(html).toContain('<span class="verdict-figure">71h 4m</span>')
-		expect(html).toContain('Selected ISO week: 71h 4m worked against target 40h 0m')
-		expect(html).toContain('<p class="verdict-caption">31h 4m over target</p>')
+		expect(html).toContain('Selected ISO week: 71h 4m recorded; Soft limit 47h 0m · upper limit 54h 0m')
+		expect(html).toContain('<p class="verdict-caption">17h 4m over the upper limit</p>')
 	})
 
 	test('renders native keyboard controls and keeps filter state out of resource URLs', () => {

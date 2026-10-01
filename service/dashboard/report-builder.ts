@@ -1,10 +1,10 @@
 import {
 	addDays,
+	buildGlobalIntervals,
 	buildSessionIntervals,
 	localDateAt,
 	periodStatus,
 	startOfZonedDay,
-	summarizeWork,
 	targetMinutesFor,
 	unionIntervals,
 	type CivilDate,
@@ -15,6 +15,7 @@ import { SERVICE_TIMEZONE } from '../config.ts'
 import type { AttributedStoredWorkEvent, StoredWorkEvent } from '../types.ts'
 import type {
 	ActivityInterval,
+	ActivityPeriod,
 	DashboardReport,
 	DashboardSelection,
 	DayBreakdown,
@@ -23,6 +24,7 @@ import type {
 	Panel,
 	Timeline,
 	TimelineLane,
+	Track,
 	Trend,
 	TrendSeries,
 } from './report.ts'
@@ -66,11 +68,16 @@ export function parseDashboardSelection(
 ): DashboardSelection | undefined {
 	if (
 		!isRecord(value) ||
-		(!hasExactKeys(value, ['projects', 'executors', 'range']) &&
-			!hasExactKeys(value, ['projects', 'executors', 'range', 'timeline_date']))
+		!hasExactKeys(value, [
+			'projects', 'executors', 'range',
+			...('timeline_date' in value ? ['timeline_date'] : []),
+			...('track' in value ? ['track'] : []),
+		])
 	) {
 		return undefined
 	}
+	if (value.track !== undefined && value.track !== 'work' && value.track !== 'play' && value.track !== 'all') return undefined
+	const selectedTrack = value.track === undefined ? {} : { track: value.track as Track }
 	const projects = parseSelectionValues(value.projects, new Set(labels.projects))
 	const executors = parseSelectionValues(value.executors, new Set(labels.executors))
 	if (!projects || !executors || !isRecord(value.range)) return undefined
@@ -82,7 +89,7 @@ export function parseDashboardSelection(
 	const range = value.range
 	if (range.preset === 7 || range.preset === 30 || range.preset === 90) {
 		if (!hasExactKeys(range, ['preset'])) return undefined
-		return { projects, executors, ...selectedDate, range: { preset: range.preset } }
+		return { projects, executors, ...selectedDate, ...selectedTrack, range: { preset: range.preset } }
 	}
 	if (
 		range.preset !== 'custom' ||
@@ -101,6 +108,7 @@ export function parseDashboardSelection(
 		projects,
 		executors,
 		...selectedDate,
+		...selectedTrack,
 		range: {
 			preset: 'custom',
 			start_date: range.start_date,
@@ -115,6 +123,7 @@ export function buildDashboardReport(
 	nowMs: number,
 ): DashboardReport {
 	const asOf = new Date(nowMs).toISOString()
+	const track = selection.track ?? 'all'
 	let labels: DashboardLabels = { projects: [], executors: [] }
 	try {
 		labels = availableDashboardLabelsForWeek(store.attributedEvents(), selection, nowMs)
@@ -123,6 +132,7 @@ export function buildDashboardReport(
 	}
 	return {
 		schema_version: 1,
+		track,
 		as_of: asOf,
 		timezone: SERVICE_TIMEZONE,
 		timeline_date:
@@ -130,12 +140,26 @@ export function buildDashboardReport(
 		available_projects: labels.projects,
 		available_executors: labels.executors,
 		overall: buildPanel('Working-time summary is unavailable.', () => {
-			const summary = summarizeWork(store.events(), nowMs, undefined, store.targetOverrides())
-			return { today: summary.daily, week: summary.weekly }
+			const today = localDateAt(nowMs, SERVICE_TIMEZONE)
+			const weekStart = addDays(today, -mondayOffset(today))
+			const intervals = track === 'all'
+				? buildGlobalIntervals(store.events(), nowMs)
+				: unionIntervals(attributedIntervals(store.attributedEvents(), nowMs, track))
+			const minutesSince = (date: CivilDate) => {
+				const startMs = startOfZonedDay(date, SERVICE_TIMEZONE)
+				return totalMinutes(intervals.map((interval) => ({
+					startMs: Math.max(startMs, interval.startMs),
+					endMs: Math.max(startMs, interval.endMs),
+				})))
+			}
+			return {
+				today: trackPeriod(track, minutesSince(today), today, store.targetOverrides()),
+				week: trackPeriod(track, minutesSince(weekStart), weekStart, store.targetOverrides(), 7),
+			}
 		}),
 		timeline: buildPanel('Activity timeline is unavailable.', () =>
 			buildTimeline(
-				attributedIntervals(store.attributedEvents(), nowMs),
+				attributedIntervals(store.attributedEvents(), nowMs, track),
 				selection,
 				nowMs,
 				store.targetOverrides(),
@@ -143,7 +167,7 @@ export function buildDashboardReport(
 		),
 		trend: buildPanel('Activity trend is unavailable.', () =>
 			buildTrend(
-				attributedIntervals(store.attributedEvents(), nowMs),
+				attributedIntervals(store.attributedEvents(), nowMs, track),
 				selection,
 				nowMs,
 				store.targetOverrides(),
@@ -152,6 +176,32 @@ export function buildDashboardReport(
 		executors: buildPanel('Executor details are unavailable.', () =>
 			buildExecutors(store.attributedEvents(), store.listBearerMetadata()),
 		),
+	}
+}
+
+/** Work is a goal. Play and All are limits, not durations to reach. */
+export function trackPeriod(
+	track: Track,
+	minutes: number,
+	date: CivilDate,
+	overrides: ReadonlyMap<string, number>,
+	days: 1 | 7 = 1,
+): ActivityPeriod {
+	let workTarget = 0
+	if (track !== 'play') {
+		for (let offset = 0; offset < days; offset += 1) {
+			workTarget += targetMinutesFor(addDays(date, offset), overrides)
+		}
+	}
+	if (track === 'work') return periodStatus(minutes * 60_000, workTarget * 60_000)
+	const softLimit = workTarget + days * 60
+	const upperLimit = workTarget + days * 120
+	return {
+		status: minutes > upperLimit ? 'EXCEEDED' : minutes > softLimit ? 'TOLERANCE' : 'WITHIN',
+		worked_minutes: minutes,
+		target_minutes: softLimit,
+		upper_limit_minutes: upperLimit,
+		difference_minutes: Math.abs(minutes - (minutes > upperLimit ? upperLimit : softLimit)),
 	}
 }
 
@@ -165,7 +215,7 @@ function availableDashboardLabelsForWeek(
 	const weekStart = addDays(date, -mondayOffset(date))
 	const startMs = startOfZonedDay(weekStart, SERVICE_TIMEZONE)
 	const endMs = Math.min(startOfZonedDay(addDays(weekStart, 7), SERVICE_TIMEZONE), nowMs)
-	const intervals = clipAttributedIntervals(attributedIntervals(events, nowMs), startMs, endMs)
+	const intervals = clipAttributedIntervals(attributedIntervals(events, nowMs, selection.track), startMs, endMs)
 	return {
 		projects: [...new Set(intervals.map((interval) => interval.project))].sort(labelOrder),
 		executors: [...new Set(intervals.map((interval) => interval.executor))].sort(labelOrder),
@@ -175,8 +225,12 @@ function availableDashboardLabelsForWeek(
 function attributedIntervals(
 	events: readonly AttributedStoredWorkEvent[],
 	nowMs: number,
+	track: Track = 'all',
 ): AttributedInterval[] {
-	return buildSessionIntervals(events, nowMs).map((interval) => ({
+	return buildSessionIntervals(events, nowMs).filter((interval) => {
+		const work = interval.start.projectSlug === 'bta' || interval.start.projectSlug === 'bta-notes'
+		return track === 'all' || (track === 'work' ? work : !work)
+	}).map((interval) => ({
 		...interval,
 		project: interval.start.projectSlug ?? 'Unassigned',
 		executor: interval.start.executorLabel,
@@ -203,24 +257,18 @@ function buildTimeline(
 	const selectedWeek = clipAttributedIntervals(selectedIntervals, weekStartMs, weekEndMs)
 	const minutes = totalMinutes(unionIntervals(selected))
 	const weekMinutes = totalMinutes(unionIntervals(selectedWeek))
-	let weekTargetMinutes = 0
-	for (let offset = 0; offset < 7; offset += 1) {
-		weekTargetMinutes += targetMinutesFor(addDays(weekStart, offset), targetOverrides)
-	}
 	const dayLanes = [
 		...timelineLanes('project', selected, (interval) => interval.project),
 		...timelineLanes('executor', selected, (interval) => interval.executor),
 	]
+	const track = selection.track ?? 'all'
 	return {
 		date: civilDateString(date),
 		week: isoWeek(date),
 		minutes,
 		week_minutes: weekMinutes,
-		day_period: periodStatus(
-			minutes * 60_000,
-			targetMinutesFor(date, targetOverrides) * 60_000,
-		),
-		week_period: periodStatus(weekMinutes * 60_000, weekTargetMinutes * 60_000),
+		day_period: trackPeriod(track, minutes, date, targetOverrides),
+		week_period: trackPeriod(track, weekMinutes, weekStart, targetOverrides, 7),
 		intervals: concurrencyIntervals(selected),
 		lanes: dayLanes,
 	}
@@ -322,7 +370,7 @@ function buildTrend(
 	}
 	const days = dayBounds(dates)
 	const series: TrendSeries[] = [
-		trendSeries('overall', 'Overall working time', intervals, dates, days),
+		trendSeries('overall', selection.track === 'work' ? 'Work activity' : selection.track === 'play' ? 'Play activity' : 'Overall working time', intervals, dates, days),
 	]
 	for (const project of selection.projects) {
 		series.push(
@@ -369,7 +417,7 @@ function buildTrend(
 		start_date: civilDateString(range.start),
 		end_date: civilDateString(range.end),
 		series,
-		days: buildDayDetails(intervals, dates, days, targetOverrides),
+		days: buildDayDetails(intervals, dates, days, targetOverrides, selection.track),
 	}
 }
 
@@ -401,15 +449,15 @@ function trendSeries(
 }
 
 /**
- * Globally unioned detail behind every heatmap cell. These values ignore the
- * filter selection for the same reason the Overall panel does: they describe
- * Overall Working Time, which filters never alter.
+ * Unioned detail for the selected track. Project and executor filters do not
+ * change these values or the track summary.
  */
 function buildDayDetails(
 	intervals: readonly AttributedInterval[],
 	dates: readonly CivilDate[],
 	days: readonly Interval[],
 	targetOverrides: ReadonlyMap<string, number>,
+	track: Track = 'all',
 ): DayDetail[] {
 	const overall = dayStatistics(unionIntervals(intervals), days)
 	const projects = breakdownByDay(intervals, days, (interval) => interval.project)
@@ -418,10 +466,7 @@ function buildDayDetails(
 		const statistics = overall[index]!
 		return {
 			date: civilDateString(date),
-			period: periodStatus(
-				statistics.minutes * 60_000,
-				targetMinutesFor(date, targetOverrides) * 60_000,
-			),
+			period: trackPeriod(track, statistics.minutes, date, targetOverrides),
 			interval_count: statistics.count,
 			first_activity_at: statistics.firstMs === null ? null : new Date(statistics.firstMs).toISOString(),
 			last_activity_at: statistics.lastMs === null ? null : new Date(statistics.lastMs).toISOString(),

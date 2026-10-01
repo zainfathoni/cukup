@@ -4,6 +4,7 @@ import {
 	availableDashboardLabels,
 	buildDashboardReport,
 	parseDashboardSelection,
+	trackPeriod,
 	type DashboardReportStore,
 } from './report-builder.ts'
 import type { DashboardSelection, TimelineLane, TrendSeries } from './report.ts'
@@ -130,6 +131,19 @@ function laneUnionMinutes(lanes: readonly TimelineLane[]): number {
 }
 
 describe('dashboard selection validation', () => {
+	test('accepts the three tracks and keeps omitted track compatible with All', () => {
+		const labels = availableDashboardLabels(fixture().store)
+		const base: DashboardSelection = { projects: [], executors: [], range: { preset: 7 } }
+		for (const track of ['work', 'play', 'all'] as const) {
+			expect(parseDashboardSelection({ ...base, track }, labels)).toEqual({ ...base, track })
+		}
+		for (const track of ['', 'WORK', 'unknown', null, [], true]) {
+			expect(parseDashboardSelection({ ...base, track }, labels)).toBeUndefined()
+		}
+		expect(parseDashboardSelection(base, labels)).toEqual(base)
+		expect(parseDashboardSelection({ ...base, track: 'all', extra: true }, labels)).toBeUndefined()
+	})
+
 	test('accepts only known labels and exact 7/30/90 or inclusive custom ranges up to 366 days', () => {
 		const labels = availableDashboardLabels(fixture().store)
 		expect(labels.projects).toContain('Unassigned')
@@ -184,7 +198,141 @@ describe('dashboard selection validation', () => {
 	})
 })
 
+describe('track policy', () => {
+	const monday = { year: 2026, month: 8, day: 31 }
+	const none = new Map<string, number>()
+
+	test('uses weekday Work goals and daily Play allowances on all seven days', () => {
+		for (const day of [24, 25, 26, 27, 28, 29, 30]) {
+			const date = { year: 2026, month: 8, day }
+			const work = day < 29 ? 480 : 0
+			expect(trackPeriod('work', 0, date, none).target_minutes).toBe(work)
+			expect(trackPeriod('play', 0, date, none)).toMatchObject({ status: 'WITHIN', target_minutes: 60, upper_limit_minutes: 120 })
+			expect(trackPeriod('all', 0, date, none)).toMatchObject({ status: 'WITHIN', target_minutes: work + 60, upper_limit_minutes: work + 120 })
+		}
+	})
+
+	test('changes limit status only after each boundary, with no minimum to reach', () => {
+		for (const [track, offset] of [['play', 0], ['all', 480]] as const) {
+			for (const [minutes, status, difference] of [
+				[0, 'WITHIN', 60], [59, 'WITHIN', 1], [60, 'WITHIN', 0],
+				[61, 'TOLERANCE', 1], [120, 'TOLERANCE', 60], [121, 'EXCEEDED', 1],
+			] as const) {
+				expect(trackPeriod(track, offset + minutes, monday, none)).toEqual({
+					status, worked_minutes: offset + minutes, target_minutes: offset + 60,
+					upper_limit_minutes: offset + 120, difference_minutes: difference,
+				})
+			}
+		}
+		expect(trackPeriod('all', 0, monday, none).status).toBe('WITHIN')
+		for (const [minutes, status] of [[479, 'UNDER'], [480, 'COMPLETE'], [481, 'OVER']] as const) {
+			expect(trackPeriod('work', minutes, monday, none).status).toBe(status)
+		}
+	})
+
+	test('sums seven daily allowances and applies Work overrides without reducing Play', () => {
+		expect(trackPeriod('work', 0, monday, none, 7).target_minutes).toBe(2400)
+		expect(trackPeriod('play', 0, monday, none, 7)).toMatchObject({ target_minutes: 420, upper_limit_minutes: 840 })
+		expect(trackPeriod('all', 0, monday, none, 7)).toMatchObject({ target_minutes: 2820, upper_limit_minutes: 3240 })
+		for (const [goal, soft, upper] of [[0, 60, 120], [240, 300, 360]] as const) {
+			const overrides = new Map([['2026-08-31', goal]])
+			expect(trackPeriod('work', 0, monday, overrides).target_minutes).toBe(goal)
+			expect(trackPeriod('all', 0, monday, overrides)).toMatchObject({ target_minutes: soft, upper_limit_minutes: upper })
+			expect(trackPeriod('play', 0, monday, overrides)).toMatchObject({ target_minutes: 60, upper_limit_minutes: 120 })
+		}
+	})
+})
+
 describe('dashboard report aggregation', () => {
+	test('does not let Play fill a Work shortfall or weekly headroom hide a daily limit breach', () => {
+		const { store, events } = fixture()
+		const base = Date.parse('2026-08-31T01:00:00Z')
+		events.splice(0, events.length,
+			...session({ index: 1, source: 'work', project: 'bta', executor: 'machine-a', start: base, end: base + 405 * minute }),
+			...session({ index: 2, source: 'play', project: 'cukup', executor: 'machine-a', start: base + 420 * minute, end: base + 525 * minute }),
+		)
+		const evening = Date.parse('2026-08-31T14:00:00Z')
+		for (const [track, minutes, status, target, difference] of [
+			['work', 420, 'UNDER', 480, 60],
+			['play', 120, 'TOLERANCE', 60, 60],
+			['all', 540, 'WITHIN', 540, 0],
+		] as const) {
+			const report = buildDashboardReport(store, { track, projects: [], executors: [], range: { preset: 7 } }, evening)
+			if (report.overall.state === 'unavailable') throw new Error('Expected summary')
+			expect(report.overall.data.today).toMatchObject({ worked_minutes: minutes, status, target_minutes: target, difference_minutes: difference })
+		}
+		// One extra minute exceeds today's Play limit even with room in the week.
+		const end = events.at(-1)!
+		end.occurredAtMs += minute
+		end.occurredAt = new Date(end.occurredAtMs).toISOString()
+		const play = buildDashboardReport(store, { track: 'play', projects: [], executors: [], range: { preset: 7 } }, evening)
+		if (play.overall.state === 'unavailable' || play.trend.state === 'unavailable') throw new Error('Expected panels')
+		expect(play.overall.data.today.status).toBe('EXCEEDED')
+		expect(play.overall.data.week.status).toBe('WITHIN')
+		expect(play.trend.data.days.at(-1)!.period.status).toBe('EXCEEDED')
+	})
+
+	test('partitions sessions by exact start project before union, with Unassigned in Play', () => {
+		const { store, events } = fixture()
+		for (const event of events) {
+			if (event.sourceInstance === 'source-a') event.projectSlug = 'bta'
+			if (event.sourceInstance === 'source-b') event.projectSlug = 'bta-notes'
+			if (event.sourceInstance === 'source-c') event.projectSlug = 'bta-notes-extra'
+		}
+		// Attribution belongs to the start, even if an end has a different label.
+		events.find((event) => event.sourceInstance === 'source-a' && event.kind === 'agent.end')!.projectSlug = 'other'
+		const base = Date.parse('2026-08-31T01:00:00.000Z')
+		events.push(...session({ index: 5, source: 'unassigned', executor: 'machine-a', start: base + 120 * minute, end: base + 140 * minute }))
+		const selection: DashboardSelection = { projects: [], executors: [], range: { preset: 7 } }
+		// Includes the 15-minute idle grace: Work [0,105], Play [45,90] + [120,155].
+		for (const [track, minutes, projects] of [
+			['work', 105, ['bta', 'bta-notes']],
+			['play', 80, ['bta-notes-extra', 'Unassigned']],
+			['all', 140, ['bta', 'bta-notes', 'bta-notes-extra', 'Unassigned']],
+		] as const) {
+			const report = buildDashboardReport(store, { ...selection, track }, now)
+			if (report.overall.state === 'unavailable' || report.timeline.state === 'unavailable' || report.trend.state === 'unavailable') throw new Error('Expected ready panels')
+			expect(report.track).toBe(track)
+			expect(report.available_projects).toEqual([...projects])
+			expect(report.overall.data.today.worked_minutes).toBe(minutes)
+			expect(report.overall.data.week.worked_minutes).toBe(minutes)
+			expect(report.timeline.data.minutes).toBe(minutes)
+			expect(report.timeline.data.week_minutes).toBe(minutes)
+			expect(report.trend.data.series[0]!.points.at(-1)!.minutes).toBe(minutes)
+			expect(report.trend.data.days.at(-1)!.period.worked_minutes).toBe(minutes)
+			for (const period of [report.overall.data.today, report.overall.data.week, report.timeline.data.day_period, report.timeline.data.week_period, report.trend.data.days.at(-1)!.period]) {
+				expect(period).toHaveProperty('target_minutes')
+				if (track === 'work') expect(period).not.toHaveProperty('upper_limit_minutes')
+				else expect(period).toHaveProperty('upper_limit_minutes')
+			}
+			const sunday = report.trend.data.days.find((day) => day.date === '2026-08-30')!
+			expect(sunday.period.worked_minutes).toBe(track === 'work' ? 0 : 20)
+		}
+		expect(buildDashboardReport(store, selection, now)).toEqual(buildDashboardReport(store, { ...selection, track: 'all' }, now))
+		const filtered = buildDashboardReport(store, { ...selection, track: 'work', projects: ['bta'], executors: ['machine-a'] }, now)
+		if (filtered.overall.state === 'unavailable' || filtered.timeline.state === 'unavailable') throw new Error('Expected ready panels')
+		expect(filtered.overall.data.today.worked_minutes).toBe(105)
+		expect(filtered.timeline.data.minutes).toBe(75)
+	})
+
+	test('clips track time at Jakarta midnight and Monday, including sessions that cross the boundary', () => {
+		const { store, events } = fixture()
+		events.splice(0, events.length, ...session({
+			index: 1, source: 'boundary', project: 'bta', executor: 'machine-a',
+			start: Date.parse('2026-08-30T16:50:00Z'), end: Date.parse('2026-08-30T17:05:00Z'),
+		}))
+		for (const [track, today, sunday] of [['work', 20, 10], ['play', 0, 0]] as const) {
+			const report = buildDashboardReport(store, { track, projects: [], executors: [], timeline_date: '2026-08-30', range: { preset: 7 } }, now)
+			if (report.overall.state === 'unavailable' || report.timeline.state === 'unavailable' || report.trend.state === 'unavailable') throw new Error('Expected ready panels')
+			expect(report.overall.data).toMatchObject({ today: { worked_minutes: today }, week: { worked_minutes: today } })
+			expect(report.timeline.data.minutes).toBe(sunday)
+			expect(report.timeline.data.week_minutes).toBe(sunday)
+			expect(report.trend.data.days.at(-1)!.period).toMatchObject({ worked_minutes: today })
+			expect(report.timeline.data.day_period.target_minutes).toBe(track === 'work' ? 0 : 60)
+			expect(report.overall.data.today.target_minutes).toBe(track === 'work' ? 480 : 60)
+		}
+	})
+
 	test('keeps global targets and trend globally unioned while OR/AND selections union underlying intervals', () => {
 		const selection: DashboardSelection = {
 			projects: ['alpha', 'beta'],
@@ -195,7 +343,7 @@ describe('dashboard report aggregation', () => {
 		expect(report.overall.state).toBe('ready')
 		if (report.overall.state === 'unavailable') throw new Error('Expected overall summary')
 		expect(report.overall.data.today.worked_minutes).toBe(105)
-		expect(report.overall.data.today.target_minutes).toBe(480)
+		expect(report.overall.data.today.target_minutes).toBe(540)
 
 		const series = readySeries(report)
 		const today = (kind: TrendSeries['kind'], label?: string) =>
@@ -217,25 +365,26 @@ describe('dashboard report aggregation', () => {
 		const selection: DashboardSelection = { projects: [], executors: [], range: { preset: 7 } }
 		const dayOff = buildDashboardReport(fixture(targetOverrides).store, selection, now)
 		if (dayOff.overall.state === 'unavailable') throw new Error('Expected overall summary')
-		expect(dayOff.overall.data.today).toMatchObject({ status: 'OVER', target_minutes: 0 })
-		expect(dayOff.overall.data.week.target_minutes).toBe(1_920)
+		expect(dayOff.overall.data.today).toMatchObject({ status: 'TOLERANCE', target_minutes: 60, upper_limit_minutes: 120 })
+		expect(dayOff.overall.data.week.target_minutes).toBe(2_340)
 
 		targetOverrides.set('2026-08-31', 240)
 		const halfDay = buildDashboardReport(fixture(targetOverrides).store, selection, now)
 		if (halfDay.overall.state === 'unavailable') throw new Error('Expected overall summary')
 		expect(halfDay.overall.data.today).toMatchObject({
-			status: 'UNDER',
+			status: 'WITHIN',
 			worked_minutes: 105,
-			target_minutes: 240,
-			difference_minutes: 135,
+			target_minutes: 300,
+			upper_limit_minutes: 360,
+			difference_minutes: 195,
 		})
-		expect(halfDay.overall.data.week.target_minutes).toBe(2_160)
+		expect(halfDay.overall.data.week.target_minutes).toBe(2_580)
 
 		targetOverrides.clear()
 		const restored = buildDashboardReport(fixture(targetOverrides).store, selection, now)
 		if (restored.overall.state === 'unavailable') throw new Error('Expected overall summary')
-		expect(restored.overall.data.today).toMatchObject({ status: 'UNDER', target_minutes: 480 })
-		expect(restored.overall.data.week.target_minutes).toBe(2_400)
+		expect(restored.overall.data.today).toMatchObject({ status: 'WITHIN', target_minutes: 540, upper_limit_minutes: 600 })
+		expect(restored.overall.data.week.target_minutes).toBe(2_820)
 		expect(readySeries(restored)).toEqual(readySeries(dayOff))
 		expect(readySeries(halfDay)).toEqual(readySeries(dayOff))
 	})
@@ -399,16 +548,18 @@ describe('dashboard report aggregation', () => {
 		expect(report.timeline.data.minutes).toBe(20)
 		expect(report.timeline.data.week_minutes).toBe(20)
 		expect(report.timeline.data.day_period).toEqual({
-			status: 'OVER',
+			status: 'WITHIN',
 			worked_minutes: 20,
-			target_minutes: 0,
-			difference_minutes: 20,
+			target_minutes: 60,
+			upper_limit_minutes: 120,
+			difference_minutes: 40,
 		})
 		expect(report.timeline.data.week_period).toEqual({
-			status: 'UNDER',
+			status: 'WITHIN',
 			worked_minutes: 20,
-			target_minutes: 2_160,
-			difference_minutes: 2_140,
+			target_minutes: 2_580,
+			upper_limit_minutes: 3_000,
+			difference_minutes: 2_560,
 		})
 		expect(report.timeline.data.lanes.map((lane) => `${lane.kind}:${lane.label}`)).toEqual([
 			'project:Unassigned',
@@ -428,10 +579,11 @@ describe('dashboard report aggregation', () => {
 		const overridden = buildDashboardReport(value.store, selection, now)
 		if (overridden.timeline.state === 'unavailable') throw new Error('Expected timeline')
 		expect(overridden.timeline.data.day_period).toEqual({
-			status: 'UNDER',
+			status: 'WITHIN',
 			worked_minutes: 20,
-			target_minutes: 60,
-			difference_minutes: 40,
+			target_minutes: 120,
+			upper_limit_minutes: 180,
+			difference_minutes: 100,
 		})
 		expect({
 			minutes: overridden.timeline.data.minutes,
@@ -442,10 +594,11 @@ describe('dashboard report aggregation', () => {
 		const restored = buildDashboardReport(value.store, selection, now)
 		if (restored.timeline.state === 'unavailable') throw new Error('Expected timeline')
 		expect(restored.timeline.data.day_period).toEqual({
-			status: 'OVER',
+			status: 'WITHIN',
 			worked_minutes: 20,
-			target_minutes: 0,
-			difference_minutes: 20,
+			target_minutes: 60,
+			upper_limit_minutes: 120,
+			difference_minutes: 40,
 		})
 		expect({
 			minutes: restored.timeline.data.minutes,
@@ -492,17 +645,18 @@ describe('dashboard report aggregation', () => {
 		const report = buildDashboardReport(fixture(outsideBothBoundaries).store, selection, now)
 		if (report.timeline.state === 'unavailable') throw new Error('Expected timeline')
 		expect(report.timeline.data.week).toBe('2020-W53')
-		// Mon–Fri contribute 5 × 480m, Saturday 0m, and Sunday's override 240m.
+		// Work contributes 2640m; seven daily allowances add 420m and 840m.
 		expect(report.timeline.data.week_period).toEqual({
-			status: 'UNDER',
+			status: 'WITHIN',
 			worked_minutes: 0,
-			target_minutes: 2_640,
-			difference_minutes: 2_640,
+			target_minutes: 3_060,
+			upper_limit_minutes: 3_480,
+			difference_minutes: 3_060,
 		})
 		for (const overrides of [insideOnly, beforeBoundary]) {
 			const boundaryReport = buildDashboardReport(fixture(overrides).store, selection, now)
 			if (boundaryReport.timeline.state === 'unavailable') throw new Error('Expected timeline')
-			expect(boundaryReport.timeline.data.week_period.target_minutes).toBe(2_640)
+			expect(boundaryReport.timeline.data.week_period.target_minutes).toBe(3_060)
 		}
 		if (report.trend.state === 'unavailable') throw new Error('Expected trend')
 		expect([report.trend.data.start_date, report.trend.data.end_date]).toEqual([
@@ -525,13 +679,13 @@ describe('dashboard report aggregation', () => {
 		expect(selected.timeline.data.minutes).toBe(45)
 		expect(selected.timeline.data.day_period).toMatchObject({
 			worked_minutes: 45,
-			target_minutes: 480,
-			status: 'UNDER',
+			target_minutes: 540,
+			status: 'WITHIN',
 		})
 		expect(selected.timeline.data.week_period).toMatchObject({
 			worked_minutes: 45,
-			target_minutes: 2_400,
-			status: 'UNDER',
+			target_minutes: 2_820,
+			status: 'WITHIN',
 		})
 
 		if (selected.trend.state === 'unavailable') throw new Error('Expected trend')
@@ -565,29 +719,31 @@ describe('dashboard report aggregation', () => {
 			last_activity_at: '2026-08-31T02:45:00.000Z',
 		})
 		expect(today.period).toEqual({
-			status: 'UNDER',
+			status: 'WITHIN',
 			worked_minutes: 105,
-			target_minutes: 480,
-			difference_minutes: 375,
+			target_minutes: 540,
+			upper_limit_minutes: 600,
+			difference_minutes: 435,
 		})
 		expect(today.executors).toEqual([
 			{ label: 'machine-a', minutes: 90 },
 			{ label: 'amp-orb', minutes: 75 },
 		])
 
-		// Sunday carries a zero target, so a short session reads as OVER.
+		// Sunday still allows Play, so a short session stays within the limit.
 		const sunday = days.find((day) => day.date === '2026-08-30')!
 		expect(sunday.period).toEqual({
-			status: 'OVER',
+			status: 'WITHIN',
 			worked_minutes: 20,
-			target_minutes: 0,
-			difference_minutes: 20,
+			target_minutes: 60,
+			upper_limit_minutes: 120,
+			difference_minutes: 40,
 		})
 		expect(sunday.projects).toEqual([{ label: 'Unassigned', minutes: 20 }])
 
 		const idle = days.find((day) => day.date === '2026-08-27')!
 		expect(idle).toMatchObject({ interval_count: 0, first_activity_at: null, last_activity_at: null })
-		expect(idle.period.status).toBe('UNDER')
+		expect(idle.period.status).toBe('WITHIN')
 		expect(idle.projects).toEqual([])
 	})
 
@@ -600,10 +756,11 @@ describe('dashboard report aggregation', () => {
 		)
 		if (report.trend.state === 'unavailable') throw new Error('Expected trend')
 		expect(report.trend.data.days.at(-1)!.period).toEqual({
-			status: 'OVER',
+			status: 'TOLERANCE',
 			worked_minutes: 105,
-			target_minutes: 0,
-			difference_minutes: 105,
+			target_minutes: 60,
+			upper_limit_minutes: 120,
+			difference_minutes: 45,
 		})
 	})
 

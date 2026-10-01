@@ -41,7 +41,7 @@ class DomDashboardView implements DashboardView {
 			this.lastFocused = document.activeElement.dataset.focusKey
 		}
 		this.root.innerHTML = renderDashboardContent(report, selection, refreshing, filtersDisabled)
-		if (this.lastFocused && !refreshing) {
+		if (this.lastFocused && (!refreshing || this.lastFocused.startsWith('track:'))) {
 			for (const element of this.root.querySelectorAll<HTMLElement>('[data-focus-key]')) {
 				if (element.dataset.focusKey === this.lastFocused) {
 					element.focus()
@@ -82,7 +82,12 @@ export function startDashboard(
 
 	root.addEventListener('change', (event) => {
 		const input = event.target
-		if (!(input instanceof HTMLInputElement) || input.type !== 'checkbox') return
+		if (!(input instanceof HTMLInputElement)) return
+		if (input.name === 'track' && (input.value === 'work' || input.value === 'play' || input.value === 'all')) {
+			void controller.setTrack(input.value)
+			return
+		}
+		if (input.type !== 'checkbox') return
 		if (input.name === 'projects' || input.name === 'executors') {
 			void controller.setFilter(input.name, input.value, input.checked)
 		}

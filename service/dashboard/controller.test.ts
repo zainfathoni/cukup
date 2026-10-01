@@ -94,6 +94,65 @@ function reportAt(date: string, asOf = `${date}T09:42:00.000Z`): DashboardReport
 }
 
 describe('dashboard interactions', () => {
+	test('switches tracks, clears filters, and preserves the chosen date and range', async () => {
+		const requests: DashboardSelection[] = []
+		const transport: DashboardTransport = {
+			async load(current) {
+				requests.push(structuredClone(current))
+				return { ...mockDashboardReport, track: current.track ?? 'all' }
+			},
+		}
+		const current: DashboardSelection = { projects: ['cukup'], executors: ['amp-orb'], timeline_date: '2026-08-29', range: { preset: 30 } }
+		const { controller } = setupWith(mockDashboardReport, current, transport)
+		await controller.setTrack('all')
+		expect(requests).toHaveLength(0)
+		await controller.setTrack('work')
+		expect(requests).toEqual([{ ...current, track: 'work', projects: [], executors: [] }])
+		await controller.setTrack('work')
+		expect(requests).toHaveLength(1)
+		await controller.setTrack('play')
+		expect(requests.at(-1)?.track).toBe('play')
+	})
+
+	test('does not apply an old track response after a newer selection', async () => {
+		let finish: ((report: DashboardReport) => void) | undefined
+		const requests: DashboardSelection[] = []
+		const transport: DashboardTransport = {
+			load(current) {
+				requests.push(structuredClone(current))
+				if (requests.length > 1) return Promise.resolve({ ...mockDashboardReport, track: current.track })
+				return new Promise((resolve) => { finish = resolve })
+			},
+		}
+		const { controller, view } = setup(transport)
+		const first = controller.setTrack('work')
+		await controller.setFilter('projects', 'cukup', true)
+		expect(controller.getSelection().projects).toEqual([])
+		await controller.setTrack('play')
+		finish?.({ ...mockDashboardReport, track: 'work' })
+		await first
+		expect(requests.map((request) => request.track)).toEqual(['work', 'play'])
+		expect(view.renders.some((render) => render.report.track === 'work')).toBeFalse()
+		expect(view.renders.at(-1)?.report.track).toBe('play')
+	})
+
+	test('retains report scope on a failed track change and retries the requested track', async () => {
+		let failing = true
+		const transport: DashboardTransport = {
+			async load(current) {
+				if (failing) throw new Error('offline')
+				return { ...mockDashboardReport, track: current.track }
+			},
+		}
+		const { controller, view } = setup(transport)
+		await controller.setTrack('work')
+		expect(view.renders.at(-1)).toMatchObject({ selection: { track: 'work' }, filtersDisabled: true })
+		expect(view.renders.at(-1)?.report.track ?? 'all').toBe('all')
+		failing = false
+		await controller.refresh()
+		expect(view.renders.at(-1)).toMatchObject({ report: { track: 'work' }, filtersDisabled: false })
+	})
+
 	test('sends project and executor selections only through the injected transport body', async () => {
 		const { controller, transport } = setup()
 		await controller.setFilter('projects', 'cukup', true)
