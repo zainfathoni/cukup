@@ -27,14 +27,16 @@ function dayDetail(
 	projects: ReadonlyArray<[string, number]>,
 	executors: ReadonlyArray<[string, number]>,
 ): DayDetail {
-	const difference = Math.abs(minutes - target)
+	const softLimit = target + 60
+	const upperLimit = target + 120
 	return {
 		date,
 		period: {
-			status: minutes < target ? 'UNDER' : minutes > target ? 'OVER' : 'COMPLETE',
+			status: minutes > upperLimit ? 'EXCEEDED' : minutes > softLimit ? 'TOLERANCE' : 'WITHIN',
 			worked_minutes: minutes,
-			target_minutes: target,
-			difference_minutes: difference,
+			target_minutes: softLimit,
+			upper_limit_minutes: upperLimit,
+			difference_minutes: Math.abs(minutes - (minutes > upperLimit ? upperLimit : softLimit)),
 		},
 		interval_count: spans.count,
 		first_activity_at: spans.first,
@@ -54,8 +56,8 @@ export const mockDashboardReport: DashboardReport = {
 	overall: {
 		state: 'ready',
 		data: {
-			today: { status: 'UNDER', worked_minutes: 380, target_minutes: 480, difference_minutes: 100 },
-			week: { status: 'UNDER', worked_minutes: 380, target_minutes: 2400, difference_minutes: 2020 },
+			today: { status: 'WITHIN', worked_minutes: 380, target_minutes: 540, upper_limit_minutes: 600, difference_minutes: 160 },
+			week: { status: 'WITHIN', worked_minutes: 380, target_minutes: 2820, upper_limit_minutes: 3240, difference_minutes: 2440 },
 		},
 	},
 	timeline: {
@@ -66,16 +68,18 @@ export const mockDashboardReport: DashboardReport = {
 			minutes: 380,
 			week_minutes: 380,
 			day_period: {
-				status: 'UNDER',
+				status: 'WITHIN',
 				worked_minutes: 380,
-				target_minutes: 480,
-				difference_minutes: 100,
+				target_minutes: 540,
+				upper_limit_minutes: 600,
+				difference_minutes: 160,
 			},
 			week_period: {
-				status: 'UNDER',
+				status: 'WITHIN',
 				worked_minutes: 380,
-				target_minutes: 2_400,
-				difference_minutes: 2_020,
+				target_minutes: 2_820,
+				upper_limit_minutes: 3_240,
+				difference_minutes: 2_440,
 			},
 			intervals: [
 				{ start: '2026-08-31T01:15:00.000Z', end: '2026-08-31T03:05:00.000Z', concurrency: 1 },

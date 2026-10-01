@@ -53,7 +53,7 @@ const events = [
 	...session({
 		index: 1,
 		source: 'source-a',
-		project: 'alpha',
+		project: 'bta',
 		executor: 'machine-a',
 		start: base,
 		end: base + 60 * minute,
@@ -61,7 +61,7 @@ const events = [
 	...session({
 		index: 2,
 		source: 'source-b',
-		project: 'alpha',
+		project: 'bta-notes',
 		executor: 'amp-orb',
 		start: base + 30 * minute,
 		end: base + 90 * minute,
@@ -69,7 +69,7 @@ const events = [
 	...session({
 		index: 3,
 		source: 'source-c',
-		project: 'beta',
+		project: 'cukup',
 		executor: 'machine-a',
 		start: base + 45 * minute,
 		end: base + 75 * minute,
@@ -81,19 +81,43 @@ const events = [
 		start: base - 24 * 60 * minute,
 		end: base - 24 * 60 * minute + 20 * minute,
 	}),
+	...session({
+		index: 5,
+		source: 'source-e',
+		executor: 'machine-a',
+		start: base + 120 * minute,
+		end: base + 150 * minute,
+	}),
+	...session({
+		index: 6,
+		source: 'source-f',
+		project: 'cukup',
+		executor: 'machine-a',
+		start: base - 2 * 24 * 60 * minute,
+		end: base - 2 * 24 * 60 * minute + 135 * minute,
+	}),
+	...session({
+		index: 7,
+		source: 'source-g',
+		project: 'bta',
+		executor: 'machine-a',
+		start: base - 3 * 24 * 60 * minute,
+		end: base - 3 * 24 * 60 * minute + 480 * minute,
+	}),
+	...session({
+		index: 8,
+		source: 'source-h',
+		project: 'bta-notes',
+		executor: 'machine-a',
+		start: base - 24 * 60 * minute + 60 * minute,
+		end: base - 24 * 60 * minute + 75 * minute,
+	}),
 ]
-
-// Historical all-day-off overrides make the selected W35 fixture visibly over target.
-const targetOverrides = new Map(
-	['2026-08-24', '2026-08-25', '2026-08-26', '2026-08-27', '2026-08-28'].map(
-		(date) => [date, 0] as const,
-	),
-)
 
 const store: DashboardReportStore = {
 	events: () => events.map(({ executorLabel: _, ...event }) => event),
 	attributedEvents: () => events,
-	targetOverrides: () => targetOverrides,
+	targetOverrides: () => new Map(),
 	listBearerMetadata: () => [
 		{ executorLabel: 'machine-a', revokedAt: null },
 		{ executorLabel: 'retired-machine', revokedAt: '2026-08-02T00:00:00.000Z' },
@@ -130,8 +154,8 @@ const explainerPaths: ReadonlySet<string> = new Set(Object.values(EXPLAINER_ROUT
 
 function document(): string {
 	return renderDashboardDocument(buildDashboardReport(store, initialSelection, now), initialSelection).replace(
-		'<main>',
-		'<main><div class="panel-notice stale" role="note"><strong>Interactive review fixture.</strong> This portal uses deterministic sample evidence; filters and heatmap dates recompute the timeline through the real dashboard report builder.</div>',
+		'<form class="session-actions" method="post" action="/logout"><button type="submit">Sign out</button></form>',
+		'<div class="panel-notice stale" role="note"><strong>Interactive review fixture.</strong> This portal uses synthetic evidence, not live data. Tracks, filters, and dates use the real dashboard report builder.</div>',
 	)
 }
 

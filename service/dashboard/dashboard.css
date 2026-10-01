@@ -509,6 +509,11 @@ section {
 	stroke-dasharray: 4 3;
 }
 
+.meter-upper {
+	stroke: var(--ink);
+	stroke-width: 3;
+}
+
 .verdict-caption {
 	margin-bottom: 0.2rem;
 	font-weight: 650;
@@ -519,6 +524,84 @@ section {
 	color: var(--ink-2);
 	font-family: var(--font-mono);
 	font-size: 0.8rem;
+}
+
+/* Track selector */
+
+.track-selector {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.75rem 1.5rem;
+}
+
+.track-selector .guidance {
+	margin: 0;
+}
+
+.track-switch {
+	border: 0;
+	padding: 0;
+}
+
+.track-switch legend {
+	border: 0;
+	background: none;
+	color: var(--ink-2);
+	padding: 0 0 0.4rem;
+}
+
+.track-options {
+	display: flex;
+}
+
+.track-options label {
+	position: relative;
+	cursor: pointer;
+}
+
+.track-options label > span {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.45rem;
+	min-height: 2.75rem;
+	padding: 0.55rem 1rem;
+	border: var(--border);
+	background: var(--card);
+	font-weight: 700;
+}
+
+.track-options label + label > span {
+	border-left: 0;
+}
+
+.track-options label:first-child > span {
+	border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+
+.track-options label:last-child > span {
+	border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.track-options input:checked + span {
+	background: var(--sun);
+	color: var(--on-sun);
+}
+
+.track-options input:focus-visible + span {
+	position: relative;
+	z-index: 1;
+	outline: 3px solid var(--focus);
+	outline-offset: 3px;
+}
+
+.track-check {
+	visibility: hidden;
+}
+
+.track-options input:checked + span .track-check {
+	visibility: visible;
 }
 
 /* Filters */
