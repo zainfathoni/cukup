@@ -745,7 +745,7 @@ describe('work-hours plugin', () => {
 		}
 	})
 
-	test('visibly marks tracking incomplete when a local transactional write fails', async () => {
+	test.each(['work-hours-status', 'tracking-gap-acknowledge'])('acknowledges a tracking gap through %s without changing evidence', async (command) => {
 		const stateHome = mkdtempSync(join(tmpdir(), 'amp-work-hours-plugin-test-'))
 		temporaryDirectories.push(stateHome)
 		const previousStateHome = process.env.XDG_STATE_HOME
@@ -754,6 +754,10 @@ describe('work-hours plugin', () => {
 		const commands = new Map<string, (context: any) => unknown>()
 		const disposers: Array<() => unknown> = []
 		const notifications: string[] = []
+		const dialogs: Array<{ title: string; message?: string; options: string[] }> = []
+		const confirmations: Array<{ title: string; message?: string; confirmButtonText?: string }> = []
+		let selection: string | undefined = 'Close'
+		let confirmed = false
 		const amp = {
 			on(name: string, handler: (event: any, context: any) => unknown) {
 				handlers.set(name, handler)
@@ -779,13 +783,28 @@ describe('work-hours plugin', () => {
 		const context = {
 			ui: {
 				notify: async (message: string) => { notifications.push(message) },
-				confirm: async () => true,
+				select: async (options: { title: string; message?: string; options: string[] }) => {
+					dialogs.push(options)
+					return selection
+				},
+				confirm: async (options: { title: string; message?: string; confirmButtonText?: string }) => {
+					confirmations.push(options)
+					return confirmed
+				},
 			},
 		}
 
 		try {
 			workHoursPlugin(amp as never)
+			await handlers.get('agent.start')?.(
+				{ thread: { id: 'T-recorded' }, id: 'message-1', message: 'private prompt' },
+				context,
+			)
 			const database = new Database(join(stateHome, 'amp-work-hours', 'state.sqlite'))
+			const evidence = database.query('SELECT * FROM events').all()
+			const outbox = database.query('SELECT * FROM outbox').all()
+			expect(evidence).toHaveLength(1)
+			expect(outbox).toHaveLength(1)
 			database.exec(`
 				CREATE TRIGGER reject_outbox BEFORE INSERT ON outbox
 				BEGIN SELECT RAISE(ABORT, 'injected local failure'); END;
@@ -797,7 +816,28 @@ describe('work-hours plugin', () => {
 			expect(notifications.at(-1)).toBe(
 				'UNKNOWN · TRACKING INCOMPLETE · Cukup could not record agent.start locally.',
 			)
-			await commands.get('tracking-gap-acknowledge')?.(context)
+			notifications.length = 0
+			for (selection of ['Close', undefined]) {
+				await commands.get('work-hours-status')?.(context)
+				expect(dialogs.at(-1)?.options).toEqual(['Acknowledge tracking gap', 'Close'])
+				expect(dialogs.at(-1)?.message).toContain('HISTORICAL TRACKING GAP')
+			}
+			expect(confirmations).toHaveLength(0)
+			selection = 'Acknowledge tracking gap'
+			await commands.get(command)?.(context)
+			expect(confirmations.at(-1)).toEqual({
+				title: 'Acknowledge historical tracking gap?',
+				message: 'This dismisses the warning only. Missing evidence will not be recovered or added to your totals.',
+				confirmButtonText: 'Acknowledge gap',
+			})
+			selection = 'Close'
+			await commands.get('work-hours-status')?.(context)
+			expect(dialogs.at(-1)?.message).toContain('HISTORICAL TRACKING GAP')
+			expect(notifications).toHaveLength(0)
+
+			selection = 'Acknowledge tracking gap'
+			confirmed = true
+			await commands.get(command)?.(context)
 			expect(notifications.at(-1)).toBe(
 				'Historical tracking-gap warning acknowledged. Recorded evidence is unchanged.',
 			)
@@ -808,6 +848,17 @@ describe('work-hours plugin', () => {
 					)
 					.get()?.value,
 			).toBe('false')
+			expect(database.query('SELECT * FROM events').all()).toEqual(evidence)
+			expect(database.query('SELECT * FROM outbox').all()).toEqual(outbox)
+			selection = 'Close'
+			await commands.get('work-hours-status')?.(context)
+			expect(dialogs.at(-1)?.options).toEqual(['Close'])
+			expect(dialogs.at(-1)?.message).not.toContain('HISTORICAL TRACKING GAP')
+
+			database.exec('DROP TABLE events')
+			await commands.get('work-hours-status')?.(context)
+			expect(dialogs.at(-1)?.options).toEqual(['Close'])
+			expect(dialogs.at(-1)?.message).toContain('UNKNOWN · TRACKING INCOMPLETE')
 			database.close()
 		} finally {
 			await Promise.all(disposers.map((dispose) => dispose()))
