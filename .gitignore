@@ -25,6 +25,7 @@
 !/plugin/**/*.md
 !/plugin/**/*.ts
 !/scripts/*.sh
+!/scripts/*.ts
 !/scripts/deploy-service
 !/service/**/*.css
 !/service/**/*.ts

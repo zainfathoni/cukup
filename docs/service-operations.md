@@ -81,6 +81,8 @@ Treat list output as machine-identifying operational data. Never give a physical
 
 ## Integrity and online backup
 
+The service uses WAL mode and restrictive directory/database permissions. `backup` opens the live source read-only and executes SQLite `VACUUM INTO`. This produces a consistent online snapshot without copying WAL files. It then runs full `PRAGMA integrity_check` and writes JSON metadata with the schema version, size, SHA-256, creation time, and backup ID. The service renames the database and metadata files separately. The metadata file is a completion marker, but the two-file pair is not published atomically.
+
 Run these commands for integrity, backup, and verification:
 
 ```sh
@@ -98,6 +100,10 @@ Pull backup pairs from the production host to an independent backup host. Verify
 Prune off-site pairs only after a successful inventory check. Record backup verification success or alert Zain Fathoni on failure.
 
 Do not count a push from the VPS as independent recovery. A missed pull can degrade the recovery point objective.
+
+Use the [off-site pull runbook](off-site-backup-pull.md) to set up each backup client. The setup scripts stage and verify each pair before publication.
+
+Use private operator records for each client's schedule and monitoring status. Verify pull, alert delivery, and restore before claiming protection.
 
 ## Clean restore and replacement
 
