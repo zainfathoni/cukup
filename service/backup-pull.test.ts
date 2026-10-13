@@ -9,11 +9,14 @@ import {
 	readFileSync,
 	readdirSync,
 	rmSync,
+	statSync,
+	utimesSync,
 	writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+	createBackupPullDependencies,
 	defaultBackupPullConfigPath,
 	loadBackupPullConfig,
 	parseRsyncDirectoryListing,
@@ -395,6 +398,120 @@ test('detects remote database drift when a published ID keeps its old metadata',
 	expect(verifyBackup(join(context.localDirectory, 'reused', 'reused.sqlite'))).toEqual(
 		localSnapshot.metadata,
 	)
+})
+
+test('attests unchanged remote databases correctly when rsync dry runs report false changes', async () => {
+	const context = setup()
+	const snapshot = createSnapshot(
+		join(context.root, 'same-source'),
+		join(context.root, 'same-source'),
+		'reused',
+		now,
+	)
+	copyPairToDirectory(snapshot, context.localDirectory, 'reused')
+	const localDatabasePath = join(context.localDirectory, 'reused', 'reused.sqlite')
+	const originalLocalDatabase = readFileSync(localDatabasePath)
+	const fakeRsyncDirectory = join(context.root, 'fake-rsync')
+	mkdirSync(fakeRsyncDirectory, { mode: 0o700 })
+	copyFileSync(snapshot.databasePath, join(fakeRsyncDirectory, 'reused.sqlite'))
+	copyFileSync(snapshot.metadataPath, join(fakeRsyncDirectory, 'reused.json'))
+	const fakeRsyncPath = join(fakeRsyncDirectory, 'rsync')
+	writeFileSync(
+		fakeRsyncPath,
+		`#!/bin/bash
+set -euo pipefail
+source_path=''
+destination=''
+dry_run=0
+checksum=0
+for argument in "$@"; do
+	case "$argument" in
+		backup-test:*) source_path="\${argument#backup-test:}" ;;
+		--dry-run) dry_run=1 ;;
+		--checksum) checksum=1 ;;
+	esac
+	destination="$argument"
+done
+source_file="\${BASH_SOURCE[0]%/*}/\${source_path##*/}"
+source_name="\${source_path##*/}"
+if [[ "\${source_name}" == *.json ]]; then
+	mkdir -p "\${destination}"
+	cp "\${source_file}" "\${destination%/}/\${source_name}"
+elif [[ "\${source_name}" == *.sqlite ]]; then
+	[[ "\${checksum}" == 1 ]] || exit 3
+	if [[ -e "\${BASH_SOURCE[0]%/*}/symlink-database" ]]; then
+		rm -f "\${destination}"
+		ln -s "\${source_file}" "\${destination}"
+	elif cmp -s "\${source_file}" "\${destination}"; then
+		if [[ "\${dry_run}" == 1 ]]; then printf '%s\\n' '>f.......'; fi
+	elif [[ "\${dry_run}" == 0 ]]; then
+		cp "\${source_file}" "\${destination}"
+	else
+		printf '%s\\n' '>f.......'
+	fi
+else
+	exit 2
+fi
+`,
+		{ mode: 0o700 },
+	)
+	chmodSync(fakeRsyncPath, 0o700)
+	const config = {
+		...context.config,
+		remoteHost: 'backup-test',
+		rsyncBinary: fakeRsyncPath,
+	}
+	const metadataDirectory = join(context.root, 'metadata-check')
+	mkdirSync(metadataDirectory, { mode: 0o700 })
+	const dependencies = createBackupPullDependencies()
+
+	const unchanged = await dependencies.attestRemotePair(
+		config,
+		'reused',
+		metadataDirectory,
+		localDatabasePath,
+		snapshot.metadata.sha256,
+	)
+
+	expect(unchanged.databaseChanged).toBe(false)
+	expect(readFileSync(localDatabasePath)).toEqual(originalLocalDatabase)
+	expect(readdirSync(metadataDirectory)).toEqual(['reused.json'])
+
+	const remoteDatabasePath = join(fakeRsyncDirectory, 'reused.sqlite')
+	const driftedDatabase = readFileSync(remoteDatabasePath)
+	driftedDatabase[0] = (driftedDatabase[0] ?? 0) ^ 1
+	writeFileSync(remoteDatabasePath, driftedDatabase)
+	const localDatabaseStats = statSync(localDatabasePath)
+	utimesSync(remoteDatabasePath, localDatabaseStats.atime, localDatabaseStats.mtime)
+	expect(statSync(remoteDatabasePath).size).toBe(localDatabaseStats.size)
+	expect(Math.floor(statSync(remoteDatabasePath).mtimeMs)).toBe(
+		Math.floor(localDatabaseStats.mtimeMs),
+	)
+	const changed = await dependencies.attestRemotePair(
+		config,
+		'reused',
+		metadataDirectory,
+		localDatabasePath,
+		snapshot.metadata.sha256,
+	)
+
+	expect(changed.databaseChanged).toBe(true)
+	expect(readFileSync(localDatabasePath)).toEqual(originalLocalDatabase)
+	expect(readdirSync(metadataDirectory)).toEqual(['reused.json'])
+
+	copyFileSync(snapshot.databasePath, remoteDatabasePath)
+	writeFileSync(join(fakeRsyncDirectory, 'symlink-database'), '')
+	await expect(
+		dependencies.attestRemotePair(
+			config,
+			'reused',
+			metadataDirectory,
+			localDatabasePath,
+			snapshot.metadata.sha256,
+		),
+	).rejects.toThrow('Remote database comparison is not a regular file')
+	expect(readFileSync(localDatabasePath)).toEqual(originalLocalDatabase)
+	expect(readdirSync(metadataDirectory)).toEqual(['reused.json'])
 })
 
 test('fails closed on remote symlinks, directories, unsafe names, and empty listings', async () => {

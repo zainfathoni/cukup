@@ -1,6 +1,9 @@
 import { verifyBackup, type BackupMetadata } from './operations.ts'
+import { createHash } from 'node:crypto'
 import {
 	chmodSync,
+	copyFileSync,
+	createReadStream,
 	existsSync,
 	lstatSync,
 	mkdirSync,
@@ -61,6 +64,7 @@ export type BackupPullDependencies = {
 		id: string,
 		metadataDestination: string,
 		localDatabasePath: string,
+		expectedDatabaseSha256: string,
 	) => Promise<{ databaseChanged: boolean }>
 	ping: (url: string, event: 'start' | 'success' | 'failure') => Promise<void>
 }
@@ -291,6 +295,7 @@ async function executeBackupPull(
 					id,
 					metadataDirectory,
 					join(existingSnapshot.directory, `${id}.sqlite`),
+					existingSnapshot.metadata.sha256,
 				)
 				const metadataPath = join(metadataDirectory, `${id}.json`)
 				const metadataInfo = lstatSync(metadataPath)
@@ -639,6 +644,7 @@ async function attestRemotePair(
 	id: string,
 	metadataDestination: string,
 	localDatabasePath: string,
+	expectedDatabaseSha256: string,
 ): Promise<{ databaseChanged: boolean }> {
 	const remotePrefix = `${config.remoteHost}:${config.remoteDirectory}`
 	await runRsync(
@@ -651,22 +657,37 @@ async function attestRemotePair(
 		],
 		'Remote metadata transfer',
 	)
-	const comparison = await runRsync(
-		config,
-		[
-			'--checksum',
-			'--dry-run',
-			'--itemize-changes',
-			'--out-format=%i%n',
-			'--timeout=60',
-			`${remotePrefix}/${id}.sqlite`,
-			localDatabasePath,
-		],
-		'Remote database content check',
-	)
-	return {
-		databaseChanged: comparison.byteLength > 0,
+	const comparisonDatabasePath = join(metadataDestination, `.${id}.remote.sqlite`)
+	try {
+		copyFileSync(localDatabasePath, comparisonDatabasePath)
+		chmodSync(comparisonDatabasePath, 0o600)
+		await runRsync(
+			config,
+			[
+				'--archive',
+				'--checksum',
+				'--timeout=60',
+				`${remotePrefix}/${id}.sqlite`,
+				comparisonDatabasePath,
+			],
+			'Remote database content check',
+		)
+		const comparisonDatabaseInfo = lstatSync(comparisonDatabasePath)
+		if (!comparisonDatabaseInfo.isFile() || comparisonDatabaseInfo.isSymbolicLink()) {
+			throw new Error('Remote database comparison is not a regular file')
+		}
+		return {
+			databaseChanged: (await sha256File(comparisonDatabasePath)) !== expectedDatabaseSha256,
+		}
+	} finally {
+		rmSync(comparisonDatabasePath, { force: true })
 	}
+}
+
+async function sha256File(path: string): Promise<string> {
+	const hash = createHash('sha256')
+	for await (const chunk of createReadStream(path)) hash.update(chunk)
+	return hash.digest('hex')
 }
 
 async function runRsync(config: BackupPullConfig, args: string[], label: string): Promise<Uint8Array> {
