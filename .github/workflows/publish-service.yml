@@ -11,6 +11,7 @@ on:
       - package.json
       - bun.lock
       - tsconfig.json
+      - scripts/check-service-runtime.ts
       - media/motion-explainer/cukup-explainer.mp4
       - media/motion-explainer/poster.png
       - media/motion-explainer/captions.en.vtt
@@ -84,4 +85,5 @@ jobs:
           docker buildx imagetools inspect "$IMAGE@$DIGEST"
           docker pull "$IMAGE@$DIGEST"
           test "$(docker image inspect "$IMAGE@$DIGEST" --format '{{.Architecture}}')" = amd64
+          docker run --rm --read-only -i --entrypoint bun "$IMAGE@$DIGEST" run - < scripts/check-service-runtime.ts
           printf 'Published `%s@%s` for `linux/amd64`.\n' "$IMAGE" "$DIGEST" >> "$GITHUB_STEP_SUMMARY"

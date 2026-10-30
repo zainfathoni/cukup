@@ -9,6 +9,11 @@ readonly EXPECTED_SERVICE="cukup-service"
 readonly EXPECTED_SOURCE="$EXPECTED_ORIGIN"
 readonly EXPECTED_API_HOSTNAME="api.cukup.dev"
 readonly EXPECTED_DASHBOARD_HOSTNAME="cukup.dev"
+readonly TRUST_BASE_REVISION="30f256bb6a00e1680c4af24b4b1f987013f34267"
+readonly TRUST_BASE_VERSION="$TRUST_BASE_REVISION-trust20261022"
+readonly TRUST_BASE_IMAGE="fleet/cukup:trust-20261022"
+readonly TRUST_BASE_IMAGE_ID="sha256:b54881133d3009f8050e41d21eaea707d46e0044faee41b7b40162997e215d44"
+readonly TRUST_BASE_CONTAINER_ID="653e80f21340afb10da18aa9c31126242684c1dfcf213aeb10a2998790819f0e"
 
 mode="${1:-}"
 if [[ "$mode" != "preflight" && "$mode" != "deploy" ]]; then
@@ -149,8 +154,18 @@ running_version() {
 	IFS=$'\t' read -r id name _ <<< "$info"
 	name="${name#/}"
 	version="${name#cukup-service-web-}"
-	[[ "$name" == "cukup-service-web-$version" && "$version" =~ ^[0-9a-f]{40}$ ]] || return 1
+	[[ "$name" == "cukup-service-web-$version" ]] || return 1
+	[[ "$version" =~ ^[0-9a-f]{40}$ || "$version" == "$TRUST_BASE_VERSION" ]] || return 1
 	printf '%s\n' "$version"
+}
+
+verify_live_runtime() {
+	local container="$1" version="$2" check_mode=""
+	[[ "$container" =~ ^[0-9a-f]{64}$ ]] || return 1
+	if [[ "$version" == "$TRUST_BASE_VERSION" ]]; then
+		check_mode="--legacy-trust-baseline"
+	fi
+	remote "docker exec -i '$container' bun run - $check_mode" < "$release_root/scripts/check-service-runtime.ts"
 }
 
 runtime_hash() {
@@ -325,6 +340,8 @@ verify_local_image() {
 		.[0].Config.Labels["org.opencontainers.image.revision"] == $sha and
 		any(.[0].RepoDigests[]; startswith($image + "@sha256:"))
 	' <<< "$image_json" >/dev/null
+	docker run --rm --read-only -i --entrypoint bun "$expected_image:$candidate" run - \
+		< "$release_root/scripts/check-service-runtime.ts"
 }
 
 render_config() {
@@ -385,12 +402,23 @@ rollback_if_needed() {
 	[[ -n "$prior_version" ]] || return 1
 	current="$(running_version 2>/dev/null || true)"
 	if [[ "$current" != "$prior_version" ]]; then
-		run_kamal "$prior_version" rollback "$prior_version" >/dev/null 2>&1 || rollback_ok=0
+		if [[ "$prior_version" == "$TRUST_BASE_VERSION" ]]; then
+			# Start the retained patched container. Do not recreate it or use the vulnerable image.
+			remote "docker stop 'cukup-service-web-$candidate'" >/dev/null 2>&1 || true
+			run_kamal "$prior_version" app start >/dev/null 2>&1 || rollback_ok=0
+		else
+			run_kamal "$prior_version" rollback "$prior_version" >/dev/null 2>&1 || rollback_ok=0
+		fi
 	fi
 	[[ "$(running_version 2>/dev/null || true)" == "$prior_version" ]] || rollback_ok=0
 	info="$(running_info 2>/dev/null || true)"
 	IFS=$'\t' read -r id name _ <<< "$info"
+	if [[ "$prior_version" == "$TRUST_BASE_VERSION" ]]; then
+		[[ "$id" == "$prior_container" ]] || rollback_ok=0
+		[[ "$(remote "docker inspect '$id' --format '{{.Image}}'" 2>/dev/null)" == "$TRUST_BASE_IMAGE_ID" ]] || rollback_ok=0
+	fi
 	[[ -n "$id" && "$(runtime_hash "$id" 2>/dev/null || true)" == "$prior_runtime_hash" ]] || rollback_ok=0
+	verify_live_runtime "$id" "$prior_version" >/dev/null 2>&1 || rollback_ok=0
 	verify_service >/dev/null 2>&1 || rollback_ok=0
 	verify_database >/dev/null 2>&1 || rollback_ok=0
 	verify_preservation >/dev/null 2>&1 || rollback_ok=0
@@ -447,15 +475,25 @@ IFS=$'\t' read -r prior_container prior_name prior_image <<< "$info"
 prior_name="${prior_name#/}"
 prior_version="${prior_name#cukup-service-web-}"
 [[ "$prior_container" =~ ^[0-9a-f]{64}$ ]]
-[[ "$prior_name" == "cukup-service-web-$prior_version" && "$prior_version" =~ ^[0-9a-f]{40}$ ]]
-[[ "$prior_image" == "$expected_image:$prior_version" ]]
-git -C "$release_root" merge-base --is-ancestor "$prior_version" "$candidate"
-git -C "$release_root" show "$prior_version:service/store.ts" | grep -Eq '^const DATABASE_VERSION = 4$'
+[[ "$prior_name" == "cukup-service-web-$prior_version" ]]
+prior_revision="$prior_version"
+if [[ "$prior_version" == "$TRUST_BASE_VERSION" ]]; then
+	[[ "$prior_image" == "$TRUST_BASE_IMAGE" ]]
+	[[ "$prior_container" == "$TRUST_BASE_CONTAINER_ID" ]]
+	[[ "$(remote "docker inspect '$prior_container' --format '{{.Image}}'")" == "$TRUST_BASE_IMAGE_ID" ]]
+	prior_revision="$TRUST_BASE_REVISION"
+else
+	[[ "$prior_version" =~ ^[0-9a-f]{40}$ ]]
+	[[ "$prior_image" == "$expected_image:$prior_version" ]]
+fi
+git -C "$release_root" merge-base --is-ancestor "$prior_revision" "$candidate"
+git -C "$release_root" show "$prior_revision:service/store.ts" | grep -Eq '^const DATABASE_VERSION = 4$'
 prior_runtime_hash="$(runtime_hash "$prior_container")"
 [[ "$prior_runtime_hash" =~ ^[0-9a-f]{64}$ ]]
 phase="runtime-secrets"
 verify_runtime_secrets
 phase="current-service"
+verify_live_runtime "$prior_container" "$prior_version"
 verify_database
 verify_service
 
@@ -482,7 +520,7 @@ verify_source_authorization
 
 phase="deploy"
 mutation_started=1
-run_kamal "$candidate" deploy --skip-push
+run_kamal "$candidate" redeploy --skip-push
 
 phase="post-deploy"
 [[ "$(running_version)" == "$candidate" ]]
@@ -494,6 +532,7 @@ IFS=$'\t' read -r post_container post_name post_image <<< "$post_info"
 [[ "$(runtime_hash "$post_container")" == "$prior_runtime_hash" ]]
 remote "docker container inspect '$prior_container'" >/dev/null
 remote "docker image inspect '$prior_image'" >/dev/null
+verify_live_runtime "$post_container" "$candidate"
 verify_service
 verify_database
 verify_preservation
