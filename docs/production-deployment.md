@@ -12,7 +12,7 @@ Do not deploy from an ordinary checkout. Keep the retired off-site operator Laun
 4. Let `Deploy service` select the successful push publication for that exact SHA.
 5. Let the protected job verify ancestry, image labels, architecture, database integrity, and the remote deployment lock.
 6. Let the job create and independently verify a fresh backup.
-7. Let Kamal deploy the exact image without rebuilding it.
+7. Let Kamal redeploy the exact Cukup image without rebuilding it, booting the shared proxy, or pruning recovery assets.
 8. Confirm API, dashboard, database, preservation, restart, and rollback gates.
 
 Automatic deployment accepts only a successful push publication from `main`. Manual, failed, cancelled, and non-main publications do not enter this path.
