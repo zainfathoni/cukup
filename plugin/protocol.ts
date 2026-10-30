@@ -45,6 +45,25 @@ export type AuthoritativeSummary = {
 	weekly: SummaryPeriod
 }
 
+export type Track = 'work' | 'play' | 'all'
+
+export type LimitPeriod = {
+	status: 'WITHIN' | 'TOLERANCE' | 'EXCEEDED'
+	worked_minutes: number
+	target_minutes: number
+	upper_limit_minutes: number
+	difference_minutes: number
+}
+
+export type TrackSummary = {
+	schema_version: typeof SUMMARY_SCHEMA_VERSION
+	track: Track
+	timezone: 'Asia/Jakarta'
+	as_of: string
+	daily: SummaryPeriod | LimitPeriod
+	weekly: SummaryPeriod | LimitPeriod
+}
+
 export type ServiceCapabilities = {
 	acceptedEventSchemaVersions: Array<1 | 2>
 	preferredNewEventSchemaVersion: 1 | 2
@@ -163,6 +182,24 @@ export class CukupServiceClient {
 	async fetchSummary(token: string): Promise<AuthoritativeSummary> {
 		const response = await this.#request('/v1/summary', token, { method: 'GET' })
 		return parseSummary(await responseJSON(response))
+	}
+
+	async fetchTrackSummary(token: string, track: Track): Promise<TrackSummary> {
+		const response = await this.#request(`/v1/summary?track=${track}`, token, { method: 'GET' })
+		const body = await responseJSON(response)
+		if (
+			!isRecord(body) || body.schema_version !== SUMMARY_SCHEMA_VERSION ||
+			body.track !== track || body.timezone !== 'Asia/Jakarta' || typeof body.as_of !== 'string'
+		) throw new ServiceRequestError('protocol', false)
+		parseTimestamp(body.as_of)
+		return {
+			schema_version: SUMMARY_SCHEMA_VERSION,
+			track,
+			timezone: 'Asia/Jakarta',
+			as_of: body.as_of,
+			daily: track === 'work' ? parseSummaryPeriod(body.daily) : parseLimitPeriod(body.daily),
+			weekly: track === 'work' ? parseSummaryPeriod(body.weekly) : parseLimitPeriod(body.weekly),
+		}
 	}
 
 	async putTargetOverride(
@@ -284,6 +321,23 @@ export function isTargetOverrideDate(value: string): boolean {
 		31,
 	][month - 1]!
 	return day >= 1 && day <= daysInMonth
+}
+
+function parseLimitPeriod(value: unknown): LimitPeriod {
+	if (
+		!isRecord(value) ||
+		(value.status !== 'WITHIN' && value.status !== 'TOLERANCE' && value.status !== 'EXCEEDED') ||
+		!isMinutes(value.worked_minutes) || !isMinutes(value.target_minutes) ||
+		!isMinutes(value.upper_limit_minutes) || !isMinutes(value.difference_minutes) ||
+		value.upper_limit_minutes < value.target_minutes
+	) throw new ServiceRequestError('protocol', false)
+	return {
+		status: value.status,
+		worked_minutes: value.worked_minutes,
+		target_minutes: value.target_minutes,
+		upper_limit_minutes: value.upper_limit_minutes,
+		difference_minutes: value.difference_minutes,
+	}
 }
 
 function parseSummaryPeriod(value: unknown): SummaryPeriod {

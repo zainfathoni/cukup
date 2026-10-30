@@ -1,8 +1,9 @@
 import { summarizeWork } from './aggregation.ts'
 import { isBearerToken, type OidcVerifier } from './auth.ts'
-import { DEFAULT_API_HOSTNAME, DEFAULT_DASHBOARD_HOSTNAME } from './config.ts'
+import { DEFAULT_API_HOSTNAME, DEFAULT_DASHBOARD_HOSTNAME, SERVICE_TIMEZONE } from './config.ts'
 import type { DashboardBackend } from './dashboard/backend.ts'
 import { EXPLAINER_ROUTES } from './dashboard/explainer.ts'
+import { buildTrackSummary } from './dashboard/report-builder.ts'
 import { SOCIAL_IMAGE_ROUTE } from './dashboard/social-image.ts'
 import { ServiceLogger } from './logger.ts'
 import {
@@ -125,9 +126,25 @@ async function authenticatedResponse(
 			: json({ error: 'method_not_allowed' }, 405, { allow: 'GET' })
 	}
 	if (url.pathname === '/v1/summary') {
-		return request.method === 'GET'
-			? json(summarizeWork(store.events(), now(), undefined, store.targetOverrides()))
-			: json({ error: 'method_not_allowed' }, 405, { allow: 'GET' })
+		if (request.method !== 'GET') return json({ error: 'method_not_allowed' }, 405, { allow: 'GET' })
+		if (!url.searchParams.has('track')) {
+			return json(summarizeWork(store.events(), now(), undefined, store.targetOverrides()))
+		}
+		const track = url.searchParams.get('track')
+		if (
+			(track !== 'work' && track !== 'play' && track !== 'all') ||
+			url.searchParams.size !== 1
+		) return json({ error: 'invalid_request' }, 400)
+		const nowMs = now()
+		const summary = buildTrackSummary(store, track, nowMs)
+		return json({
+			schema_version: 1,
+			track,
+			timezone: SERVICE_TIMEZONE,
+			as_of: new Date(nowMs).toISOString(),
+			daily: summary.today,
+			weekly: summary.week,
+		})
 	}
 	if (url.pathname.startsWith('/v1/target-overrides/')) {
 		const date = parseTargetOverrideDate(url.pathname.slice('/v1/target-overrides/'.length))

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
+import type { PluginToolDefinition } from '@ampcode/plugin'
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -72,7 +73,9 @@ describe('work-hours plugin', () => {
 		const notifications: string[] = []
 		const statusDialogs: Array<{ title: string; message?: string; options: string[] }> = []
 		const commandAvailability = new Map<string, unknown>()
+		const tools: PluginToolDefinition[] = []
 		const amp = {
+			registerTool(tool: PluginToolDefinition) { tools.push(tool); return { unsubscribe() {} } },
 			on(name: string, handler: (event: any, context?: any) => unknown) {
 				handlers.set(name, handler)
 				return { unsubscribe() {} }
@@ -123,6 +126,15 @@ describe('work-hours plugin', () => {
 
 		try {
 			workHoursPlugin(amp as never)
+			expect(tools.map((tool) => tool.name)).toEqual(['work_hours_status'])
+			expect(tools[0]!.inputSchema).toEqual({ type: 'object', properties: { track: { type: 'string', enum: ['work', 'play', 'all'], default: 'work' } }, additionalProperties: false })
+			const toolResult = await tools[0]!.execute({}, {} as never)
+			expect(toolResult).toBeString()
+			expect(toolResult as string).toStartWith('UNKNOWN · work status unavailable')
+			const playResult = await tools[0]!.execute({ track: 'play' }, {} as never)
+			expect(playResult as string).toStartWith('UNKNOWN · play status unavailable')
+			expect(statusDialogs).toHaveLength(0)
+			expect(notifications).toHaveLength(0)
 			expect([...handlers.keys()]).toEqual([
 				'session.start',
 				'agent.start',
@@ -177,6 +189,7 @@ describe('work-hours plugin', () => {
 			const handlers = new Map<string, (event: any, context?: any) => unknown>()
 			let dispose = async () => {}
 			const amp = {
+				registerTool() { return { unsubscribe() {} } },
 				on(name: string, handler: (event: any, context?: any) => unknown) {
 					handlers.set(name, handler)
 					return { unsubscribe() {} }
@@ -276,6 +289,7 @@ describe('work-hours plugin', () => {
 			resolveProject = resolve
 		})
 		const amp = {
+			registerTool() { return { unsubscribe() {} } },
 			on(name: string, handler: (event: any, context?: any) => unknown) {
 				handlers.set(name, handler)
 				return { unsubscribe() {} }
@@ -394,6 +408,7 @@ describe('work-hours plugin', () => {
 		})
 		let stateObserver: ((state: 'idle') => void) | undefined
 		const amp = {
+			registerTool() { return { unsubscribe() {} } },
 			on(name: string, handler: (event: any) => unknown) {
 				handlers.set(name, handler)
 				return { unsubscribe() {} }
@@ -455,6 +470,7 @@ describe('work-hours plugin', () => {
 		const handlers = new Map<string, (event: any, context?: any) => unknown>()
 		const disposers: Array<() => unknown> = []
 		const amp = {
+			registerTool() { return { unsubscribe() {} } },
 			on(name: string, handler: (event: any, context?: any) => unknown) {
 				handlers.set(name, handler)
 				return { unsubscribe() {} }
@@ -524,6 +540,7 @@ describe('work-hours plugin', () => {
 		const stateObservers = new Set<(state: 'running' | 'idle') => void>()
 		let state: 'running' | 'idle' = 'running'
 		const amp = {
+			registerTool() { return { unsubscribe() {} } },
 			on(name: string, handler: (event: any) => unknown) {
 				handlers.set(name, handler)
 				return { unsubscribe() {} }
@@ -648,6 +665,7 @@ describe('work-hours plugin', () => {
 		const commands = new Map<string, (context: any) => unknown>()
 		const disposers: Array<() => unknown> = []
 		const amp = {
+			registerTool() { return { unsubscribe() {} } },
 			on() { return { unsubscribe() {} } },
 			registerCommand(id: string, _options: unknown, handler: (context: any) => unknown) {
 				commands.set(id, handler)
@@ -759,6 +777,7 @@ describe('work-hours plugin', () => {
 		let selection: string | undefined = 'Close'
 		let confirmed = false
 		const amp = {
+			registerTool() { return { unsubscribe() {} } },
 			on(name: string, handler: (event: any, context: any) => unknown) {
 				handlers.set(name, handler)
 				return { unsubscribe() {} }
@@ -876,6 +895,7 @@ describe('work-hours plugin', () => {
 		const disposers: Array<() => unknown> = []
 		let projectLookups = 0
 		const amp = {
+			registerTool() { return { unsubscribe() {} } },
 			on() { return { unsubscribe() {} } },
 			registerCommand(id: string, _options: unknown, handler: (context: any) => unknown) {
 				commands.set(id, handler)
@@ -942,6 +962,7 @@ describe('work-hours plugin', () => {
 		let projectLookups = 0
 		const project = { id: 'project-bta', name: 'BookThatApp React' }
 		const amp = {
+			registerTool() { return { unsubscribe() {} } },
 			on() { return { unsubscribe() {} } },
 			registerCommand(id: string, _options: unknown, handler: (context: any) => unknown) {
 				commands.set(id, handler)
@@ -996,6 +1017,7 @@ describe('work-hours plugin', () => {
 		const commands = new Map<string, (context: any) => unknown>()
 		const disposers: Array<() => unknown> = []
 		const amp = {
+			registerTool() { return { unsubscribe() {} } },
 			on() { return { unsubscribe() {} } },
 			registerCommand(id: string, _options: unknown, handler: (context: any) => unknown) {
 				commands.set(id, handler)
@@ -1067,6 +1089,7 @@ describe('work-hours plugin', () => {
 		let dispose = async () => {}
 		let tokenMintCalls = 0
 		const amp = {
+			registerTool() { return { unsubscribe() {} } },
 			logger: { log() {} },
 			on(name: string, handler: (event: any, context?: any) => unknown) {
 				const registered = handlers.get(name) ?? []

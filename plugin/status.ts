@@ -1,6 +1,94 @@
-import { MAX_CLIENT_CLOCK_SKEW_MS, type SummaryPeriod } from './protocol.ts'
-import type { CachedSummary, OutboxCounts, PersistedSyncState, TrackingGap } from './store.ts'
-import { formatMinutes } from './tracker.ts'
+import type { TokenProvider } from './auth.ts'
+import { TokenProviderError } from './auth.ts'
+import { ServiceRequestError, type CukupServiceClient } from './protocol.ts'
+import { MAX_CLIENT_CLOCK_SKEW_MS, type SummaryPeriod, type LimitPeriod, type Track, type TrackSummary } from './protocol.ts'
+import type { CachedSummary, OutboxCounts, PersistedSyncState, TrackingGap, WorkHoursStore } from './store.ts'
+import { formatMinutes, jakartaDateString, jakartaDayBounds } from './tracker.ts'
+
+/** Read metrics without running synchronization or changing local state. */
+export async function readWorkHoursStatus(input: {
+	client?: Pick<CukupServiceClient, 'fetchTrackSummary'>
+	track?: Track
+	tokenProvider: TokenProvider
+	store: Pick<WorkHoursStore, 'cachedSummary' | 'outboxCounts' | 'syncState'>
+	trackingGap: () => TrackingGap | undefined
+	now: () => number
+}): Promise<string> {
+	const track = input.track ?? 'work'
+	let summary: TrackSummary | undefined
+	let cache: CachedSummary | undefined
+	let transientErrorKind: string | undefined
+	try {
+		if (input.client) {
+			const token = await input.tokenProvider.getToken()
+			summary = await input.client.fetchTrackSummary(token, track)
+		} else {
+			transientErrorKind = 'configuration'
+		}
+	} catch (error) {
+		transientErrorKind = error instanceof TokenProviderError
+			? `authentication-${error.kind}`
+			: error instanceof ServiceRequestError ? error.kind : 'service'
+	}
+
+	let display: string
+	try {
+		const counts = input.store.outboxCounts()
+		const syncState = input.store.syncState()
+		const trackingGap = input.trackingGap()
+		if (summary) {
+			display = [
+				`AUTHORITATIVE${trackingGap ? ' · HISTORICAL TRACKING GAP' : ''} · ${summaryMetadata({ summary }, input.now())} · ${formatDiagnostics(counts, syncState)}`,
+				...(trackingGap ? [formatTrackingGap(trackingGap)] : []),
+				formatTrackPeriod('Today', summary.daily),
+				formatTrackPeriod('Week', summary.weekly),
+			].join('\n')
+		} else {
+			cache = input.store.cachedSummary()
+			display = [
+				`UNKNOWN · ${track} status unavailable. A legacy global summary cannot establish this track's status.`,
+				...(cache ? [
+					`STALE · LEGACY GLOBAL ACTIVITY ONLY${trackingGap ? ' · HISTORICAL TRACKING GAP' : ''} · ${summaryMetadata(cache, input.now())} · ${formatDiagnostics(counts, syncState, transientErrorKind)}`,
+					...(trackingGap ? [formatTrackingGap(trackingGap)] : []),
+					`Cached global daily activity: ${formatMinutes(cache.summary.daily.worked_minutes)}`,
+					`Cached global weekly activity: ${formatMinutes(cache.summary.weekly.worked_minutes)}`,
+					'Work/Play split unavailable. No goal or limit comparison is reported for cached activity.',
+				] : [formatStatusDisplay({ authoritative: false, counts, syncState, trackingGap, nowMs: input.now(), transientErrorKind })]),
+			].join('\n')
+		}
+	} catch {
+		return 'UNKNOWN · local diagnostics are unavailable. No complete status can be reported. No local state was changed.'
+	}
+
+	const scope = [`${summary ? 'Track' : 'Requested track'}: ${track}. Work = bta and bta-notes; Play = every other project, including Unassigned; All = global union.`, 'Scope: Asia/Jakarta; daily calendar day; weekly Monday–Sunday.']
+	const asOf = summary?.as_of ?? cache?.summary.as_of
+	if (asOf) {
+		const asOfMs = Date.parse(asOf)
+		const date = jakartaDateString(asOfMs)
+		const day = jakartaDayBounds(asOfMs)
+		const weekday = new Date(`${date}T00:00:00Z`).getUTCDay()
+		const mondayMs = day.startMs - ((weekday + 6) % 7) * 86_400_000
+		scope.push(`${summary ? 'Today/Week refer to the as_of snapshot' : 'Cached global snapshot scope'}: daily ${date}; weekly ${jakartaDateString(mondayMs)} through ${jakartaDateString(mondayMs + 6 * 86_400_000)}.`)
+	}
+	return [
+		display,
+		...scope,
+		'Legacy Working Time · turn-based; not measured human attention. Only Work counts toward the BTA Work goal. Play and All have limits, not goals to reach. Work + Play can exceed All because of overlap; do not add track, machine, or project totals.',
+		'Pending events are not uploaded by this read. Conflicts, rejections, and tracking gaps can limit coverage. No local estimate is added. A cached global summary is STALE and does not provide track status.',
+		'Diagnostics cover this executor only. They do not prove complete coverage on other executors. Existing tracking and background synchronization remain independent of this read.',
+	].join('\n')
+}
+
+function formatTrackPeriod(label: string, period: SummaryPeriod | LimitPeriod): string {
+	if ('upper_limit_minutes' in period) {
+		const boundary = period.status === 'EXCEEDED' ? 'upper' : 'soft'
+		const direction = period.status === 'WITHIN' ? 'below' : 'above'
+		return `${label}: ${period.status} · ${formatMinutes(period.worked_minutes)} · soft limit ${formatMinutes(period.target_minutes)} · upper limit ${formatMinutes(period.upper_limit_minutes)} · ${formatMinutes(period.difference_minutes)} ${direction} ${boundary} limit`
+	}
+	if (period.target_minutes === 0) return `${label}: NO SCHEDULED GOAL · ${formatMinutes(period.worked_minutes)} unplanned Work`
+	if (period.status === 'UNDER') return formatPeriod(label, period)
+	return `${label}: GOAL MET · ${formatMinutes(period.worked_minutes)} / ${formatMinutes(period.target_minutes)}`
+}
 
 export type StatusDisplayInput = {
 	cache?: CachedSummary
@@ -75,7 +163,7 @@ function formatPeriod(label: string, period: SummaryPeriod): string {
 	return `${label}: ${period.status} · ${progress} · ${formatMinutes(period.difference_minutes)} ${suffix}`
 }
 
-function summaryMetadata(cache: CachedSummary | undefined, nowMs: number): string {
+function summaryMetadata(cache: { summary: { as_of: string } } | undefined, nowMs: number): string {
 	if (!cache) return 'no authoritative summary'
 	const asOfMs = Date.parse(cache.summary.as_of)
 	return `as_of ${cache.summary.as_of} · age ${formatAge(Math.max(0, nowMs - asOfMs))}`
