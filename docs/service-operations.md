@@ -26,6 +26,18 @@ Production sets `CUKUP_NEW_TURN_EVENT_SCHEMA_VERSION=2`. Set it to `1` only to m
 
 Missing dashboard secrets disable dashboard routes. They do not disable ingestion. See [the dashboard contract](dashboard-service.md).
 
+## Read metrics through the plugin
+
+The development plugin provides the agent tool `work_hours_status`. Its optional `track` selects `work`, `play`, or `all`; the default is `work`. See the [tool registration](../plugin/index.ts) and [status reader](../plugin/status.ts). Local source changes do not activate or publish the tool. Service deployment, plugin publication, and activation require separate owner approval.
+
+Use this tool for a status read instead of UI automation, SQL, or direct credential access. It uses the existing protected token provider and `GET /v1/summary?track=work` (or `play` or `all`). It does not run synchronization, upload queued events, save a summary, acknowledge gaps, or change targets or attribution. Existing tracking hooks and background synchronization remain independent of the read.
+
+Report the returned freshness and `as_of`. Daily and Monday–Sunday weekly scope use Asia/Jakarta and the snapshot date, not the date of a later cached read. A failed or unsupported track read reports UNKNOWN for that track. It can show the existing global cache as a separate STALE legacy snapshot, never as track status. Cached activity has explicit global daily and weekly labels, without goal or limit comparisons. Missing data is not zero. The tool does not add a local estimate. Pending, conflict, rejection, clock, and tracking-gap diagnostics describe local coverage limits; they do not prove complete coverage on other executors.
+
+The track response reuses the dashboard's existing calculation. Work includes exactly `bta` and `bta-notes`. Play includes everything else, including Unassigned. Work has goals; Play and All have limits, not goals to reach. These totals are Legacy Working Time · turn-based, not measured human attention. Do not add overlapping track, machine, or project totals. Cukup does not decide when the owner must stop work.
+
+The summary endpoint without `track` retains its legacy global response and target policy. Existing synchronization and status commands keep that contract. The new client requires the requested track and timezone in the response, so an older service that ignores the query cannot appear track-aware. Deploy the compatible service before activating this tool.
+
 ## Publication and protected deployment operator
 
 Use the protected GitHub `production` environment for deployment. Do not use the retired off-site operator deployment operator.
