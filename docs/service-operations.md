@@ -61,6 +61,10 @@ After deployment, verify API health, authenticated API behavior, dashboard login
 
 Record the deployed immutable image and the prior known-good v4-aware image. Keep both available for rollback.
 
+The [canonical build](../Dockerfile.service) copies only the fixed Bun executable from a digest-pinned stable image. The builder and runtime filesystem remain unchanged. The [runtime check](../scripts/check-service-runtime.ts) verifies the executable hash and revision, native SQLite, rejection of both revoked test chains, and a valid TLS control. Publication checks the final image. Deployment checks the candidate image and live runtime.
+
+The [deployment operator](../scripts/deploy-service) permits one exact October 22 trust-remediated baseline by container name, container ID, image name, image ID, and runtime identity. Other unexpected baselines fail. For this transition, recovery starts the exact retained patched container; it does not recreate it or return to the vulnerable original runtime. Retain the original and patched images, containers, and recovery files. Do not modify the shared proxy or other applications. Cukup redeployment changes only its application target.
+
 SQLite `user_version=4` is the production floor. Never run a pre-v4 binary against a database opened by v4.
 
 For attribution rollback, prefer event schema v1 only for future starts. Continue to accept delayed and active v2 evidence.
