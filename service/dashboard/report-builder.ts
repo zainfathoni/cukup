@@ -21,6 +21,7 @@ import type {
 	DayBreakdown,
 	DayDetail,
 	ExecutorSummary,
+	OverallSummary,
 	Panel,
 	Timeline,
 	TimelineLane,
@@ -139,24 +140,7 @@ export function buildDashboardReport(
 			selection.timeline_date ?? civilDateString(localDateAt(nowMs, SERVICE_TIMEZONE)),
 		available_projects: labels.projects,
 		available_executors: labels.executors,
-		overall: buildPanel('Working-time summary is unavailable.', () => {
-			const today = localDateAt(nowMs, SERVICE_TIMEZONE)
-			const weekStart = addDays(today, -mondayOffset(today))
-			const intervals = track === 'all'
-				? buildGlobalIntervals(store.events(), nowMs)
-				: unionIntervals(attributedIntervals(store.attributedEvents(), nowMs, track))
-			const minutesSince = (date: CivilDate) => {
-				const startMs = startOfZonedDay(date, SERVICE_TIMEZONE)
-				return totalMinutes(intervals.map((interval) => ({
-					startMs: Math.max(startMs, interval.startMs),
-					endMs: Math.max(startMs, interval.endMs),
-				})))
-			}
-			return {
-				today: trackPeriod(track, minutesSince(today), today, store.targetOverrides()),
-				week: trackPeriod(track, minutesSince(weekStart), weekStart, store.targetOverrides(), 7),
-			}
-		}),
+		overall: buildPanel('Working-time summary is unavailable.', () => buildTrackSummary(store, track, nowMs)),
 		timeline: buildPanel('Activity timeline is unavailable.', () =>
 			buildTimeline(
 				attributedIntervals(store.attributedEvents(), nowMs, track),
@@ -176,6 +160,29 @@ export function buildDashboardReport(
 		executors: buildPanel('Executor details are unavailable.', () =>
 			buildExecutors(store.attributedEvents(), store.listBearerMetadata()),
 		),
+	}
+}
+
+export function buildTrackSummary(
+	store: Pick<DashboardReportStore, 'events' | 'attributedEvents' | 'targetOverrides'>,
+	track: Track,
+	nowMs: number,
+): OverallSummary {
+	const today = localDateAt(nowMs, SERVICE_TIMEZONE)
+	const weekStart = addDays(today, -mondayOffset(today))
+	const intervals = track === 'all'
+		? buildGlobalIntervals(store.events(), nowMs)
+		: unionIntervals(attributedIntervals(store.attributedEvents(), nowMs, track))
+	const minutesSince = (date: CivilDate) => {
+		const startMs = startOfZonedDay(date, SERVICE_TIMEZONE)
+		return totalMinutes(intervals.map((interval) => ({
+			startMs: Math.max(startMs, interval.startMs),
+			endMs: Math.max(startMs, interval.endMs),
+		})))
+	}
+	return {
+		today: trackPeriod(track, minutesSince(today), today, store.targetOverrides()),
+		week: trackPeriod(track, minutesSince(weekStart), weekStart, store.targetOverrides(), 7),
 	}
 }
 

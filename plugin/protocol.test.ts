@@ -22,6 +22,29 @@ const event: OutboxEvent = {
 }
 
 describe('CukupServiceClient', () => {
+	test('requires the requested track and timezone, and validates goal versus limit periods', async () => {
+		const period = { status: 'WITHIN', worked_minutes: 75, target_minutes: 60, upper_limit_minutes: 120, difference_minutes: 15 } as const
+		const valid = { schema_version: 1, track: 'play', timezone: 'Asia/Jakarta', as_of: '2026-08-31T05:00:00.000Z', daily: { ...period, status: 'TOLERANCE' }, weekly: { ...period, target_minutes: 420, upper_limit_minutes: 840, difference_minutes: 345 } } as const
+		let body: unknown = valid
+		const client = new CukupServiceClient('https://cukup.example', async () => Response.json(body))
+		expect(await client.fetchTrackSummary(token, 'play')).toEqual(valid)
+		for (const invalid of [
+			{ ...valid, track: 'all' },
+			{ ...valid, track: undefined },
+			{ ...valid, timezone: 'UTC' },
+			{ ...valid, schema_version: 2 },
+			{ ...valid, as_of: 'invalid' },
+			{ ...valid, daily: { ...period, status: 'UNDER' } },
+			{ ...valid, daily: { ...period, worked_minutes: -1 } },
+			{ ...valid, daily: { ...period, upper_limit_minutes: 59 } },
+		]) {
+			body = invalid
+			await expect(client.fetchTrackSummary(token, 'play')).rejects.toBeInstanceOf(ServiceRequestError)
+		}
+		body = { ...valid, track: 'work' }
+		await expect(client.fetchTrackSummary(token, 'work')).rejects.toBeInstanceOf(ServiceRequestError)
+	})
+
 	test('keeps event, summary, and capability schema contracts separate', () => {
 		expect(EVENT_SCHEMA_VERSION_V1).toBe(1)
 		expect(EVENT_SCHEMA_VERSION_V2).toBe(2)
