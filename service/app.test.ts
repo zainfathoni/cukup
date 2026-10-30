@@ -313,6 +313,13 @@ describe('HTTP boundary', () => {
 				difference_minutes: 2390,
 			},
 		})
+		for (const query of ['track=', 'track=Work', 'track=work&track=play', 'track=all&project=private-label']) {
+			const invalid = await value.app.fetch(request(`/v1/summary?${query}`, { token: value.token }))
+			expect(invalid.status).toBe(400)
+		}
+		expect((await value.app.fetch(request('/v1/summary?track=work'))).status).toBe(401)
+		expect((await value.app.fetch(request('/v1/summary?track=work', { token: value.token, method: 'POST' }))).status).toBe(405)
+		expect(value.logs.join('\n')).not.toContain('private-label')
 		value.store.close()
 	})
 
