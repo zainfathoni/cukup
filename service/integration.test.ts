@@ -4,15 +4,15 @@ import { existsSync } from 'node:fs'
 import { readWorkHoursStatus } from '../plugin/status.ts'
 import { createLocalStack } from './fixture.ts'
 
-test('status reads service totals without delivering pending local evidence', async () => {
-	const stack = createLocalStack()
+test('status reads service totals for configured Work projects without delivering pending local evidence', async () => {
+	const stack = createLocalStack({ workProjects: new Set(['client-portal', 'docs']) })
 	const { pluginStore, serviceStore, client, sync, nowMs } = stack
 	try {
 		const principal = serviceStore.authenticateBearer(stack.token)!
 		if (principal.kind !== 'bearer') throw new Error('Expected a fixture bearer')
 		serviceStore.bindExecutorLabel(principal.tokenId, 'synthetic-machine')
 		for (const [index, [projectSlug, start, end]] of ([
-			['bta', 180, 150], ['bta-notes', 165, 135], ['cukup', 150, 90], [null, 45, 30],
+			['client-portal', 180, 150], ['docs', 165, 135], ['client-portal-extra', 150, 90], [null, 45, 30],
 		] as const).entries()) {
 			const messageId = String(index)
 			pluginStore.record(
@@ -23,7 +23,7 @@ test('status reads service totals without delivering pending local evidence', as
 			pluginStore.recordEndIfStarted({ threadId: 'T-synthetic', messageId, kind: 'end', status: 'done', atMs: nowMs - end * 60_000 })
 		}
 		await sync.runNow()
-		pluginStore.record({ threadId: 'T-synthetic', messageId: 'pending', kind: 'start', atMs: nowMs - 20 * 60_000 }, undefined, { schemaVersion: 2, projectSlug: 'bta' })
+		pluginStore.record({ threadId: 'T-synthetic', messageId: 'pending', kind: 'start', atMs: nowMs - 20 * 60_000 }, undefined, { schemaVersion: 2, projectSlug: 'client-portal' })
 		pluginStore.recordEndIfStarted({ threadId: 'T-synthetic', messageId: 'pending', kind: 'end', status: 'done', atMs: nowMs - 5 * 60_000 })
 		const pluginDatabase = new Database(stack.pluginPath, { readonly: true })
 		const serviceDatabase = new Database(stack.servicePath, { readonly: true })
