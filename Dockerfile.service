@@ -18,6 +18,8 @@ COPY --from=fixed-bun /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /app
 RUN mkdir -p /var/lib/cukup && chown bun:bun /var/lib/cukup
 COPY --from=build --chown=bun:bun /app/dist/service ./
+COPY LICENSE ./licenses/Cukup.txt
+COPY --from=build /app/node_modules/jose/LICENSE.md ./licenses/jose.txt
 
 USER bun
 ENV CUKUP_DATABASE_PATH=/var/lib/cukup/cukup.sqlite \
