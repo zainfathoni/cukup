@@ -272,7 +272,7 @@ describe('signed-out player', () => {
 		expect(page).not.toMatch(/<script|<form|<iframe|style=/i)
 		expect(page).not.toMatch(/sign up now|join the|get started|download|install cukup|clone/i)
 
-		// Every destination is local and known.
+		// External links are allowed, but media and styles must stay local.
 		const ids = new Set([...page.matchAll(/ id="([^"]+)"/g)].map((match) => match[1]))
 		for (const [, attribute, value] of page.matchAll(/ (href|src|poster)="([^"]+)"/g)) {
 			if (value!.startsWith('#')) expect(ids).toContain(value!.slice(1))
@@ -284,6 +284,7 @@ describe('signed-out player', () => {
 					'https://ampcode.com/',
 					// The canonical link, which must be absolute.
 					'https://cukup.dev/',
+					...(attribute === 'href' ? ['https://github.com/zainfathoni/cukup'] : []),
 					...Object.values(EXPLAINER_ROUTES),
 				]).toContain(value!)
 			}
