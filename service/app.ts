@@ -1,6 +1,6 @@
 import { summarizeWork } from './aggregation.ts'
 import { isBearerToken, type OidcVerifier } from './auth.ts'
-import { DEFAULT_API_HOSTNAME, DEFAULT_DASHBOARD_HOSTNAME, SERVICE_TIMEZONE } from './config.ts'
+import { SERVICE_TIMEZONE } from './config.ts'
 import type { DashboardBackend } from './dashboard/backend.ts'
 import { EXPLAINER_ROUTES } from './dashboard/explainer.ts'
 import { buildTrackSummary } from './dashboard/report-builder.ts'
@@ -29,8 +29,8 @@ type AppOptions = {
 	trustTlsProxy?: boolean
 	fleetHostnames?: ReadonlySet<string>
 	preferredNewEventSchemaVersion?: 1 | 2
-	apiHostname?: string
-	dashboardHostname?: string
+	apiHostname: string
+	dashboardHostname: string
 	dashboard?: Pick<DashboardBackend, 'fetch'>
 }
 
@@ -41,8 +41,7 @@ export function createApp(options: AppOptions): { fetch(request: Request): Promi
 	const trustTlsProxy = options.trustTlsProxy ?? false
 	const fleetHostnames = options.fleetHostnames ?? new Set<string>()
 	const preferredNewEventSchemaVersion = options.preferredNewEventSchemaVersion ?? 1
-	const apiHostname = options.apiHostname ?? DEFAULT_API_HOSTNAME
-	const dashboardHostname = options.dashboardHostname ?? DEFAULT_DASHBOARD_HOSTNAME
+	const { apiHostname, dashboardHostname } = options
 
 	return {
 		async fetch(request: Request): Promise<Response> {

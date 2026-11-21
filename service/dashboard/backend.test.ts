@@ -473,6 +473,8 @@ describe('dashboard HTTP contract', () => {
 			})
 			return createApp({
 				store: serviceStore,
+				apiHostname: 'api.cukup.dev',
+				dashboardHostname: 'cukup.dev',
 				oidcVerifier: { verify: async () => false },
 				now: () => now,
 				logger: new ServiceLogger(() => {}),

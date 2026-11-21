@@ -3,17 +3,7 @@ set -Eeuo pipefail
 
 umask 077
 
-readonly EXPECTED_REPOSITORY="zainfathoni/cukup"
-readonly EXPECTED_ORIGIN="https://github.com/zainfathoni/cukup"
 readonly EXPECTED_SERVICE="cukup-service"
-readonly EXPECTED_SOURCE="$EXPECTED_ORIGIN"
-readonly EXPECTED_API_HOSTNAME="api.cukup.dev"
-readonly EXPECTED_DASHBOARD_HOSTNAME="cukup.dev"
-readonly TRUST_BASE_REVISION="30f256bb6a00e1680c4af24b4b1f987013f34267"
-readonly TRUST_BASE_VERSION="$TRUST_BASE_REVISION-trust20261022"
-readonly TRUST_BASE_IMAGE="fleet/cukup:trust-20261022"
-readonly TRUST_BASE_IMAGE_ID="sha256:b54881133d3009f8050e41d21eaea707d46e0044faee41b7b40162997e215d44"
-readonly TRUST_BASE_CONTAINER_ID="653e80f21340afb10da18aa9c31126242684c1dfcf213aeb10a2998790819f0e"
 
 mode="${1:-}"
 if [[ "$mode" != "preflight" && "$mode" != "deploy" ]]; then
@@ -24,7 +14,6 @@ fi
 required_environment=(
 	CUKUP_REVISION
 	CUKUP_RELEASE_ROOT
-	CUKUP_IMAGE
 	CUKUP_DEPLOY_HOST
 	CUKUP_SSH_USER
 	CUKUP_SSH_KEY
@@ -32,7 +21,7 @@ required_environment=(
 	CUKUP_DASHBOARD_HOSTNAME
 	CUKUP_DATA_DIRECTORY
 	CUKUP_BACKUP_DIRECTORY
-	KAMAL_REGISTRY_USERNAME
+	GITHUB_REPOSITORY
 	GITHUB_TOKEN
 	CUKUP_OIDC_ALLOWED_USER_ID
 	CUKUP_FLEET_HOSTNAMES
@@ -48,6 +37,32 @@ for name in "${required_environment[@]}"; do
 	}
 done
 
+[[ "$GITHUB_REPOSITORY" =~ ^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+$ ]] || {
+	printf 'invalid GitHub repository\n' >&2
+	exit 1
+}
+readonly EXPECTED_REPOSITORY="$GITHUB_REPOSITORY"
+readonly EXPECTED_SOURCE="https://github.com/$EXPECTED_REPOSITORY"
+CUKUP_IMAGE="$(printf '%s' "$EXPECTED_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+KAMAL_REGISTRY_USERNAME="${EXPECTED_REPOSITORY%/*}"
+readonly CUKUP_IMAGE KAMAL_REGISTRY_USERNAME
+export CUKUP_IMAGE KAMAL_REGISTRY_USERNAME
+
+readonly TRUST_BASE_VERSION="${CUKUP_TRUST_BASE_VERSION:-}"
+readonly TRUST_BASE_IMAGE="${CUKUP_TRUST_BASE_IMAGE:-}"
+readonly TRUST_BASE_IMAGE_ID="${CUKUP_TRUST_BASE_IMAGE_ID:-}"
+readonly TRUST_BASE_CONTAINER_ID="${CUKUP_TRUST_BASE_CONTAINER_ID:-}"
+readonly TRUST_BASE_REVISION="${TRUST_BASE_VERSION%%-*}"
+if [[ -n "$TRUST_BASE_VERSION$TRUST_BASE_IMAGE$TRUST_BASE_IMAGE_ID$TRUST_BASE_CONTAINER_ID" ]]; then
+	if [[ ! "$TRUST_BASE_VERSION" =~ ^[0-9a-f]{40}-[A-Za-z0-9][A-Za-z0-9.-]*$ ||
+		! "$TRUST_BASE_IMAGE" =~ ^[a-z0-9][a-z0-9._/-]*:[A-Za-z0-9_][A-Za-z0-9_.-]*$ ||
+		! "$TRUST_BASE_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ||
+		! "$TRUST_BASE_CONTAINER_ID" =~ ^[0-9a-f]{64}$ ]]; then
+		printf 'incomplete or invalid legacy rollback baseline\n' >&2
+		exit 1
+	fi
+fi
+
 readonly candidate="$CUKUP_REVISION"
 readonly release_root="$CUKUP_RELEASE_ROOT"
 readonly expected_image="ghcr.io/$CUKUP_IMAGE"
@@ -61,20 +76,15 @@ readonly remote_target="$CUKUP_SSH_USER@$CUKUP_DEPLOY_HOST"
 	printf 'release checkout is unavailable\n' >&2
 	exit 1
 }
-[[ "$CUKUP_IMAGE" == "zainfathoni/cukup" ]] || {
-	printf 'unexpected image\n' >&2
-	exit 1
-}
-[[ "$KAMAL_REGISTRY_USERNAME" == "zainfathoni" ]] || {
-	printf 'unexpected registry identity\n' >&2
-	exit 1
-}
-[[ "$CUKUP_API_HOSTNAME" == "$EXPECTED_API_HOSTNAME" ]] || {
-	printf 'unexpected API hostname\n' >&2
-	exit 1
-}
-[[ "$CUKUP_DASHBOARD_HOSTNAME" == "$EXPECTED_DASHBOARD_HOSTNAME" ]] || {
-	printf 'unexpected dashboard hostname\n' >&2
+hostname_label='[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?'
+for hostname in "$CUKUP_DEPLOY_HOST" "$CUKUP_API_HOSTNAME" "$CUKUP_DASHBOARD_HOSTNAME"; do
+	if [[ ! "$hostname" =~ ^$hostname_label(\.$hostname_label)*$ || ${#hostname} -gt 253 ]]; then
+		printf 'invalid deployment hostname\n' >&2
+		exit 1
+	fi
+done
+[[ "$CUKUP_SSH_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ && "$CUKUP_API_HOSTNAME" != "$CUKUP_DASHBOARD_HOSTNAME" ]] || {
+	printf 'invalid SSH user or duplicate public hostnames\n' >&2
 	exit 1
 }
 [[ "$CUKUP_DATA_DIRECTORY" =~ ^/[A-Za-z0-9._/-]+$ ]] || {
@@ -155,7 +165,7 @@ running_version() {
 	name="${name#/}"
 	version="${name#cukup-service-web-}"
 	[[ "$name" == "cukup-service-web-$version" ]] || return 1
-	[[ "$version" =~ ^[0-9a-f]{40}$ || "$version" == "$TRUST_BASE_VERSION" ]] || return 1
+	[[ "$version" =~ ^[0-9a-f]{40}$ || ( -n "$TRUST_BASE_VERSION" && "$version" == "$TRUST_BASE_VERSION" ) ]] || return 1
 	printf '%s\n' "$version"
 }
 
@@ -182,9 +192,11 @@ Binds:(.HostConfig.Binds | sort)
 }' | sha256sum | cut -d' ' -f1"
 }
 
-verify_runtime_secrets() {
+verify_runtime_configuration() {
 	local name expected_hash actual_hash matches=1
 	for name in \
+		CUKUP_API_HOSTNAME \
+		CUKUP_DASHBOARD_HOSTNAME \
 		CUKUP_OIDC_ALLOWED_USER_ID \
 		CUKUP_FLEET_HOSTNAMES \
 		CUKUP_GITHUB_OAUTH_CLIENT_ID \
@@ -193,11 +205,11 @@ verify_runtime_secrets() {
 		CUKUP_DASHBOARD_SESSION_KEYS; do
 		expected_hash="$(printf '%s' "${!name}" | sha256sum | cut -d' ' -f1)"
 		if ! actual_hash="$(remote "set -o pipefail; docker inspect '$prior_container' | jq -r --arg name '$name' '.[0].Config.Env | map(select(startswith(\$name + \"=\"))) | if length == 1 then .[0][(\$name | length) + 1:] else error(\"missing or duplicate environment entry\") end' | tr -d '\\n' | sha256sum | cut -d' ' -f1" 2>/dev/null)"; then
-			printf 'runtime secret is unavailable for comparison: %s\n' "$name" >&2
+			printf 'runtime setting is unavailable for comparison: %s\n' "$name" >&2
 			return 1
 		fi
 		if [[ "$actual_hash" != "$expected_hash" ]]; then
-			printf 'runtime secret does not match protected environment: %s\n' "$name" >&2
+			printf 'runtime setting does not match protected environment: %s\n' "$name" >&2
 			matches=0
 		fi
 	done
@@ -477,7 +489,7 @@ prior_version="${prior_name#cukup-service-web-}"
 [[ "$prior_container" =~ ^[0-9a-f]{64}$ ]]
 [[ "$prior_name" == "cukup-service-web-$prior_version" ]]
 prior_revision="$prior_version"
-if [[ "$prior_version" == "$TRUST_BASE_VERSION" ]]; then
+if [[ -n "$TRUST_BASE_VERSION" && "$prior_version" == "$TRUST_BASE_VERSION" ]]; then
 	[[ "$prior_image" == "$TRUST_BASE_IMAGE" ]]
 	[[ "$prior_container" == "$TRUST_BASE_CONTAINER_ID" ]]
 	[[ "$(remote "docker inspect '$prior_container' --format '{{.Image}}'")" == "$TRUST_BASE_IMAGE_ID" ]]
@@ -490,8 +502,9 @@ git -C "$release_root" merge-base --is-ancestor "$prior_revision" "$candidate"
 git -C "$release_root" show "$prior_revision:service/store.ts" | grep -Eq '^const DATABASE_VERSION = 4$'
 prior_runtime_hash="$(runtime_hash "$prior_container")"
 [[ "$prior_runtime_hash" =~ ^[0-9a-f]{64}$ ]]
-phase="runtime-secrets"
-verify_runtime_secrets
+phase="runtime-configuration"
+verify_runtime_configuration
+remote "set -o pipefail; docker inspect '$prior_container' | jq -e --arg source '$CUKUP_DATA_DIRECTORY' '.[0].Mounts | map(select(.Destination == \"/var/lib/cukup\")) | length == 1 and .[0].Type == \"bind\" and .[0].Source == \$source'" >/dev/null
 phase="current-service"
 verify_live_runtime "$prior_container" "$prior_version"
 verify_database

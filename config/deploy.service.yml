@@ -15,8 +15,8 @@ servers:
 proxy:
   ssl: true
   hosts:
-    - <%= ENV.fetch("CUKUP_API_HOSTNAME", "api.cukup.dev") %>
-    - <%= ENV.fetch("CUKUP_DASHBOARD_HOSTNAME", "cukup.dev") %>
+    - <%= ENV.fetch("CUKUP_API_HOSTNAME") %>
+    - <%= ENV.fetch("CUKUP_DASHBOARD_HOSTNAME") %>
   app_port: 3000
   healthcheck:
     path: /up
@@ -37,8 +37,8 @@ env:
   clear:
     CUKUP_HOST: 0.0.0.0
     CUKUP_BEHIND_TLS_PROXY: 1
-    CUKUP_API_HOSTNAME: <%= ENV.fetch("CUKUP_API_HOSTNAME", "api.cukup.dev") %>
-    CUKUP_DASHBOARD_HOSTNAME: <%= ENV.fetch("CUKUP_DASHBOARD_HOSTNAME", "cukup.dev") %>
+    CUKUP_API_HOSTNAME: <%= ENV.fetch("CUKUP_API_HOSTNAME") %>
+    CUKUP_DASHBOARD_HOSTNAME: <%= ENV.fetch("CUKUP_DASHBOARD_HOSTNAME") %>
     CUKUP_DATABASE_PATH: /var/lib/cukup/cukup.sqlite
     CUKUP_NEW_TURN_EVENT_SCHEMA_VERSION: 2
     PORT: 3000
@@ -51,4 +51,4 @@ env:
     - CUKUP_DASHBOARD_SESSION_KEYS
 
 volumes:
-  - "<%= ENV.fetch('CUKUP_DATA_DIRECTORY', '/srv/example-cukup-data') %>:/var/lib/cukup"
+  - "<%= ENV.fetch('CUKUP_DATA_DIRECTORY') %>:/var/lib/cukup"
