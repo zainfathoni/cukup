@@ -337,8 +337,9 @@ verify_source_authorization() {
 		' <<< "$commit_json" >/dev/null || return 1
 	done
 
+	# The API's completed filter can omit successful reruns. Check status locally.
 	runs_json="$(gh api -X GET "repos/$EXPECTED_REPOSITORY/actions/workflows/publish-service.yml/runs" \
-		-f branch=main -f head_sha="$candidate" -f status=completed -f per_page=100)" || return 1
+		-f branch=main -f head_sha="$candidate" -f per_page=100)" || return 1
 	jq -e --arg sha "$candidate" '
 		any(.workflow_runs[];
 			.name == "Publish service image" and
