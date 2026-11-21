@@ -33,6 +33,7 @@ if (!directTls && !behindTlsProxy && !loopbackOnly) {
 const allowedOidcUserId = configuredAllowedOidcUserId()
 const apiHostname = configuredApiHostname()
 const dashboardHostname = configuredDashboardHostname()
+if (apiHostname === dashboardHostname) throw new Error('API and dashboard hostnames must be different')
 const dashboardConfiguration = configuredDashboard(process.env, dashboardHostname)
 const fleetHostnames = configuredFleetHostnames()
 const preferredNewEventSchemaVersion = configuredNewTurnEventSchemaVersion()

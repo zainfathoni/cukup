@@ -70,12 +70,14 @@ export function createLocalStack(options: LocalStackOptions = {}): LocalStack {
 		const issued = createdServiceStore.issueBearer(nowMs)
 		const app = createApp({
 			store: createdServiceStore,
+			apiHostname: 'api.example.test',
+			dashboardHostname: 'dashboard.example.test',
 			oidcVerifier: { verify: async () => false },
 			now,
 			logger: new ServiceLogger(() => {}),
 		})
 		const client = new CukupServiceClient(
-			'https://api.cukup.dev',
+			'https://api.example.test',
 			(input, init) => app.fetch(new Request(input, init)),
 			now,
 		)

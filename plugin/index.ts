@@ -41,9 +41,9 @@ export const description =
 export default function (amp: PluginAPI) {
 	const store = new WorkHoursStore()
 	const now = Date.now
-	const serviceURL = process.env.CUKUP_SERVICE_URL?.trim() || 'https://api.cukup.dev'
+	const serviceURL = process.env.CUKUP_SERVICE_URL?.trim()
 	const client = createClient(serviceURL, now)
-	const tokenProvider = selectTokenProvider(amp)
+	const tokenProvider = client ? selectTokenProvider(amp) : unavailableTokenProvider()
 	const sync = new SyncEngine({
 		store,
 		client,
@@ -53,7 +53,7 @@ export default function (amp: PluginAPI) {
 	})
 	const legacyAmpAdapter = createLegacyAmpAdapter({ amp, store, sync, now })
 	const { resolveProjectAttribution } = legacyAmpAdapter
-	const experimentalAmpShadowCollector = startExperimentalAmpShadowCollector(amp)
+	const experimentalAmpShadowCollector = serviceURL ? startExperimentalAmpShadowCollector(amp) : undefined
 
 	async function acknowledgeTrackingGap(ctx: PluginCommandContext): Promise<void> {
 		if (!sync.trackingGap()) {
@@ -205,7 +205,7 @@ export default function (amp: PluginAPI) {
 			})
 			if (!confirmed) return
 			if (!client) {
-				await ctx.ui.notify('Authoritative day-off update failed. The Cukup service is unavailable.')
+				await ctx.ui.notify('Authoritative day-off update failed. Set CUKUP_SERVICE_URL to your Cukup API origin.')
 				return
 			}
 			try {

@@ -222,7 +222,7 @@ function errorLabel(kind: string): string {
 		case 'local-state':
 			return 'LOCAL STATE ERROR'
 		case 'configuration':
-			return 'NOT CONFIGURED'
+			return 'NOT CONFIGURED: set CUKUP_SERVICE_URL to your Cukup API origin'
 		default:
 			return kind.toUpperCase()
 	}

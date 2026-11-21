@@ -5,6 +5,7 @@
 
 # Root project metadata.
 !/.dockerignore
+!/.env.example
 !/.gitignore
 !/*.md
 !/Dockerfile.*

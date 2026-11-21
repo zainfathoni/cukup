@@ -47,14 +47,16 @@ jobs:
       CUKUP_REVISION: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.revision }}
       CUKUP_OPERATION: ${{ github.event_name == 'workflow_run' && 'deploy' || inputs.operation }}
       CUKUP_RELEASE_ROOT: ${{ github.workspace }}/release
-      CUKUP_IMAGE: ${{ vars.CUKUP_IMAGE || 'zainfathoni/cukup' }}
-      CUKUP_DEPLOY_HOST: ${{ vars.CUKUP_DEPLOY_HOST || '103.235.75.227' }}
-      CUKUP_SSH_USER: ${{ vars.CUKUP_SSH_USER || 'openclaw' }}
-      CUKUP_API_HOSTNAME: ${{ vars.CUKUP_API_HOSTNAME || 'api.cukup.dev' }}
-      CUKUP_DASHBOARD_HOSTNAME: ${{ vars.CUKUP_DASHBOARD_HOSTNAME || 'cukup.dev' }}
-      CUKUP_DATA_DIRECTORY: ${{ vars.CUKUP_DATA_DIRECTORY || '/srv/cukup' }}
-      CUKUP_BACKUP_DIRECTORY: ${{ vars.CUKUP_BACKUP_DIRECTORY || '/srv/cukup-backups' }}
-      KAMAL_REGISTRY_USERNAME: ${{ vars.KAMAL_REGISTRY_USERNAME || 'zainfathoni' }}
+      CUKUP_DEPLOY_HOST: ${{ vars.CUKUP_DEPLOY_HOST }}
+      CUKUP_SSH_USER: ${{ vars.CUKUP_SSH_USER }}
+      CUKUP_API_HOSTNAME: ${{ vars.CUKUP_API_HOSTNAME }}
+      CUKUP_DASHBOARD_HOSTNAME: ${{ vars.CUKUP_DASHBOARD_HOSTNAME }}
+      CUKUP_DATA_DIRECTORY: ${{ vars.CUKUP_DATA_DIRECTORY }}
+      CUKUP_BACKUP_DIRECTORY: ${{ vars.CUKUP_BACKUP_DIRECTORY }}
+      CUKUP_TRUST_BASE_VERSION: ${{ vars.CUKUP_TRUST_BASE_VERSION }}
+      CUKUP_TRUST_BASE_IMAGE: ${{ vars.CUKUP_TRUST_BASE_IMAGE }}
+      CUKUP_TRUST_BASE_IMAGE_ID: ${{ vars.CUKUP_TRUST_BASE_IMAGE_ID }}
+      CUKUP_TRUST_BASE_CONTAINER_ID: ${{ vars.CUKUP_TRUST_BASE_CONTAINER_ID }}
       KAMAL_REGISTRY_PASSWORD: ${{ secrets.KAMAL_REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
       CUKUP_OIDC_ALLOWED_USER_ID: ${{ secrets.CUKUP_OIDC_ALLOWED_USER_ID }}
       CUKUP_FLEET_HOSTNAMES: ${{ secrets.CUKUP_FLEET_HOSTNAMES }}
@@ -110,8 +112,8 @@ jobs:
         run: |
           set -euo pipefail
           required=(
-            CUKUP_IMAGE CUKUP_DEPLOY_HOST CUKUP_SSH_USER
-            KAMAL_REGISTRY_USERNAME KAMAL_REGISTRY_PASSWORD
+            CUKUP_DEPLOY_HOST CUKUP_SSH_USER CUKUP_API_HOSTNAME CUKUP_DASHBOARD_HOSTNAME
+            CUKUP_DATA_DIRECTORY CUKUP_BACKUP_DIRECTORY KAMAL_REGISTRY_PASSWORD
             CUKUP_OIDC_ALLOWED_USER_ID CUKUP_FLEET_HOSTNAMES
             CUKUP_GITHUB_OAUTH_CLIENT_ID CUKUP_GITHUB_OAUTH_CLIENT_SECRET
             CUKUP_GITHUB_ALLOWED_USER_ID CUKUP_DASHBOARD_SESSION_KEYS
