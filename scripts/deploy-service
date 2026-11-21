@@ -334,16 +334,18 @@ verify_service() {
 
 verify_remote_image() {
 	local image_json
-	image_json="$(remote "docker image inspect '${1:-$expected_image:$candidate}'" 2>/dev/null)" || return 1
-	jq -e --arg sha "$candidate" --arg service "$EXPECTED_SERVICE" --arg source "$EXPECTED_SOURCE" \
-		--arg digest "${cutover_digest:+$expected_image@$cutover_digest}" '
-		length == 1 and
-		.[0].Os == "linux" and .[0].Architecture == "amd64" and
-		.[0].Config.Labels.service == $service and
-		.[0].Config.Labels["org.opencontainers.image.source"] == $source and
-		.[0].Config.Labels["org.opencontainers.image.revision"] == $sha and
-		($digest == "" or any(.[0].RepoDigests[]; . == $digest))
-	' <<< "$image_json" >/dev/null
+	image_json="$(remote "docker image inspect '$expected_image:$candidate'" 2>/dev/null)" || return 1
+	jq -er --arg sha "$candidate" --arg service "$EXPECTED_SERVICE" --arg source "$EXPECTED_SOURCE" \
+		--argjson digests "$verified_repo_digests" --arg digest "${cutover_digest:+$expected_image@$cutover_digest}" '
+		select(length == 1 and
+			.[0].Os == "linux" and .[0].Architecture == "amd64" and
+			.[0].Config.Labels.service == $service and
+			.[0].Config.Labels["org.opencontainers.image.source"] == $source and
+			.[0].Config.Labels["org.opencontainers.image.revision"] == $sha and
+			any(.[0].RepoDigests[]; . as $remote | $digests | index($remote) != null) and
+			($digest == "" or any(.[0].RepoDigests[]; . == $digest)))
+		| .[0].Id | select(test("^sha256:[0-9a-f]{64}$"))
+	' <<< "$image_json" 2>/dev/null
 }
 
 verify_source_authorization() {
@@ -388,16 +390,30 @@ verify_local_image() {
 	local image_json
 	docker pull --quiet --platform linux/amd64 "$expected_image:$candidate" >/dev/null 2>&1
 	image_json="$(docker image inspect "$expected_image:$candidate" 2>/dev/null)"
-	jq -e --arg sha "$candidate" --arg service "$EXPECTED_SERVICE" --arg source "$EXPECTED_SOURCE" --arg image "$expected_image" \
+	verified_repo_digests="$(jq -ce --arg sha "$candidate" --arg service "$EXPECTED_SERVICE" --arg source "$EXPECTED_SOURCE" --arg image "$expected_image" \
 		--arg digest "${cutover_digest:+$expected_image@$cutover_digest}" '
-		length == 1 and .[0].Os == "linux" and .[0].Architecture == "amd64" and
-		.[0].Config.Labels.service == $service and
-		.[0].Config.Labels["org.opencontainers.image.source"] == $source and
-		.[0].Config.Labels["org.opencontainers.image.revision"] == $sha and
-		any(.[0].RepoDigests[]; if $digest == "" then startswith($image + "@sha256:") else . == $digest end)
-	' <<< "$image_json" >/dev/null
+		select(length == 1 and .[0].Os == "linux" and .[0].Architecture == "amd64" and
+			.[0].Config.Labels.service == $service and
+			.[0].Config.Labels["org.opencontainers.image.source"] == $source and
+			.[0].Config.Labels["org.opencontainers.image.revision"] == $sha)
+		| [.[0].RepoDigests[] | select(if $digest == "" then startswith($image + "@sha256:") else . == $digest end)]
+		| select(length > 0)
+	' <<< "$image_json")"
 	docker run --rm --read-only -i --entrypoint bun "$expected_image:$candidate" run - \
 		< "$release_root/scripts/check-service-runtime.ts" >/dev/null 2>&1
+}
+
+stage_remote_image() {
+	local attempt
+	for attempt in 1 2 3; do
+		if run_kamal "$candidate" build pull >/dev/null 2>&1; then
+			staged_image_id="$(verify_remote_image)"
+			return
+		fi
+		printf 'remote image pull failed on attempt %s of 3\n' "$attempt" >&2
+		if (( attempt < 3 )); then sleep "$((attempt * 2))"; fi
+	done
+	return 1
 }
 
 render_config() {
@@ -586,7 +602,7 @@ fi
 
 if [[ "$prior_version" == "$candidate" ]]; then
 	phase="already-current"
-	verify_remote_image
+	verify_remote_image >/dev/null
 	summary "success-no-mutation"
 	exit 0
 fi
@@ -600,12 +616,11 @@ backup_base="$(take_predeploy_backup)"
 verify_independent_backup
 verify_preservation
 
+# Complete the registry transfer while the known-good service is still running.
+phase="remote-image-staging"
+stage_remote_image || on_error
+
 phase="final-authorization"
-if [[ -n "$cutover" ]]; then
-	# Boot the verified local tag without pulling it again during the cutover.
-	run_kamal "$candidate" build pull >/dev/null 2>&1 || on_error
-	verify_remote_image
-fi
 verify_source_authorization
 if [[ -n "$cutover" ]]; then
 	verify_cutover_baseline
@@ -615,24 +630,16 @@ fi
 phase="deploy"
 mutation_started=1
 # Handle failure outside the redirection so phase and rollback messages stay visible.
-if [[ -n "$cutover" ]]; then
-	run_kamal "$candidate" app boot --version "$candidate" >/dev/null 2>&1 || on_error
-else
-	run_kamal "$candidate" redeploy --skip-push >/dev/null 2>&1 || on_error
-fi
+run_kamal "$candidate" app boot --version "$candidate" >/dev/null 2>&1 || on_error
 
 phase="post-deploy"
 [[ "$(running_version)" == "$candidate" ]]
-verify_remote_image
+[[ "$(verify_remote_image)" == "$staged_image_id" ]]
 post_info="$(running_info)"
 IFS=$'\t' read -r post_container post_name post_image <<< "$post_info"
 [[ "${post_name#/}" == "cukup-service-web-$candidate" ]]
 [[ "$post_image" == "$expected_image:$candidate" ]]
-if [[ -n "$cutover" ]]; then
-	post_image_id="$(remote "docker inspect '$post_container' --format '{{.Image}}'")"
-	[[ "$post_image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
-	verify_remote_image "$post_image_id"
-fi
+[[ "$(remote "docker inspect '$post_container' --format '{{.Image}}'")" == "$staged_image_id" ]]
 [[ "$(runtime_hash "$post_container" CUKUP_WORK_PROJECTS)" == "$prior_preserved_runtime_hash" ]]
 verify_runtime_configuration "$post_container" CUKUP_WORK_PROJECTS
 remote "docker container inspect '$prior_container'" >/dev/null
