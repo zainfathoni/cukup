@@ -5,6 +5,7 @@ import {
 	configuredDashboardHostname,
 	configuredFleetHostnames,
 	configuredNewTurnEventSchemaVersion,
+	configuredWorkProjects,
 	isCanonicalFleetHostname,
 	isCanonicalProjectSlug,
 } from './config.ts'
@@ -34,6 +35,14 @@ describe('attribution configuration', () => {
 		expect(isCanonicalProjectSlug('a'.repeat(65))).toBeFalse()
 		expect(isCanonicalProjectSlug('cukup_service')).toBeFalse()
 	})
+
+	test('accepts a Work list, leaves blank lists empty, and rejects malformed entries', () => {
+		expect([...configuredWorkProjects('client-portal, docs,client-portal')]).toEqual(['client-portal', 'docs'])
+		expect(configuredWorkProjects(' ').size).toBe(0)
+		for (const value of ['client-portal,', 'client-portal,,docs', 'Client-Portal', 'a'.repeat(65)]) {
+			expect(() => configuredWorkProjects(value)).toThrow('CUKUP_WORK_PROJECTS')
+		}
+	})
 })
 
 describe('dashboard configuration', () => {
@@ -45,10 +54,10 @@ describe('dashboard configuration', () => {
 			CUKUP_GITHUB_OAUTH_CLIENT_SECRET: 'client-secret',
 			CUKUP_GITHUB_ALLOWED_USER_ID: '12345678',
 			CUKUP_DASHBOARD_SESSION_KEYS: `${first},${second}`,
-		})
+		}, 'dashboard.example.test')
 		expect(value).toMatchObject({
-			hostname: 'cukup.dev',
-			callbackUrl: 'https://cukup.dev/auth/github/callback',
+			hostname: 'dashboard.example.test',
+			callbackUrl: 'https://dashboard.example.test/auth/github/callback',
 			allowedGithubUserId: '12345678',
 		})
 		expect(value?.sessionKeys).toEqual([Buffer.alloc(32, 1), Buffer.alloc(32, 2)])
@@ -61,20 +70,22 @@ describe('dashboard configuration', () => {
 			CUKUP_GITHUB_ALLOWED_USER_ID: '12345678',
 			CUKUP_DASHBOARD_SESSION_KEYS: Buffer.alloc(32, 1).toString('base64url'),
 		}
-		expect(configuredDashboard({})).toBeUndefined()
+		expect(configuredDashboard({}, 'dashboard.example.test')).toBeUndefined()
 		for (const overrides of [
 			{ CUKUP_GITHUB_ALLOWED_USER_ID: 'login-name' },
 			{ CUKUP_GITHUB_ALLOWED_USER_ID: '9007199254740992' },
 			{ CUKUP_GITHUB_OAUTH_CLIENT_ID: 'contains whitespace' },
 			{ CUKUP_DASHBOARD_SESSION_KEYS: 'too-short' },
 		]) {
-			expect(configuredDashboard({ ...valid, ...overrides })).toBeUndefined()
+			expect(configuredDashboard({ ...valid, ...overrides }, 'dashboard.example.test')).toBeUndefined()
 		}
 	})
 
 	test('uses canonical exact hostnames for host-first routing', () => {
-		expect(configuredApiHostname(undefined)).toBe('api.cukup.dev')
-		expect(configuredDashboardHostname(undefined)).toBe('cukup.dev')
+		expect(configuredApiHostname(' api.example.test ')).toBe('api.example.test')
+		expect(configuredDashboardHostname('dashboard.example.test')).toBe('dashboard.example.test')
+		expect(() => configuredApiHostname('')).toThrow('CUKUP_API_HOSTNAME')
+		expect(() => configuredDashboardHostname(' ')).toThrow('CUKUP_DASHBOARD_HOSTNAME')
 		expect(() => configuredApiHostname('API.cukup.dev')).toThrow()
 		expect(() => configuredDashboardHostname('cukup.dev:443')).toThrow()
 	})

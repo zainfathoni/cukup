@@ -60,6 +60,8 @@ function fixture(path = databasePath()): {
 		logs,
 		app: createApp({
 			store,
+			apiHostname: 'api.cukup.dev',
+			dashboardHostname: 'cukup.dev',
 			oidcVerifier: { verify: async (value) => value === workloadToken() },
 			now: () => now,
 			logger: new ServiceLogger((line) => logs.push(line)),
@@ -118,6 +120,8 @@ describe('HTTP boundary', () => {
 
 		const proxied = createApp({
 			store: value.store,
+			apiHostname: 'api.cukup.dev',
+			dashboardHostname: 'cukup.dev',
 			oidcVerifier: { verify: async () => false },
 			now: () => now,
 			logger: new ServiceLogger(() => {}),
@@ -146,6 +150,8 @@ describe('HTTP boundary', () => {
 
 		const v2Preferred = createApp({
 			store: value.store,
+			apiHostname: 'api.cukup.dev',
+			dashboardHostname: 'cukup.dev',
 			oidcVerifier: { verify: async () => false },
 			now: () => now,
 			logger: new ServiceLogger(() => {}),
@@ -518,6 +524,8 @@ test('persists authenticated ingestion across a clean store restart', async () =
 	const reopened = new ServiceStore(path)
 	const app = createApp({
 		store: reopened,
+		apiHostname: 'api.cukup.dev',
+		dashboardHostname: 'cukup.dev',
 		oidcVerifier: { verify: async () => false },
 		now: () => now,
 		logger: new ServiceLogger(() => {}),

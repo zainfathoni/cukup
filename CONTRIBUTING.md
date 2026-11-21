@@ -24,6 +24,8 @@ bun run check
 
 These are local checks, not publication steps. Use synthetic data and the [local integration fixture](service/fixture.ts), not production credentials or databases.
 
+The `Cukup checks` CI job runs the same commands on Ubuntu for pull requests into `main` and pushes to `main`. CI does not publish or deploy. To block untested changes, require this check and require pull requests in the protection rules for `main`. A check on a direct push reports failures after the push; it does not block the push.
+
 ## What belongs in a pull request?
 
 - The issue, intended outcome, and non-goals.

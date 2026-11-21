@@ -1,6 +1,6 @@
 import { summarizeWork } from './aggregation.ts'
 import { isBearerToken, type OidcVerifier } from './auth.ts'
-import { DEFAULT_API_HOSTNAME, DEFAULT_DASHBOARD_HOSTNAME, SERVICE_TIMEZONE } from './config.ts'
+import { SERVICE_TIMEZONE } from './config.ts'
 import type { DashboardBackend } from './dashboard/backend.ts'
 import { EXPLAINER_ROUTES } from './dashboard/explainer.ts'
 import { buildTrackSummary } from './dashboard/report-builder.ts'
@@ -29,8 +29,9 @@ type AppOptions = {
 	trustTlsProxy?: boolean
 	fleetHostnames?: ReadonlySet<string>
 	preferredNewEventSchemaVersion?: 1 | 2
-	apiHostname?: string
-	dashboardHostname?: string
+	workProjects?: ReadonlySet<string>
+	apiHostname: string
+	dashboardHostname: string
 	dashboard?: Pick<DashboardBackend, 'fetch'>
 }
 
@@ -41,8 +42,7 @@ export function createApp(options: AppOptions): { fetch(request: Request): Promi
 	const trustTlsProxy = options.trustTlsProxy ?? false
 	const fleetHostnames = options.fleetHostnames ?? new Set<string>()
 	const preferredNewEventSchemaVersion = options.preferredNewEventSchemaVersion ?? 1
-	const apiHostname = options.apiHostname ?? DEFAULT_API_HOSTNAME
-	const dashboardHostname = options.dashboardHostname ?? DEFAULT_DASHBOARD_HOSTNAME
+	const { apiHostname, dashboardHostname } = options
 
 	return {
 		async fetch(request: Request): Promise<Response> {
@@ -82,6 +82,7 @@ export function createApp(options: AppOptions): { fetch(request: Request): Promi
 									now,
 									fleetHostnames,
 									preferredNewEventSchemaVersion,
+									options.workProjects,
 								)
 							: json(
 									{ error: 'unauthorized' },
@@ -119,6 +120,7 @@ async function authenticatedResponse(
 	now: () => number,
 	fleetHostnames: ReadonlySet<string>,
 	preferredNewEventSchemaVersion: 1 | 2,
+	workProjects: ReadonlySet<string> | undefined,
 ): Promise<Response> {
 	if (url.pathname === '/v1/time') {
 		return request.method === 'GET'
@@ -136,7 +138,7 @@ async function authenticatedResponse(
 			url.searchParams.size !== 1
 		) return json({ error: 'invalid_request' }, 400)
 		const nowMs = now()
-		const summary = buildTrackSummary(store, track, nowMs)
+		const summary = buildTrackSummary(store, track, nowMs, workProjects)
 		return json({
 			schema_version: 1,
 			track,

@@ -38,6 +38,7 @@ for argument in "$@"; do
 		break
 	fi
 done
+[[ "$endpoint" == repos/Example-Owner/Cukup/* ]]
 case "$endpoint" in
 	*/git/ref/heads/main)
 		printf '%s\n' "$TEST_CANDIDATE"
@@ -76,15 +77,17 @@ if [[ "$1" == run ]]; then
 	exit
 fi
 if [[ "$1 $2" == "image inspect" ]]; then
-	jq -n --arg sha "$TEST_CANDIDATE" '[{
+	source=https://github.com/Example-Owner/Cukup
+	if [[ "${TEST_BAD_IMAGE_SOURCE:-0}" == 1 ]]; then source=https://github.com/Other-Owner/Cukup; fi
+	jq -n --arg sha "$TEST_CANDIDATE" --arg source "$source" '[{
 		Os: "linux",
 		Architecture: "amd64",
 		Config: { Labels: {
 			service: "cukup-service",
-			"org.opencontainers.image.source": "https://github.com/zainfathoni/cukup",
+			"org.opencontainers.image.source": $source,
 			"org.opencontainers.image.revision": $sha
 		} },
-		RepoDigests: ["ghcr.io/zainfathoni/cukup@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+		RepoDigests: ["ghcr.io/example-owner/cukup@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
 	}]'
 	exit 0
 fi
@@ -95,6 +98,7 @@ cat > "$fake_bin/kamal" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s %s\n' "${VERSION:-}" "$*" >> "$TEST_KAMAL_LOG"
+[[ "$CUKUP_IMAGE" == example-owner/cukup && "$KAMAL_REGISTRY_USERNAME" == Example-Owner ]]
 if [[ "$*" == *"lock status"* ]]; then
 	if [[ "${TEST_LOCKED:-0}" == 1 ]]; then
 		printf 'Locked by: prior deployment\n'
@@ -105,8 +109,16 @@ fi
 if [[ "$1" == redeploy ]]; then
 	printf candidate > "$TEST_RUNNING_STATE"
 	[[ "${TEST_DEPLOY_FAIL:-0}" != 1 ]]
+elif [[ "$1" == rollback ]]; then
+	[[ "$VERSION" == "$TEST_PRIOR" && "$2" == "$TEST_PRIOR" ]]
+	if [[ -v CUKUP_WORK_PROJECTS ]]; then
+		printf 'CUKUP_WORK_PROJECTS=%s' "$CUKUP_WORK_PROJECTS" > "$TEST_RUNNING_STATE.rollback-env"
+	else
+		: > "$TEST_RUNNING_STATE.rollback-env"
+	fi
+	printf rolled-back > "$TEST_RUNNING_STATE"
 elif [[ "$1 $2" == 'app start' ]]; then
-	[[ "$VERSION" == '30f256bb6a00e1680c4af24b4b1f987013f34267-trust20261022' ]]
+	[[ "$VERSION" == '1111111111111111111111111111111111111111-trust-test' ]]
 	[[ "${TEST_START_FAILURE:-0}" != 1 ]]
 	if [[ "$(cat "$TEST_RUNNING_STATE")" == candidate ]]; then
 		printf both > "$TEST_RUNNING_STATE"
@@ -129,33 +141,49 @@ case "$command" in
 	*"docker ps -q"*)
 		[[ "$state" != both && "$state" != stopped ]]
 		version="$TEST_PRIOR"
-		image="ghcr.io/zainfathoni/cukup:$version"
+		image="ghcr.io/example-owner/cukup:$version"
 		id="$(printf 'b%.0s' {1..64})"
 		if [[ "$state" == candidate ]]; then
 			version="$TEST_CANDIDATE"
-			image="ghcr.io/zainfathoni/cukup:$version"
+			image="ghcr.io/example-owner/cukup:$version"
 			id="$(printf 'd%.0s' {1..64})"
 		elif [[ "${TEST_TRUST_BASELINE:-0}" == 1 ]]; then
-			version='30f256bb6a00e1680c4af24b4b1f987013f34267-trust20261022'
-			image='fleet/cukup:trust-20261022'
-			id='653e80f21340afb10da18aa9c31126242684c1dfcf213aeb10a2998790819f0e'
+			version='1111111111111111111111111111111111111111-trust-test'
+			image='example-owner/cukup:trust-test'
+			id="$(printf 'e%.0s' {1..64})"
 			if [[ "${TEST_BAD_BASELINE_NAME:-0}" == 1 ]]; then version="$version-other"; fi
-			if [[ "${TEST_BAD_BASELINE_IMAGE:-0}" == 1 ]]; then image='fleet/cukup:unknown'; fi
+			if [[ "${TEST_BAD_BASELINE_IMAGE:-0}" == 1 ]]; then image='example-owner/cukup:unknown'; fi
 			if [[ "${TEST_BAD_BASELINE_CONTAINER_ID:-0}" == 1 ]]; then id="$(printf 'b%.0s' {1..64})"; fi
-			if [[ -f "$TEST_RUNNING_STATE.recreated" ]]; then id="$(printf 'e%.0s' {1..64})"; fi
+			if [[ -f "$TEST_RUNNING_STATE.recreated" ]]; then id="$(printf 'f%.0s' {1..64})"; fi
 		fi
 		printf '%s\t/%s\t%s\n' \
 			"$id" "cukup-service-web-$version" "$image"
 		;;
 	*"--format '{{.Image}}'"*)
 		if [[ "${TEST_BAD_BASELINE_ID:-0}" == 1 ]]; then printf 'sha256:wrong\n'
-		else printf 'sha256:b54881133d3009f8050e41d21eaea707d46e0044faee41b7b40162997e215d44\n'; fi
+		else printf 'sha256:%s\n' "$(printf 'a%.0s' {1..64})"; fi
 		;;
 	*"bun run -"*)
 		[[ "${TEST_BAD_RUNTIME:-0}" != 1 ]]
 		if [[ "$state" == candidate && "${TEST_POST_RUNTIME_FAILURE:-0}" == 1 ]]; then exit 1; fi
 		;;
-	*"Config.Env"*) printf '%s\n' "$(printf '%s' "${TEST_RUNTIME_SECRET_VALUE:-test}" | sha256sum | cut -d' ' -f1)" ;;
+	*"--arg name 'CUKUP_API_HOSTNAME'"*) printf '%s' "${TEST_RUNNING_API_HOST:-api.example.test}" | sha256sum | cut -d' ' -f1 ;;
+	*"--arg name 'CUKUP_DASHBOARD_HOSTNAME'"*) printf '%s' dashboard.example.test | sha256sum | cut -d' ' -f1 ;;
+	*"--arg name 'CUKUP_WORK_PROJECTS'"*|*"--arg ignore "*)
+		environment='["KAMAL_VERSION=fixture","PORT=3000"]'
+		if [[ "$state" == candidate ]]; then
+			environment="$(jq -c --arg setting "CUKUP_WORK_PROJECTS=${TEST_RUNNING_WORK_PROJECTS-client-portal,docs}" '. + [$setting]' <<< "$environment")"
+			if [[ "${TEST_POST_ENV_DRIFT:-0}" == 1 ]]; then environment="$(jq -c '. + ["OTHER_SETTING=changed"]' <<< "$environment")"; fi
+		else
+			setting="${TEST_PRIOR_WORK_PROJECTS_ENTRY:-}"
+			if [[ "$state" == rolled-back ]]; then setting="$(cat "$TEST_RUNNING_STATE.rollback-env")"; fi
+			if [[ -n "$setting" ]]; then environment="$(jq -c --arg setting "$setting" '. + [$setting]' <<< "$environment")"; fi
+		fi
+		jq -nc --argjson env "$environment" '[{Config:{Env:$env},HostConfig:{Binds:[]}}]' |
+			bash -o pipefail -c "${command#* | }"
+		;;
+	*"--arg name 'CUKUP_"*) printf '%s' "${TEST_RUNTIME_SECRET_VALUE:-test}" | sha256sum | cut -d' ' -f1 ;;
+	*".Mounts"*) [[ "$command" == *"--arg source '/srv/cukup'"* ]] ;;
 	*"sha256sum"*) printf '%s\n' "$(printf 'c%.0s' {1..64})" ;;
 	*"ATTACH DATABASE"*) printf '4\nok\n0\n0\n0\n0\n' ;;
 	*"PRAGMA user_version"*) printf '4\nok\n' ;;
@@ -178,7 +206,7 @@ set -euo pipefail
 args=("$@")
 if [[ "${TEST_TRUST_BASELINE:-0}" == 1 ]]; then
 	for index in "${!args[@]}"; do
-		args[index]="${args[index]//30f256bb6a00e1680c4af24b4b1f987013f34267/$TEST_PRIOR}"
+		args[index]="${args[index]//1111111111111111111111111111111111111111/$TEST_PRIOR}"
 	done
 fi
 exec "$TEST_REAL_GIT" "${args[@]}"
@@ -247,15 +275,19 @@ run_operator() {
 		TEST_SSH_LOG="$root/ssh.log" \
 		CUKUP_REVISION="$candidate" \
 		CUKUP_RELEASE_ROOT="$release" \
-		CUKUP_IMAGE=zainfathoni/cukup \
+		GITHUB_REPOSITORY=Example-Owner/Cukup \
 		CUKUP_DEPLOY_HOST=example.test \
 		CUKUP_SSH_USER=deployer \
 		CUKUP_SSH_KEY="$key" \
-		CUKUP_API_HOSTNAME=api.cukup.dev \
-		CUKUP_DASHBOARD_HOSTNAME=cukup.dev \
-		CUKUP_DATA_DIRECTORY=/srv/cukup \
+		CUKUP_API_HOSTNAME="${TEST_CONFIG_API_HOST-api.example.test}" \
+		CUKUP_DASHBOARD_HOSTNAME=dashboard.example.test \
+		CUKUP_WORK_PROJECTS="${TEST_CONFIG_WORK_PROJECTS-client-portal,docs}" \
+		CUKUP_DATA_DIRECTORY="${TEST_DATA_DIRECTORY:-/srv/cukup}" \
 		CUKUP_BACKUP_DIRECTORY=/srv/cukup-backups \
-		KAMAL_REGISTRY_USERNAME=zainfathoni \
+		CUKUP_TRUST_BASE_VERSION="${TEST_CONFIG_BASE_VERSION-1111111111111111111111111111111111111111-trust-test}" \
+		CUKUP_TRUST_BASE_IMAGE="${TEST_CONFIG_BASE_IMAGE-example-owner/cukup:trust-test}" \
+		CUKUP_TRUST_BASE_IMAGE_ID="${TEST_CONFIG_BASE_IMAGE_ID-sha256:$(printf 'a%.0s' {1..64})}" \
+		CUKUP_TRUST_BASE_CONTAINER_ID="${TEST_CONFIG_BASE_CONTAINER_ID-$(printf 'e%.0s' {1..64})}" \
 		GITHUB_TOKEN=test \
 		CUKUP_OIDC_ALLOWED_USER_ID=test \
 		CUKUP_FLEET_HOSTNAMES=test \
@@ -278,7 +310,8 @@ assert_absent() {
 
 : > "$root/kamal.log"
 : > "$root/ssh.log"
-run_operator "$root/success-summary"
+TEST_CONFIG_BASE_VERSION= TEST_CONFIG_BASE_IMAGE= TEST_CONFIG_BASE_IMAGE_ID= TEST_CONFIG_BASE_CONTAINER_ID= \
+	run_operator "$root/success-summary"
 # shellcheck disable=SC2016 # Markdown backticks are literal.
 grep -Fq '`preflight` `success-no-mutation`' "$root/success-summary"
 assert_absent '(^| )(deploy|rollback)( |$)' "$root/kamal.log"
@@ -304,10 +337,21 @@ if TEST_RUNTIME_SECRET_VALUE=wrong run_operator "$root/mismatch-summary" 2> "$ro
 	printf 'runtime secret mismatch unexpectedly passed preflight\n' >&2
 	exit 1
 fi
-grep -Fq 'runtime secret does not match protected environment: CUKUP_OIDC_ALLOWED_USER_ID' "$root/mismatch-stderr"
-grep -Fq 'deployment failed at phase: runtime-secrets' "$root/mismatch-stderr"
+grep -Fq 'runtime setting does not match protected environment: CUKUP_OIDC_ALLOWED_USER_ID' "$root/mismatch-stderr"
+grep -Fq 'deployment failed at phase: runtime-configuration' "$root/mismatch-stderr"
 assert_absent '(^| )(deploy|rollback)( |$)' "$root/kamal.log"
 assert_absent 'systemctl start cukup-backup.service' "$root/ssh.log"
+
+for control in TEST_RUNNING_API_HOST=wrong.example.test TEST_DATA_DIRECTORY=/srv/other TEST_BAD_IMAGE_SOURCE=1 TEST_CONFIG_BASE_VERSION= TEST_CONFIG_API_HOST= TEST_CONFIG_WORK_PROJECTS= TEST_CONFIG_WORK_PROJECTS=invalid_slug; do
+	: > "$root/kamal.log"
+	: > "$root/ssh.log"
+	if (export "$control"; run_operator "$root/target-summary" deploy) 2> "$root/target-stderr"; then
+		printf 'unsafe deployment configuration unexpectedly passed: %s\n' "$control" >&2
+		exit 1
+	fi
+	assert_absent '(^| )(redeploy|rollback|app start)( |$)' "$root/kamal.log"
+	assert_absent 'systemctl start cukup-backup.service' "$root/ssh.log"
+done
 
 : > "$root/kamal.log"
 : > "$root/ssh.log"
@@ -329,7 +373,7 @@ for control in TEST_BAD_BASELINE_NAME TEST_BAD_BASELINE_IMAGE TEST_BAD_BASELINE_
 	assert_absent 'systemctl start cukup-backup.service' "$root/ssh.log"
 done
 
-for failure in TEST_DEPLOY_FAIL TEST_POST_RUNTIME_FAILURE; do
+for failure in TEST_DEPLOY_FAIL TEST_POST_RUNTIME_FAILURE TEST_RUNNING_WORK_PROJECTS TEST_POST_ENV_DRIFT; do
 	: > "$root/kamal.log"
 	: > "$root/ssh.log"
 	rm -f "$root/running-state" "$root/running-state.recreated"
@@ -339,9 +383,22 @@ for failure in TEST_DEPLOY_FAIL TEST_POST_RUNTIME_FAILURE; do
 	fi
 	grep -Fq 'failed-and-rolled-back' "$root/recovery-$failure"
 	grep -Fq 'rollback verified' "$root/recovery-stderr"
-	grep -Fq '30f256bb6a00e1680c4af24b4b1f987013f34267-trust20261022 app start' "$root/kamal.log"
+	grep -Fq '1111111111111111111111111111111111111111-trust-test app start' "$root/kamal.log"
 	test "$(cat "$root/running-state")" = prior
 	assert_absent '(^| )(deploy|rollback|prune|proxy)( |$)' "$root/kamal.log"
+done
+
+for prior_entry in '' 'CUKUP_WORK_PROJECTS=previous-client'; do
+	: > "$root/kamal.log"
+	rm -f "$root/running-state" "$root/running-state.recreated"
+	if TEST_PRIOR_WORK_PROJECTS_ENTRY="$prior_entry" TEST_POST_RUNTIME_FAILURE=1 \
+		run_operator "$root/normal-recovery-summary" deploy 2> "$root/normal-recovery-stderr"; then
+		printf 'failed deployment unexpectedly returned success\n' >&2
+		exit 1
+	fi
+	grep -Fq 'failed-and-rolled-back' "$root/normal-recovery-summary"
+	grep -Fq "rollback verified: restored $prior" "$root/normal-recovery-stderr"
+	test "$(cat "$root/running-state.rollback-env")" = "$prior_entry"
 done
 
 for failure in TEST_STOP_FAILURE TEST_START_FAILURE TEST_RECREATED_RECOVERY; do

@@ -9,8 +9,6 @@ export const MAX_CLOCK_SKEW_MS = 10 * 60 * 1_000
 export const OIDC_ISSUER = 'https://ampcode.com/api/workload-identity'
 export const OIDC_AUDIENCE = 'https://cukup.dev'
 export const PROJECT_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
-export const DEFAULT_API_HOSTNAME = 'api.cukup.dev'
-export const DEFAULT_DASHBOARD_HOSTNAME = 'cukup.dev'
 
 export type DashboardConfiguration = {
 	hostname: string
@@ -37,18 +35,18 @@ export function configuredAllowedOidcUserId(): string {
 export function configuredApiHostname(
 	value = process.env.CUKUP_API_HOSTNAME,
 ): string {
-	return configuredHostname(value, DEFAULT_API_HOSTNAME, 'CUKUP_API_HOSTNAME')
+	return configuredHostname(value, 'CUKUP_API_HOSTNAME')
 }
 
 export function configuredDashboardHostname(
 	value = process.env.CUKUP_DASHBOARD_HOSTNAME,
 ): string {
-	return configuredHostname(value, DEFAULT_DASHBOARD_HOSTNAME, 'CUKUP_DASHBOARD_HOSTNAME')
+	return configuredHostname(value, 'CUKUP_DASHBOARD_HOSTNAME')
 }
 
 export function configuredDashboard(
-	environment: Readonly<Record<string, string | undefined>> = process.env,
-	hostname = configuredDashboardHostname(environment.CUKUP_DASHBOARD_HOSTNAME),
+	environment: Readonly<Record<string, string | undefined>>,
+	hostname: string,
 ): DashboardConfiguration | undefined {
 	const githubClientId = environment.CUKUP_GITHUB_OAUTH_CLIENT_ID?.trim()
 	const githubClientSecret = environment.CUKUP_GITHUB_OAUTH_CLIENT_SECRET?.trim()
@@ -97,6 +95,15 @@ export function configuredNewTurnEventSchemaVersion(
 	throw new Error('CUKUP_NEW_TURN_EVENT_SCHEMA_VERSION must be 1 or 2')
 }
 
+export function configuredWorkProjects(value = process.env.CUKUP_WORK_PROJECTS): ReadonlySet<string> {
+	if (!value?.trim()) return new Set()
+	const projects = value.split(',').map((slug) => slug.trim())
+	if (projects.some((slug) => !isCanonicalProjectSlug(slug))) {
+		throw new Error('CUKUP_WORK_PROJECTS must contain comma-separated canonical project slugs')
+	}
+	return new Set(projects)
+}
+
 export function isCanonicalProjectSlug(value: string): boolean {
 	return value.length <= 64 && PROJECT_SLUG_PATTERN.test(value)
 }
@@ -111,11 +118,10 @@ export function isCanonicalFleetHostname(value: string): boolean {
 
 function configuredHostname(
 	value: string | undefined,
-	fallback: string,
 	name: string,
 ): string {
-	const hostname = value?.trim() || fallback
-	if (!isCanonicalHttpHostname(hostname)) throw new Error(`${name} must be a canonical hostname`)
+	const hostname = value?.trim()
+	if (!hostname || !isCanonicalHttpHostname(hostname)) throw new Error(`${name} must be a canonical hostname`)
 	return hostname
 }
 
