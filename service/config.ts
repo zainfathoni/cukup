@@ -95,6 +95,15 @@ export function configuredNewTurnEventSchemaVersion(
 	throw new Error('CUKUP_NEW_TURN_EVENT_SCHEMA_VERSION must be 1 or 2')
 }
 
+export function configuredWorkProjects(value = process.env.CUKUP_WORK_PROJECTS): ReadonlySet<string> {
+	if (!value?.trim()) return new Set()
+	const projects = value.split(',').map((slug) => slug.trim())
+	if (projects.some((slug) => !isCanonicalProjectSlug(slug))) {
+		throw new Error('CUKUP_WORK_PROJECTS must contain comma-separated canonical project slugs')
+	}
+	return new Set(projects)
+}
+
 export function isCanonicalProjectSlug(value: string): boolean {
 	return value.length <= 64 && PROJECT_SLUG_PATTERN.test(value)
 }

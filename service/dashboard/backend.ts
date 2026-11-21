@@ -39,6 +39,7 @@ export class DashboardBackend {
 	readonly #now: () => number
 	readonly #explainer: ExplainerAssets | undefined
 	readonly #socialImage: Blob | undefined
+	readonly #workProjects: ReadonlySet<string> | undefined
 
 	constructor(options: {
 		config: DashboardConfiguration
@@ -50,6 +51,7 @@ export class DashboardBackend {
 		socialImage?: Blob
 		githubFetch?: typeof globalThis.fetch
 		now?: () => number
+		workProjects?: ReadonlySet<string>
 	}) {
 		this.#config = options.config
 		this.#store = options.store
@@ -57,6 +59,7 @@ export class DashboardBackend {
 		this.#now = options.now ?? Date.now
 		this.#explainer = options.explainer
 		this.#socialImage = options.socialImage
+		this.#workProjects = options.workProjects
 		this.#auth = new DashboardAuth(options.config, {
 			fetch: options.githubFetch,
 			now: this.#now,
@@ -138,7 +141,7 @@ export class DashboardBackend {
 				})
 			}
 			const nonce = randomBytes(18).toString('base64url')
-			const report = buildDashboardReport(this.#store, initialSelection, this.#now())
+			const report = buildDashboardReport(this.#store, initialSelection, this.#now(), this.#workProjects)
 			return html(renderDashboardDocument(report, initialSelection, nonce), 200, [], nonce)
 		}
 		return json({ error: 'not_found' }, 404)
@@ -166,7 +169,7 @@ export class DashboardBackend {
 		}
 		const selection = parseDashboardSelection(body.value, labels)
 		if (!selection) return json({ error: 'invalid_request' }, 400)
-		return json(buildDashboardReport(this.#store, selection, this.#now()))
+		return json(buildDashboardReport(this.#store, selection, this.#now(), this.#workProjects))
 	}
 }
 

@@ -60,7 +60,7 @@ export async function readWorkHoursStatus(input: {
 		return 'UNKNOWN · local diagnostics are unavailable. No complete status can be reported. No local state was changed.'
 	}
 
-	const scope = [`${summary ? 'Track' : 'Requested track'}: ${track}. Work = bta and bta-notes; Play = every other project, including Unassigned; All = global union.`, 'Scope: Asia/Jakarta; daily calendar day; weekly Monday–Sunday.']
+	const scope = [`${summary ? 'Track' : 'Requested track'}: ${track}. Work = projects on the service Work list; Play = every other project, including Unassigned; All = global union.`, 'Scope: Asia/Jakarta; daily calendar day; weekly Monday–Sunday.']
 	const asOf = summary?.as_of ?? cache?.summary.as_of
 	if (asOf) {
 		const asOfMs = Date.parse(asOf)

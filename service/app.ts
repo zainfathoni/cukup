@@ -29,6 +29,7 @@ type AppOptions = {
 	trustTlsProxy?: boolean
 	fleetHostnames?: ReadonlySet<string>
 	preferredNewEventSchemaVersion?: 1 | 2
+	workProjects?: ReadonlySet<string>
 	apiHostname: string
 	dashboardHostname: string
 	dashboard?: Pick<DashboardBackend, 'fetch'>
@@ -81,6 +82,7 @@ export function createApp(options: AppOptions): { fetch(request: Request): Promi
 									now,
 									fleetHostnames,
 									preferredNewEventSchemaVersion,
+									options.workProjects,
 								)
 							: json(
 									{ error: 'unauthorized' },
@@ -118,6 +120,7 @@ async function authenticatedResponse(
 	now: () => number,
 	fleetHostnames: ReadonlySet<string>,
 	preferredNewEventSchemaVersion: 1 | 2,
+	workProjects: ReadonlySet<string> | undefined,
 ): Promise<Response> {
 	if (url.pathname === '/v1/time') {
 		return request.method === 'GET'
@@ -135,7 +138,7 @@ async function authenticatedResponse(
 			url.searchParams.size !== 1
 		) return json({ error: 'invalid_request' }, 400)
 		const nowMs = now()
-		const summary = buildTrackSummary(store, track, nowMs)
+		const summary = buildTrackSummary(store, track, nowMs, workProjects)
 		return json({
 			schema_version: 1,
 			track,

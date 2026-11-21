@@ -76,7 +76,7 @@ export default function (amp: PluginAPI) {
 
 	amp.registerTool({
 		name: 'work_hours_status',
-		description: 'Read Cukup daily and Monday–Sunday weekly status in Asia/Jakarta. Defaults to Work (bta and bta-notes); Play includes all other projects and Unassigned; All is the global union. Work has goals; Play/All have limits. Uses only GET /v1/summary?track=... and local diagnostics, without sync, uploads, state changes, or UI. Reports as_of and coverage limits. Legacy turn-based estimates are not measured attention. Do not add overlapping totals. A legacy global cache cannot establish track status.',
+		description: 'Read Cukup daily and Monday–Sunday weekly status in Asia/Jakarta. Defaults to Work (projects on the service Work list); Play includes all other projects and Unassigned; All is the global union. Work has goals; Play/All have limits. Uses only GET /v1/summary?track=... and local diagnostics, without sync, uploads, state changes, or UI. Reports as_of and coverage limits. Legacy turn-based estimates are not measured attention. Do not add overlapping totals. A legacy global cache cannot establish track status.',
 		inputSchema: {
 			type: 'object',
 			properties: { track: { type: 'string', enum: ['work', 'play', 'all'], default: 'work' } },

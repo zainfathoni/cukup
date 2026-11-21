@@ -109,6 +109,14 @@ fi
 if [[ "$1" == redeploy ]]; then
 	printf candidate > "$TEST_RUNNING_STATE"
 	[[ "${TEST_DEPLOY_FAIL:-0}" != 1 ]]
+elif [[ "$1" == rollback ]]; then
+	[[ "$VERSION" == "$TEST_PRIOR" && "$2" == "$TEST_PRIOR" ]]
+	if [[ -v CUKUP_WORK_PROJECTS ]]; then
+		printf 'CUKUP_WORK_PROJECTS=%s' "$CUKUP_WORK_PROJECTS" > "$TEST_RUNNING_STATE.rollback-env"
+	else
+		: > "$TEST_RUNNING_STATE.rollback-env"
+	fi
+	printf rolled-back > "$TEST_RUNNING_STATE"
 elif [[ "$1 $2" == 'app start' ]]; then
 	[[ "$VERSION" == '1111111111111111111111111111111111111111-trust-test' ]]
 	[[ "${TEST_START_FAILURE:-0}" != 1 ]]
@@ -161,6 +169,19 @@ case "$command" in
 		;;
 	*"--arg name 'CUKUP_API_HOSTNAME'"*) printf '%s' "${TEST_RUNNING_API_HOST:-api.example.test}" | sha256sum | cut -d' ' -f1 ;;
 	*"--arg name 'CUKUP_DASHBOARD_HOSTNAME'"*) printf '%s' dashboard.example.test | sha256sum | cut -d' ' -f1 ;;
+	*"--arg name 'CUKUP_WORK_PROJECTS'"*|*"--arg ignore "*)
+		environment='["KAMAL_VERSION=fixture","PORT=3000"]'
+		if [[ "$state" == candidate ]]; then
+			environment="$(jq -c --arg setting "CUKUP_WORK_PROJECTS=${TEST_RUNNING_WORK_PROJECTS-client-portal,docs}" '. + [$setting]' <<< "$environment")"
+			if [[ "${TEST_POST_ENV_DRIFT:-0}" == 1 ]]; then environment="$(jq -c '. + ["OTHER_SETTING=changed"]' <<< "$environment")"; fi
+		else
+			setting="${TEST_PRIOR_WORK_PROJECTS_ENTRY:-}"
+			if [[ "$state" == rolled-back ]]; then setting="$(cat "$TEST_RUNNING_STATE.rollback-env")"; fi
+			if [[ -n "$setting" ]]; then environment="$(jq -c --arg setting "$setting" '. + [$setting]' <<< "$environment")"; fi
+		fi
+		jq -nc --argjson env "$environment" '[{Config:{Env:$env},HostConfig:{Binds:[]}}]' |
+			bash -o pipefail -c "${command#* | }"
+		;;
 	*"--arg name 'CUKUP_"*) printf '%s' "${TEST_RUNTIME_SECRET_VALUE:-test}" | sha256sum | cut -d' ' -f1 ;;
 	*".Mounts"*) [[ "$command" == *"--arg source '/srv/example-cukup-data'"* ]] ;;
 	*"sha256sum"*) printf '%s\n' "$(printf 'c%.0s' {1..64})" ;;
@@ -260,6 +281,7 @@ run_operator() {
 		CUKUP_SSH_KEY="$key" \
 		CUKUP_API_HOSTNAME="${TEST_CONFIG_API_HOST-api.example.test}" \
 		CUKUP_DASHBOARD_HOSTNAME=dashboard.example.test \
+		CUKUP_WORK_PROJECTS="${TEST_CONFIG_WORK_PROJECTS-client-portal,docs}" \
 		CUKUP_DATA_DIRECTORY="${TEST_DATA_DIRECTORY:-/srv/example-cukup-data}" \
 		CUKUP_BACKUP_DIRECTORY=/srv/example-cukup-backups \
 		CUKUP_TRUST_BASE_VERSION="${TEST_CONFIG_BASE_VERSION-1111111111111111111111111111111111111111-trust-test}" \
@@ -320,7 +342,7 @@ grep -Fq 'deployment failed at phase: runtime-configuration' "$root/mismatch-std
 assert_absent '(^| )(deploy|rollback)( |$)' "$root/kamal.log"
 assert_absent 'systemctl start cukup-backup.service' "$root/ssh.log"
 
-for control in TEST_RUNNING_API_HOST=wrong.example.test TEST_DATA_DIRECTORY=/srv/other TEST_BAD_IMAGE_SOURCE=1 TEST_CONFIG_BASE_VERSION= TEST_CONFIG_API_HOST=; do
+for control in TEST_RUNNING_API_HOST=wrong.example.test TEST_DATA_DIRECTORY=/srv/other TEST_BAD_IMAGE_SOURCE=1 TEST_CONFIG_BASE_VERSION= TEST_CONFIG_API_HOST= TEST_CONFIG_WORK_PROJECTS= TEST_CONFIG_WORK_PROJECTS=invalid_slug; do
 	: > "$root/kamal.log"
 	: > "$root/ssh.log"
 	if (export "$control"; run_operator "$root/target-summary" deploy) 2> "$root/target-stderr"; then
@@ -351,7 +373,7 @@ for control in TEST_BAD_BASELINE_NAME TEST_BAD_BASELINE_IMAGE TEST_BAD_BASELINE_
 	assert_absent 'systemctl start cukup-backup.service' "$root/ssh.log"
 done
 
-for failure in TEST_DEPLOY_FAIL TEST_POST_RUNTIME_FAILURE; do
+for failure in TEST_DEPLOY_FAIL TEST_POST_RUNTIME_FAILURE TEST_RUNNING_WORK_PROJECTS TEST_POST_ENV_DRIFT; do
 	: > "$root/kamal.log"
 	: > "$root/ssh.log"
 	rm -f "$root/running-state" "$root/running-state.recreated"
@@ -364,6 +386,19 @@ for failure in TEST_DEPLOY_FAIL TEST_POST_RUNTIME_FAILURE; do
 	grep -Fq '1111111111111111111111111111111111111111-trust-test app start' "$root/kamal.log"
 	test "$(cat "$root/running-state")" = prior
 	assert_absent '(^| )(deploy|rollback|prune|proxy)( |$)' "$root/kamal.log"
+done
+
+for prior_entry in '' 'CUKUP_WORK_PROJECTS=previous-client'; do
+	: > "$root/kamal.log"
+	rm -f "$root/running-state" "$root/running-state.recreated"
+	if TEST_PRIOR_WORK_PROJECTS_ENTRY="$prior_entry" TEST_POST_RUNTIME_FAILURE=1 \
+		run_operator "$root/normal-recovery-summary" deploy 2> "$root/normal-recovery-stderr"; then
+		printf 'failed deployment unexpectedly returned success\n' >&2
+		exit 1
+	fi
+	grep -Fq 'failed-and-rolled-back' "$root/normal-recovery-summary"
+	grep -Fq "rollback verified: restored $prior" "$root/normal-recovery-stderr"
+	test "$(cat "$root/running-state.rollback-env")" = "$prior_entry"
 done
 
 for failure in TEST_STOP_FAILURE TEST_START_FAILURE TEST_RECREATED_RECOVERY; do

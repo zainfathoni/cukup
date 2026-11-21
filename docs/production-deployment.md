@@ -35,11 +35,14 @@ Before merging a change that publishes a service image, set these variables in t
 | `CUKUP_SSH_USER` | Current deployment SSH account. |
 | `CUKUP_API_HOSTNAME` | Current public API hostname, with no scheme or port. |
 | `CUKUP_DASHBOARD_HOSTNAME` | Current public dashboard hostname, with no scheme or port. |
+| `CUKUP_WORK_PROJECTS` | Exact Amp project slugs, separated by commas with no spaces. Set this to `bta,bta-notes` to keep the current production reports. |
 | `CUKUP_DATA_DIRECTORY` | Current SQLite bind mount source on the host. |
 | `CUKUP_BACKUP_DIRECTORY` | Directory where the existing backup service writes verified pairs. |
 | `CUKUP_DNS_ZONE` | Active Cloudflare zone. Required only for the manual DNS workflow. |
 
 The workflows derive the source repository and GHCR image from the GitHub repository. Kamal uses its owner as the registry username. Keep the existing credentials. Do not rotate runtime secrets or change owner IDs as part of this migration: preflight checks the two hostnames, the database bind mount, and the runtime secrets against the running container before any deploy.
+
+The deploy check verifies the new Work list on the candidate container. The prior container can have a different list or no list. All other runtime hash inputs must match. If Kamal recreates the prior container during rollback, it uses the prior Work list or omits the setting if it was absent. The rollback check compares the full prior runtime hash. A changed list takes effect on a new release, not a repeat deployment of the current SHA.
 
 Leave the four `CUKUP_TRUST_BASE_*` variables unset for a deployment already running a verified GHCR release. If the host still runs the retained legacy trust-repair container, set all four to its approved exact identity: `CUKUP_TRUST_BASE_VERSION` (full commit SHA with suffix), `CUKUP_TRUST_BASE_IMAGE` (image and tag), `CUKUP_TRUST_BASE_IMAGE_ID` (`sha256:` digest), and `CUKUP_TRUST_BASE_CONTAINER_ID` (full container ID). This does not bypass the pinned runtime checks.
 

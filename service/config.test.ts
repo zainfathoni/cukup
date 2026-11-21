@@ -5,6 +5,7 @@ import {
 	configuredDashboardHostname,
 	configuredFleetHostnames,
 	configuredNewTurnEventSchemaVersion,
+	configuredWorkProjects,
 	isCanonicalFleetHostname,
 	isCanonicalProjectSlug,
 } from './config.ts'
@@ -33,6 +34,14 @@ describe('attribution configuration', () => {
 		expect(isCanonicalProjectSlug('a'.repeat(64))).toBeTrue()
 		expect(isCanonicalProjectSlug('a'.repeat(65))).toBeFalse()
 		expect(isCanonicalProjectSlug('cukup_service')).toBeFalse()
+	})
+
+	test('accepts a Work list, leaves blank lists empty, and rejects malformed entries', () => {
+		expect([...configuredWorkProjects('client-portal, docs,client-portal')]).toEqual(['client-portal', 'docs'])
+		expect(configuredWorkProjects(' ').size).toBe(0)
+		for (const value of ['client-portal,', 'client-portal,,docs', 'Client-Portal', 'a'.repeat(65)]) {
+			expect(() => configuredWorkProjects(value)).toThrow('CUKUP_WORK_PROJECTS')
+		}
 	})
 })
 

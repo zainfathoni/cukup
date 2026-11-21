@@ -122,12 +122,13 @@ export function buildDashboardReport(
 	store: DashboardReportStore,
 	selection: DashboardSelection,
 	nowMs: number,
+	workProjects?: ReadonlySet<string>,
 ): DashboardReport {
 	const asOf = new Date(nowMs).toISOString()
 	const track = selection.track ?? 'all'
 	let labels: DashboardLabels = { projects: [], executors: [] }
 	try {
-		labels = availableDashboardLabelsForWeek(store.attributedEvents(), selection, nowMs)
+		labels = availableDashboardLabelsForWeek(store.attributedEvents(), selection, nowMs, workProjects)
 	} catch {
 		// Label discovery is not allowed to make otherwise independent panels look healthy.
 	}
@@ -140,10 +141,10 @@ export function buildDashboardReport(
 			selection.timeline_date ?? civilDateString(localDateAt(nowMs, SERVICE_TIMEZONE)),
 		available_projects: labels.projects,
 		available_executors: labels.executors,
-		overall: buildPanel('Working-time summary is unavailable.', () => buildTrackSummary(store, track, nowMs)),
+		overall: buildPanel('Working-time summary is unavailable.', () => buildTrackSummary(store, track, nowMs, workProjects)),
 		timeline: buildPanel('Activity timeline is unavailable.', () =>
 			buildTimeline(
-				attributedIntervals(store.attributedEvents(), nowMs, track),
+				attributedIntervals(store.attributedEvents(), nowMs, track, workProjects),
 				selection,
 				nowMs,
 				store.targetOverrides(),
@@ -151,7 +152,7 @@ export function buildDashboardReport(
 		),
 		trend: buildPanel('Activity trend is unavailable.', () =>
 			buildTrend(
-				attributedIntervals(store.attributedEvents(), nowMs, track),
+				attributedIntervals(store.attributedEvents(), nowMs, track, workProjects),
 				selection,
 				nowMs,
 				store.targetOverrides(),
@@ -167,12 +168,13 @@ export function buildTrackSummary(
 	store: Pick<DashboardReportStore, 'events' | 'attributedEvents' | 'targetOverrides'>,
 	track: Track,
 	nowMs: number,
+	workProjects?: ReadonlySet<string>,
 ): OverallSummary {
 	const today = localDateAt(nowMs, SERVICE_TIMEZONE)
 	const weekStart = addDays(today, -mondayOffset(today))
 	const intervals = track === 'all'
 		? buildGlobalIntervals(store.events(), nowMs)
-		: unionIntervals(attributedIntervals(store.attributedEvents(), nowMs, track))
+		: unionIntervals(attributedIntervals(store.attributedEvents(), nowMs, track, workProjects))
 	const minutesSince = (date: CivilDate) => {
 		const startMs = startOfZonedDay(date, SERVICE_TIMEZONE)
 		return totalMinutes(intervals.map((interval) => ({
@@ -216,13 +218,14 @@ function availableDashboardLabelsForWeek(
 	events: readonly AttributedStoredWorkEvent[],
 	selection: DashboardSelection,
 	nowMs: number,
+	workProjects: ReadonlySet<string> | undefined,
 ): DashboardLabels {
 	const today = localDateAt(nowMs, SERVICE_TIMEZONE)
 	const date = selection.timeline_date === undefined ? today : parseCivilDate(selection.timeline_date)!
 	const weekStart = addDays(date, -mondayOffset(date))
 	const startMs = startOfZonedDay(weekStart, SERVICE_TIMEZONE)
 	const endMs = Math.min(startOfZonedDay(addDays(weekStart, 7), SERVICE_TIMEZONE), nowMs)
-	const intervals = clipAttributedIntervals(attributedIntervals(events, nowMs, selection.track), startMs, endMs)
+	const intervals = clipAttributedIntervals(attributedIntervals(events, nowMs, selection.track ?? 'all', workProjects), startMs, endMs)
 	return {
 		projects: [...new Set(intervals.map((interval) => interval.project))].sort(labelOrder),
 		executors: [...new Set(intervals.map((interval) => interval.executor))].sort(labelOrder),
@@ -232,10 +235,12 @@ function availableDashboardLabelsForWeek(
 function attributedIntervals(
 	events: readonly AttributedStoredWorkEvent[],
 	nowMs: number,
-	track: Track = 'all',
+	track: Track,
+	workProjects: ReadonlySet<string> | undefined,
 ): AttributedInterval[] {
 	return buildSessionIntervals(events, nowMs).filter((interval) => {
-		const work = interval.start.projectSlug === 'bta' || interval.start.projectSlug === 'bta-notes'
+		const slug = interval.start.projectSlug
+		const work = slug != null && workProjects?.has(slug) === true
 		return track === 'all' || (track === 'work' ? work : !work)
 	}).map((interval) => ({
 		...interval,

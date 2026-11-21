@@ -257,7 +257,7 @@ describe('dashboard report aggregation', () => {
 			['play', 120, 'TOLERANCE', 60, 60],
 			['all', 540, 'WITHIN', 540, 0],
 		] as const) {
-			const report = buildDashboardReport(store, { track, projects: [], executors: [], range: { preset: 7 } }, evening)
+			const report = buildDashboardReport(store, { track, projects: [], executors: [], range: { preset: 7 } }, evening, new Set(['bta']))
 			if (report.overall.state === 'unavailable') throw new Error('Expected summary')
 			expect(report.overall.data.today).toMatchObject({ worked_minutes: minutes, status, target_minutes: target, difference_minutes: difference })
 		}
@@ -265,7 +265,7 @@ describe('dashboard report aggregation', () => {
 		const end = events.at(-1)!
 		end.occurredAtMs += minute
 		end.occurredAt = new Date(end.occurredAtMs).toISOString()
-		const play = buildDashboardReport(store, { track: 'play', projects: [], executors: [], range: { preset: 7 } }, evening)
+		const play = buildDashboardReport(store, { track: 'play', projects: [], executors: [], range: { preset: 7 } }, evening, new Set(['bta']))
 		if (play.overall.state === 'unavailable' || play.trend.state === 'unavailable') throw new Error('Expected panels')
 		expect(play.overall.data.today.status).toBe('EXCEEDED')
 		expect(play.overall.data.week.status).toBe('WITHIN')
@@ -284,13 +284,14 @@ describe('dashboard report aggregation', () => {
 		const base = Date.parse('2026-08-31T01:00:00.000Z')
 		events.push(...session({ index: 5, source: 'unassigned', executor: 'machine-a', start: base + 120 * minute, end: base + 140 * minute }))
 		const selection: DashboardSelection = { projects: [], executors: [], range: { preset: 7 } }
+		const workProjects = new Set(['bta', 'bta-notes'])
 		// Includes the 15-minute idle grace: Work [0,105], Play [45,90] + [120,155].
 		for (const [track, minutes, projects] of [
 			['work', 105, ['bta', 'bta-notes']],
 			['play', 80, ['bta-notes-extra', 'Unassigned']],
 			['all', 140, ['bta', 'bta-notes', 'bta-notes-extra', 'Unassigned']],
 		] as const) {
-			const report = buildDashboardReport(store, { ...selection, track }, now)
+			const report = buildDashboardReport(store, { ...selection, track }, now, workProjects)
 			if (report.overall.state === 'unavailable' || report.timeline.state === 'unavailable' || report.trend.state === 'unavailable') throw new Error('Expected ready panels')
 			expect(report.track).toBe(track)
 			expect(report.available_projects).toEqual([...projects])
@@ -309,7 +310,10 @@ describe('dashboard report aggregation', () => {
 			expect(sunday.period.worked_minutes).toBe(track === 'work' ? 0 : 20)
 		}
 		expect(buildDashboardReport(store, selection, now)).toEqual(buildDashboardReport(store, { ...selection, track: 'all' }, now))
-		const filtered = buildDashboardReport(store, { ...selection, track: 'work', projects: ['bta'], executors: ['machine-a'] }, now)
+		const noWorkProjects = buildDashboardReport(store, { ...selection, track: 'work' }, now)
+		expect(noWorkProjects.available_projects).toEqual([])
+		expect(noWorkProjects.overall).toMatchObject({ data: { today: { worked_minutes: 0 } } })
+		const filtered = buildDashboardReport(store, { ...selection, track: 'work', projects: ['bta'], executors: ['machine-a'] }, now, workProjects)
 		if (filtered.overall.state === 'unavailable' || filtered.timeline.state === 'unavailable') throw new Error('Expected ready panels')
 		expect(filtered.overall.data.today.worked_minutes).toBe(105)
 		expect(filtered.timeline.data.minutes).toBe(75)
@@ -322,7 +326,7 @@ describe('dashboard report aggregation', () => {
 			start: Date.parse('2026-08-30T16:50:00Z'), end: Date.parse('2026-08-30T17:05:00Z'),
 		}))
 		for (const [track, today, sunday] of [['work', 20, 10], ['play', 0, 0]] as const) {
-			const report = buildDashboardReport(store, { track, projects: [], executors: [], timeline_date: '2026-08-30', range: { preset: 7 } }, now)
+			const report = buildDashboardReport(store, { track, projects: [], executors: [], timeline_date: '2026-08-30', range: { preset: 7 } }, now, new Set(['bta']))
 			if (report.overall.state === 'unavailable' || report.timeline.state === 'unavailable' || report.trend.state === 'unavailable') throw new Error('Expected ready panels')
 			expect(report.overall.data).toMatchObject({ today: { worked_minutes: today }, week: { worked_minutes: today } })
 			expect(report.timeline.data.minutes).toBe(sunday)

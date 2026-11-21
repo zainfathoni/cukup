@@ -2,7 +2,7 @@
 
 Use a separate installation and an empty SQLite volume for each owner. Cukup supports Amp only. There is no public signup. Changing an allowed owner ID on a populated volume does not migrate data or revoke machine tokens. Do not reuse a populated volume for a different owner.
 
-The service uses Asia/Jakarta for dates and Monday as the start of the week. Only Amp project slugs `bta` and `bta-notes` count as Work. Other projects and Unassigned count as Play. These rules are not configurable.
+The service uses Asia/Jakarta for dates and Monday as the start of the week. These rules are not configurable. By default, new turns have no project attribution. They appear as Unassigned and count as Play. Use All to see time across all projects.
 
 ## 1. Set up the two hosts and owner accounts
 
@@ -16,11 +16,15 @@ Use your Amp account's `user_id` claim for `CUKUP_OIDC_ALLOWED_USER_ID`. To find
 amp orb id-token --audience https://cukup.dev | python3 -c 'import base64,json,sys; p=sys.stdin.read().strip().split(".")[1]; print(json.loads(base64.urlsafe_b64decode(p+"="*(-len(p)%4)))["user_id"])'
 ```
 
-Keep `https://cukup.dev` as the Amp token **audience**. It identifies the token type. It does not set the plugin's network destination.
+Keep `https://cukup.dev` as the Amp token **audience**. The plugin and service use this same audience for all installations. It does not select an installation or set the plugin's network destination.
 
 ## 2. Build and start the service
 
 Run these commands only for a fresh install, from a clean source checkout. Keep the real environment file outside the checkout. Replace the placeholders with your hostnames, IDs, OAuth credentials, and a session key. To generate a session key, run `openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n'` in a private terminal. Do not share the result.
+
+To record project attribution for new turns, set `CUKUP_NEW_TURN_EVENT_SCHEMA_VERSION=2` in the service environment file. If you use local Amp executors, also set `CUKUP_FLEET_HOSTNAMES` to a comma-separated list of their exact OS hostnames. The service rejects the executor profile of a local machine that is not on this list. This blocks sync for that machine.
+
+Set `CUKUP_WORK_PROJECTS` in the same file to the exact Amp project slugs that count as Work, separated by commas. For example, use `CUKUP_WORK_PROJECTS=client-portal,documentation`. If unset or blank, no project counts as Work. All other projects and Unassigned count as Play. Recreate the container with the updated environment file to change the list. Reports apply the new list to past and future turns without rewriting stored data.
 
 ```sh
 umask 077
@@ -52,7 +56,7 @@ From another machine, check that `https://api.cukup.example.com/healthz` returns
 
 On a machine with Bun installed, run `bun install --frozen-lockfile` and `bun run build:plugin` in the checkout. Install `dist/plugin.js` as `cukup.js` in one of the [Amp plugin locations](https://ampcode.com/docs/customize/plugins#plugin-locations-and-precedence). For a local install, use `~/.config/amp/plugins/cukup.js` (or `$XDG_CONFIG_HOME/amp/plugins/cukup.js` when set). For orbs, use your own personal plugin repository, or put the bundle in `.amp/plugins/cukup.js` in a project that the orb checks out. Do not install two copies in the same executor.
 
-Set `CUKUP_SERVICE_URL=https://api.cukup.example.com` in the environment of **each** executor that uses the plugin. Export it before starting local Amp. For orbs add it to your [personal Amp environment variables](https://ampcode.com/docs/orbs/handling-secrets) and start a fresh orb. Use the API origin over HTTPS, without a path. An unset or blank value disables all Cukup delivery, not local turn tracking. If you already use Cukup, set the destination to the API you intended to use before you replace the plugin.
+Set `CUKUP_SERVICE_URL=https://api.cukup.example.com` in the environment of **each** executor that uses the plugin. Export it before starting local Amp. For orbs add it to your [personal Amp environment variables](https://ampcode.com/docs/orbs/handling-secrets) and start a fresh orb. Use the API origin over HTTPS, without a path. An unset or blank value disables all Cukup delivery, not local turn tracking. New turns recorded in this state stay Unassigned and count as Play after sync. If you already use Cukup, set the destination before you replace the plugin.
 
 For each local machine, issue a separate bearer token on the server. Redirect the output to a new protected file. Do not print the token or pass it on a command line.
 
