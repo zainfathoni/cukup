@@ -88,8 +88,12 @@ if [[ "$1" == pull ]]; then
 	exit 0
 fi
 if [[ "$1" == run ]]; then
-	[[ "${TEST_BAD_CANDIDATE_RUNTIME:-0}" != 1 ]]
-	exit
+	if [[ "${TEST_BAD_CANDIDATE_RUNTIME:-0}" == 1 ]]; then
+		printf 'raw transport diagnostic on stdout\n'
+		printf 'raw transport diagnostic on stderr\n' >&2
+		exit 1
+	fi
+	exit 0
 fi
 if [[ "$1 $2" == "image inspect" ]]; then
 	source=https://github.com/Example-Owner/Cukup
@@ -123,7 +127,11 @@ if [[ "$*" == *"lock status"* ]]; then
 fi
 if [[ "$1" == redeploy || "$1 $2" == 'app boot' ]]; then
 	printf candidate > "$TEST_RUNNING_STATE"
-	[[ "${TEST_DEPLOY_FAIL:-0}" != 1 ]]
+	if [[ "${TEST_DEPLOY_FAIL:-0}" == 1 ]]; then
+		printf 'raw transport diagnostic on stdout\n'
+		printf 'raw transport diagnostic on stderr\n' >&2
+		exit 1
+	fi
 elif [[ "$1" == rollback ]]; then
 	[[ "$VERSION" == "$TEST_PRIOR" && "$2" == "$TEST_PRIOR" ]]
 	if [[ -v CUKUP_WORK_PROJECTS ]]; then
@@ -393,11 +401,15 @@ assert_absent 'systemctl start cukup-backup.service' "$root/ssh.log"
 for control in TEST_BAD_BASELINE_NAME TEST_BAD_BASELINE_IMAGE TEST_BAD_BASELINE_ID TEST_BAD_BASELINE_CONTAINER_ID TEST_BAD_RUNTIME TEST_BAD_CANDIDATE_RUNTIME; do
 	: > "$root/kamal.log"
 	: > "$root/ssh.log"
-	if (export "$control=1"; TEST_TRUST_BASELINE=1 run_operator "$root/negative-$control") 2> "$root/negative-stderr"; then
+	if (export "$control=1"; TEST_TRUST_BASELINE=1 run_operator "$root/negative-$control") > "$root/negative-log" 2>&1; then
 		printf 'unsafe trust baseline or candidate unexpectedly passed: %s\n' "$control" >&2
 		exit 1
 	fi
 	grep -Fq 'failed-before-deploy' "$root/negative-$control"
+	if [[ "$control" == TEST_BAD_CANDIDATE_RUNTIME ]]; then
+		grep -Fxq 'deployment failed at phase: image-verification' "$root/negative-log"
+		assert_absent 'raw transport diagnostic' "$root/negative-log"
+	fi
 	assert_absent '(^| )(deploy|redeploy|rollback|app start)( |$)' "$root/kamal.log"
 	assert_absent 'systemctl start cukup-backup.service' "$root/ssh.log"
 done
@@ -406,12 +418,16 @@ for failure in TEST_DEPLOY_FAIL TEST_POST_RUNTIME_FAILURE TEST_RUNNING_WORK_PROJ
 	: > "$root/kamal.log"
 	: > "$root/ssh.log"
 	rm -f "$root/running-state" "$root/running-state.recreated"
-	if (export "$failure=1"; TEST_TRUST_BASELINE=1 run_operator "$root/recovery-$failure" deploy) 2> "$root/recovery-stderr"; then
+	if (export "$failure=1"; TEST_TRUST_BASELINE=1 run_operator "$root/recovery-$failure" deploy) > "$root/recovery-log" 2>&1; then
 		printf 'failed deployment unexpectedly returned success\n' >&2
 		exit 1
 	fi
 	grep -Fq 'failed-and-rolled-back' "$root/recovery-$failure"
-	grep -Fq 'rollback verified' "$root/recovery-stderr"
+	if [[ "$failure" == TEST_DEPLOY_FAIL ]]; then
+		grep -Fxq 'deployment failed at phase: deploy' "$root/recovery-log"
+	fi
+	grep -Fq 'rollback verified' "$root/recovery-log"
+	assert_absent 'raw transport diagnostic' "$root/recovery-log"
 	grep -Fq '1111111111111111111111111111111111111111-trust-test app start' "$root/kamal.log"
 	test "$(cat "$root/running-state")" = prior
 	assert_absent '(^| )(deploy|rollback|prune|proxy)( |$)' "$root/kamal.log"
