@@ -10,6 +10,7 @@
  */
 import { mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { EXPLAINER_ROUTES } from '../../../service/dashboard/explainer.ts'
 import { launchChromium } from './browser.ts'
 
 const base = process.env.PREVIEW_URL ?? 'http://localhost:4173'
@@ -64,7 +65,8 @@ const video = (page: Page) => page.locator('#explainer video')
 		loop: element.loop,
 	}))
 	check('Does not autoplay, loop, or start muted', idle.paused && idle.time === 0 && !idle.autoplay && !idle.loop && !idle.muted, JSON.stringify(idle))
-	check('Poster loads', statuses.get('/assets/explainer/poster.png') === 200, `poster status ${statuses.get('/assets/explainer/poster.png')}`)
+	const posterStatus = statuses.get(EXPLAINER_ROUTES.poster)
+	check('Poster loads', posterStatus === 200, `poster status ${posterStatus}`)
 	check('Metadata loads without playback', (await video(page).evaluate((element: HTMLVideoElement) => element.duration)) > 98)
 
 	await page.locator('#explainer').screenshot({ path: `${assets}desktop-light.png` })

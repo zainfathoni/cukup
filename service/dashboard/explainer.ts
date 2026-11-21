@@ -6,9 +6,10 @@
  * path ever becomes a filesystem path.
  */
 
+// Change a cacheable media URL when its file changes. The build keeps stable file names.
 export const EXPLAINER_ROUTES = {
-	video: '/assets/explainer/cukup-explainer.mp4',
-	poster: '/assets/explainer/poster.png',
+	video: '/assets/explainer/cukup-explainer-v2.mp4',
+	poster: '/assets/explainer/poster-v2.png',
 	captions: '/assets/explainer/captions.en.vtt',
 	transcript: '/explainer/transcript',
 } as const

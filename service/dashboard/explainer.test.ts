@@ -195,6 +195,7 @@ describe('public explainer routes', () => {
 		const transcript = await get(app, EXPLAINER_ROUTES.transcript)
 		expect(transcript.status).toBe(200)
 		expect(transcript.headers.get('content-type')).toBe('text/html; charset=utf-8')
+		expect(transcript.headers.get('cache-control')).toBe('no-store')
 		expect(transcript.headers.get('content-security-policy')).toContain("default-src 'none'")
 		const page = await transcript.text()
 		expect(page.match(/<h1[\s>]/g)).toHaveLength(1)
@@ -258,6 +259,8 @@ describe('signed-out player', () => {
 		for (const attribute of ['controls', 'playsinline', 'preload="metadata"', `poster="${EXPLAINER_ROUTES.poster}"`]) {
 			expect(player).toContain(attribute)
 		}
+		expect(page).toContain(`<source src="${EXPLAINER_ROUTES.video}" type="video/mp4">`)
+		expect(page).not.toMatch(/\/assets\/explainer\/(cukup-explainer\.mp4|poster\.png)"/)
 		expect(player).not.toMatch(/autoplay|loop|muted/)
 		const track = /<track[^>]*>/.exec(page)![0]
 		expect(track).toContain('kind="captions"')
