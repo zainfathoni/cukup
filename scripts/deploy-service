@@ -155,6 +155,7 @@ summary() {
 }
 
 remote() {
+	# Commands can return data for local checks. Keep transport errors out of public logs.
 	ssh \
 		-i "$CUKUP_SSH_KEY" \
 		-o IdentitiesOnly=yes \
@@ -162,14 +163,14 @@ remote() {
 		-o ForwardAgent=no \
 		-o StrictHostKeyChecking=yes \
 		-o ConnectTimeout=15 \
-		"$remote_target" "$@"
+		"$remote_target" "$@" 2>/dev/null
 }
 
 run_kamal() {
 	local version="$1"
 	shift
 	(
-		cd "$release_root"
+		cd "$release_root" || return
 		VERSION="$version" kamal "$@" -c "$rendered_config"
 	)
 }
@@ -385,8 +386,8 @@ verify_source_authorization() {
 
 verify_local_image() {
 	local image_json
-	docker pull --quiet --platform linux/amd64 "$expected_image:$candidate" >/dev/null
-	image_json="$(docker image inspect "$expected_image:$candidate")"
+	docker pull --quiet --platform linux/amd64 "$expected_image:$candidate" >/dev/null 2>&1
+	image_json="$(docker image inspect "$expected_image:$candidate" 2>/dev/null)"
 	jq -e --arg sha "$candidate" --arg service "$EXPECTED_SERVICE" --arg source "$EXPECTED_SOURCE" --arg image "$expected_image" \
 		--arg digest "${cutover_digest:+$expected_image@$cutover_digest}" '
 		length == 1 and .[0].Os == "linux" and .[0].Architecture == "amd64" and
@@ -396,7 +397,7 @@ verify_local_image() {
 		any(.[0].RepoDigests[]; if $digest == "" then startswith($image + "@sha256:") else . == $digest end)
 	' <<< "$image_json" >/dev/null
 	docker run --rm --read-only -i --entrypoint bun "$expected_image:$candidate" run - \
-		< "$release_root/scripts/check-service-runtime.ts"
+		< "$release_root/scripts/check-service-runtime.ts" >/dev/null 2>&1
 }
 
 render_config() {
@@ -413,7 +414,7 @@ ssh:
     - <%= ENV.fetch("CUKUP_SSH_KEY") %>
 YAML
 	chmod 0600 "$rendered_config"
-	run_kamal "$candidate" config >/dev/null
+	run_kamal "$candidate" config >/dev/null 2>&1 || on_error
 }
 
 verify_no_deploy_lock() {
@@ -602,7 +603,7 @@ verify_preservation
 phase="final-authorization"
 if [[ -n "$cutover" ]]; then
 	# Boot the verified local tag without pulling it again during the cutover.
-	run_kamal "$candidate" build pull
+	run_kamal "$candidate" build pull >/dev/null 2>&1 || on_error
 	verify_remote_image
 fi
 verify_source_authorization
@@ -613,10 +614,11 @@ fi
 
 phase="deploy"
 mutation_started=1
+# Handle failure outside the redirection so phase and rollback messages stay visible.
 if [[ -n "$cutover" ]]; then
-	run_kamal "$candidate" app boot --version "$candidate"
+	run_kamal "$candidate" app boot --version "$candidate" >/dev/null 2>&1 || on_error
 else
-	run_kamal "$candidate" redeploy --skip-push
+	run_kamal "$candidate" redeploy --skip-push >/dev/null 2>&1 || on_error
 fi
 
 phase="post-deploy"
