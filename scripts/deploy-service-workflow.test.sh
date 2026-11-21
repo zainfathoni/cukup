@@ -38,16 +38,28 @@ assert_contains 'run: scripts/deploy-service "$CUKUP_OPERATION"'
 assert_contains 'group: cukup-production'
 assert_contains 'cancel-in-progress: false'
 assert_contains 'environment: production'
-for name in CUKUP_DEPLOY_HOST CUKUP_SSH_USER CUKUP_DATA_DIRECTORY CUKUP_BACKUP_DIRECTORY CUKUP_HISTORY_CUTOVER; do
+for name in CUKUP_DEPLOY_HOST CUKUP_SSH_USER CUKUP_DATA_DIRECTORY CUKUP_BACKUP_DIRECTORY; do
 	assert_contains "$name: \${{ secrets.$name }}"
 done
+if grep -Fq CUKUP_HISTORY_CUTOVER "$workflow"; then
+	printf 'production must not pass the one-time cutover binding\n' >&2
+	exit 1
+fi
 
 publish="$project_root/.github/workflows/publish-service.yml"
 grep -Fxq '  workflow_dispatch:' "$publish"
-if grep -Eq '^  push:' "$publish"; then
-	printf 'cutover publication must not run on push\n' >&2
+triggers=$(sed -n '/^  push:$/,/^$/p' "$publish")
+grep -Fxq '      - main' <<< "$triggers"
+grep -Fxq '    paths:' <<< "$triggers"
+grep -Fxq '      - .github/workflows/publish-service.yml' <<< "$triggers"
+grep -Fxq '      - service/**' <<< "$triggers"
+if grep -Eq '^      - (docs/|README\.md$)' <<< "$triggers"; then
+	printf 'documentation outside the image inputs must not trigger publication\n' >&2
 	exit 1
 fi
+grep -Fq 'if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then' "$publish"
 grep -Fq 'test "$GITHUB_SHA" = "$APPROVED_REVISION"' "$publish"
+grep -Fq 'test "$GITHUB_EVENT_NAME" = push' "$publish"
+grep -Fq '.commit.verification.reason == "valid"' "$publish"
 
 printf 'deployment workflow trigger regression checks passed\n'
