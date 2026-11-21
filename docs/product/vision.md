@@ -8,7 +8,7 @@ The intended distinction is human collaboration versus autonomous execution. Tim
 
 ## Who is it for now?
 
-Cukup serves the owner's personal Amp workflow. An Amp-first open-source release is intended so that others can inspect, adapt, and host it; that release is not yet available. Other harnesses, a stable SDK, and multi-user support are paused indefinitely.
+Cukup is open source. It supports one owner's personal Amp workflow per installation. Zain has verified [self-hosting](../self-hosting.md) only on his own installation. Other harnesses, a stable SDK, and multi-user support are paused indefinitely.
 
 Cukup means “enough” in Indonesian. AI can produce more work, but people still choose, review, and own the results. Working Time is one prompt to pause and consider enough. It does not decide for the user.
 

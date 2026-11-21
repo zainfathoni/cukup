@@ -2,7 +2,7 @@
 
 Cukup helps its owner understand time spent on AI-assisted work without collecting prompts or source code. It is not a productivity score.
 
-**Current scope: personal Amp use.** An Amp-first open-source release is in preparation. It is not available yet: the repository is private, and independent self-hosting is not verified. Other harnesses, a stable SDK, and multi-user support are paused indefinitely. Experimental code is not a support promise. See the [roadmap](ROADMAP.md).
+**Cukup is open source.** It supports Amp only and one owner per installation. Zain has verified self-hosting only on his own installation. Other harnesses, a stable SDK, and multi-user support are paused indefinitely. Experimental code is not a support promise. See the [roadmap](ROADMAP.md).
 
 ## Who owns this project?
 

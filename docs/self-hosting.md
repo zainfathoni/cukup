@@ -1,5 +1,7 @@
 # Self-host Cukup for one owner
 
+Cukup is open source. Zain has verified this procedure only on his own installation. No independent installation has been verified.
+
 Use a separate installation and an empty SQLite volume for each owner. Cukup supports Amp only. There is no public signup. Changing an allowed owner ID on a populated volume does not migrate data or revoke machine tokens. Do not reuse a populated volume for a different owner.
 
 The service uses Asia/Jakarta for dates and Monday as the start of the week. These rules are not configurable. By default, new turns have no project attribution. They appear as Unassigned and count as Play. Use All to see time across all projects.

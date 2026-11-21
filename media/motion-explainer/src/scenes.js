@@ -153,7 +153,7 @@ export const scenes = [
 		kind: 'title',
 		purpose: 'Leave one line to remember and an accurate destination.',
 		action:
-			'The closing line appears in large type. Then the end card shows cukup.dev and the current status: a personal dashboard, Amp only, and an open-source release in preparation.',
+			'The closing line appears in large type. Then the end card shows cukup.dev and the current status: open source, Amp only, and one owner per installation.',
 		transition: 'Hold on the end card, which is also the poster.',
 		lead: 0.3,
 		lines: [
@@ -168,7 +168,7 @@ export const scenes = [
 export const endCard = {
 	url: 'cukup.dev',
 	invitation: 'Read why Cukup exists, and what it can and cannot tell you.',
-	status: 'A personal dashboard · Amp only · Open-source release in preparation',
+	status: 'Open source · Amp only · One owner per install',
 	// Spoken over the end card, which appears after the last line.
 	caption: 'Read why Cukup exists, and what it can and cannot tell you, at cukup.dev.',
 	say: 'Read why Cukup exists, and what it can and cannot tell you, at cukup dot dev.',

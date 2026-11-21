@@ -1,6 +1,6 @@
 # Cukup motion explainer
 
-A narrated motion explainer about human attention, delegation, self-compassion, and enough. It is for [issue #29](https://github.com/zainfathoni/cukup/issues/29). The owner has accepted this cut. The signed-out page embeds it on this branch; see [dashboard service](../../docs/dashboard-service.md#what-does-a-signed-out-visitor-see) and the [browser evidence](../../docs/tests/landing-explainer/e2e-evidence.md). It is not deployed yet.
+A narrated motion explainer about human attention, delegation, self-compassion, and enough. It is for [issue #29](https://github.com/zainfathoni/cukup/issues/29). The signed-out page embeds it. See the [dashboard service](../../docs/dashboard-service.md#what-does-a-signed-out-visitor-see) and the [browser evidence](../../docs/tests/landing-explainer/e2e-evidence.md).
 
 | File | Purpose |
 | --- | --- |
