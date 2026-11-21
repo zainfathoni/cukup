@@ -18,6 +18,7 @@ The initial six plugin files came from an uncommitted `work-hours/` prototype in
 - [Domain language](CONTEXT.md): what the terms mean, not how code implements them.
 - [Decisions](docs/adr/0007-generic-harness-evidence-boundary.md): why future measurements must stay separate from historical totals.
 - [Contribution rules](CONTRIBUTING.md): review requirements and authority limits.
+- [Self-hosting](docs/self-hosting.md): install Cukup for one owner from source.
 - [Operations](docs/service-operations.md): release, backup, and recovery procedures.
 - [Production deployment](docs/production-deployment.md): infrastructure and access requirements.
 

@@ -59,6 +59,55 @@ afterEach(() => {
 })
 
 describe('work-hours plugin', () => {
+	test.each([
+		['local', undefined], ['local', ' \t '],
+		['remote', undefined], ['remote', ' \t '],
+	] as const)('does not send credentials when the %s destination is %j', async (kind, destination) => {
+		const stateHome = mkdtempSync(join(tmpdir(), 'amp-work-hours-plugin-disabled-'))
+		temporaryDirectories.push(stateHome)
+		const previousStateHome = process.env.XDG_STATE_HOME
+		const previousFetch = globalThis.fetch
+		process.env.XDG_STATE_HOME = stateHome
+		process.env.CUKUP_TOKEN_FILE = join(stateHome, 'token')
+		const token = `cukup_v1_${'a'.repeat(43)}`
+		writeFileSync(process.env.CUKUP_TOKEN_FILE, token, { mode: 0o600 })
+		if (destination === undefined) delete process.env.CUKUP_SERVICE_URL
+		else process.env.CUKUP_SERVICE_URL = destination
+		const requests: string[] = []
+		let mintCalls = 0
+		let tool!: PluginToolDefinition
+		let showStatus!: (ctx: { ui: { select: () => Promise<'Close'> } }) => Promise<void>
+		let dispose = async () => {}
+		globalThis.fetch = (async (input: string | URL | Request) => {
+			requests.push(String(input))
+			return new Response(null, { status: 401 })
+		}) as typeof fetch
+		try {
+			workHoursPlugin({
+				system: { executor: { kind } },
+				registerTool(value: PluginToolDefinition) { tool = value },
+				registerCommand(id: string, _options: unknown, handler: typeof showStatus) {
+					if (id === 'work-hours-status') showStatus = handler
+				},
+				on() { return { unsubscribe() {} } },
+				onDispose(callback: typeof dispose) { dispose = callback },
+				$: async () => {
+					mintCalls++
+					return { exitCode: 0, stdout: token, stderr: '' }
+				},
+			} as never)
+			await tool.execute({}, {} as never)
+			await showStatus({ ui: { select: async () => 'Close' } })
+			expect(requests).toEqual([])
+			expect(mintCalls).toBe(0)
+		} finally {
+			await dispose()
+			globalThis.fetch = previousFetch
+			if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME
+			else process.env.XDG_STATE_HOME = previousStateHome
+		}
+	})
+
 	test('registers hooks and commands and completes the status loop', async () => {
 		const stateHome = mkdtempSync(join(tmpdir(), 'amp-work-hours-plugin-test-'))
 		temporaryDirectories.push(stateHome)

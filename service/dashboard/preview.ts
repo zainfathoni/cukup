@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url'
+import { configuredWorkProjects } from '../config.ts'
 import type { AttributedStoredWorkEvent } from '../types.ts'
 import {
 	availableDashboardLabels,
@@ -134,6 +135,7 @@ if (!bundle.success) throw new Error('Dashboard preview client build failed')
 const client = await bundle.outputs[0]!.text()
 const css = await Bun.file(new URL('./dashboard.css', import.meta.url)).text()
 const labels = availableDashboardLabels(store)
+const workProjects = configuredWorkProjects(process.env.CUKUP_WORK_PROJECTS ?? 'bta,bta-notes')
 
 // The signed-out surface runs through the real backend, so its headers and CSP match production.
 const signedOut = new DashboardBackend({
@@ -153,7 +155,7 @@ const signedOut = new DashboardBackend({
 const explainerPaths: ReadonlySet<string> = new Set(Object.values(EXPLAINER_ROUTES))
 
 function document(): string {
-	return renderDashboardDocument(buildDashboardReport(store, initialSelection, now), initialSelection).replace(
+	return renderDashboardDocument(buildDashboardReport(store, initialSelection, now, workProjects), initialSelection).replace(
 		'<form class="session-actions" method="post" action="/logout"><button type="submit">Sign out</button></form>',
 		'<div class="panel-notice stale" role="note"><strong>Interactive review fixture.</strong> This portal uses synthetic evidence, not live data. Tracks, filters, and dates use the real dashboard report builder.</div>',
 	)
@@ -179,7 +181,7 @@ Bun.serve({
 		if (pathname === '/dashboard/report' && request.method === 'POST') {
 			const selection = parseDashboardSelection(await request.json(), labels)
 			if (!selection) return new Response('Invalid dashboard selection.', { status: 400 })
-			return Response.json(buildDashboardReport(store, selection, now))
+			return Response.json(buildDashboardReport(store, selection, now, workProjects))
 		}
 		return new Response(document(), { headers: { 'content-type': 'text/html' } })
 	},

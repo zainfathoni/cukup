@@ -7,6 +7,7 @@ import {
 	configuredDashboardHostname,
 	configuredFleetHostnames,
 	configuredNewTurnEventSchemaVersion,
+	configuredWorkProjects,
 	defaultServiceDatabasePath,
 } from './config.ts'
 import { DashboardBackend, type DashboardAssets } from './dashboard/backend.ts'
@@ -33,9 +34,11 @@ if (!directTls && !behindTlsProxy && !loopbackOnly) {
 const allowedOidcUserId = configuredAllowedOidcUserId()
 const apiHostname = configuredApiHostname()
 const dashboardHostname = configuredDashboardHostname()
+if (apiHostname === dashboardHostname) throw new Error('API and dashboard hostnames must be different')
 const dashboardConfiguration = configuredDashboard(process.env, dashboardHostname)
 const fleetHostnames = configuredFleetHostnames()
 const preferredNewEventSchemaVersion = configuredNewTurnEventSchemaVersion()
+const workProjects = configuredWorkProjects()
 const store = new ServiceStore(defaultServiceDatabasePath())
 const logger = new ServiceLogger()
 let dashboard: DashboardBackend | undefined
@@ -54,6 +57,7 @@ if (dashboardConfiguration) {
 			assets: await loadDashboardAssets(),
 			explainer,
 			socialImage,
+			workProjects,
 		})
 	} catch {
 		logger.error('dashboard_disabled', { error: 'initialization_failed' })
@@ -67,6 +71,7 @@ const app = createApp({
 	trustTlsProxy: behindTlsProxy,
 	fleetHostnames,
 	preferredNewEventSchemaVersion,
+	workProjects,
 	apiHostname,
 	dashboardHostname,
 	dashboard,

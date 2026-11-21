@@ -41,6 +41,7 @@ export type LocalStack = {
 export type LocalStackOptions = {
 	/** Injected clock. Defaults to a fixed instant so tests stay deterministic. */
 	nowMs?: number
+	workProjects?: ReadonlySet<string>
 	/**
 	 * Seed the plugin database before `WorkHoursStore` opens it, for migration
 	 * coverage. Receives the path; the parent directory already exists.
@@ -70,12 +71,15 @@ export function createLocalStack(options: LocalStackOptions = {}): LocalStack {
 		const issued = createdServiceStore.issueBearer(nowMs)
 		const app = createApp({
 			store: createdServiceStore,
+			apiHostname: 'api.example.test',
+			dashboardHostname: 'dashboard.example.test',
 			oidcVerifier: { verify: async () => false },
+			workProjects: options.workProjects,
 			now,
 			logger: new ServiceLogger(() => {}),
 		})
 		const client = new CukupServiceClient(
-			'https://api.cukup.dev',
+			'https://api.example.test',
 			(input, init) => app.fetch(new Request(input, init)),
 			now,
 		)

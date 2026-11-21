@@ -199,7 +199,7 @@ function renderTrackSelector(track: Track): string {
 	const options = (['work', 'play', 'all'] as const).map((value) =>
 		`<label><input class="sr-only" type="radio" name="track" value="${value}" data-focus-key="track:${value}"${track === value ? ' checked' : ''}><span>${value === 'work' ? 'Work' : value === 'play' ? 'Play' : 'All'}<span class="track-check" aria-hidden="true">✓</span></span></label>`,
 	).join('')
-	const description = track === 'work' ? 'Work includes bta and bta-notes.' : track === 'play' ? 'Play includes every other project and Unassigned activity.' : 'All includes Work and Play. Overlapping time counts once.'
+	const description = track === 'work' ? 'Work includes projects on the Work list for this installation.' : track === 'play' ? 'Play includes every other project and Unassigned activity.' : 'All includes Work and Play. Overlapping time counts once.'
 	return `<div class="track-selector"><fieldset class="track-switch" aria-describedby="track-description"><legend>Track</legend><div class="track-options">${options}</div></fieldset><p id="track-description" class="guidance">${description}</p></div>`
 }
 

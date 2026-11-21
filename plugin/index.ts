@@ -41,9 +41,9 @@ export const description =
 export default function (amp: PluginAPI) {
 	const store = new WorkHoursStore()
 	const now = Date.now
-	const serviceURL = process.env.CUKUP_SERVICE_URL?.trim() || 'https://api.cukup.dev'
+	const serviceURL = process.env.CUKUP_SERVICE_URL?.trim()
 	const client = createClient(serviceURL, now)
-	const tokenProvider = selectTokenProvider(amp)
+	const tokenProvider = client ? selectTokenProvider(amp) : unavailableTokenProvider()
 	const sync = new SyncEngine({
 		store,
 		client,
@@ -53,7 +53,7 @@ export default function (amp: PluginAPI) {
 	})
 	const legacyAmpAdapter = createLegacyAmpAdapter({ amp, store, sync, now })
 	const { resolveProjectAttribution } = legacyAmpAdapter
-	const experimentalAmpShadowCollector = startExperimentalAmpShadowCollector(amp)
+	const experimentalAmpShadowCollector = serviceURL ? startExperimentalAmpShadowCollector(amp) : undefined
 
 	async function acknowledgeTrackingGap(ctx: PluginCommandContext): Promise<void> {
 		if (!sync.trackingGap()) {
@@ -76,7 +76,7 @@ export default function (amp: PluginAPI) {
 
 	amp.registerTool({
 		name: 'work_hours_status',
-		description: 'Read Cukup daily and Monday–Sunday weekly status in Asia/Jakarta. Defaults to Work (bta and bta-notes); Play includes all other projects and Unassigned; All is the global union. Work has goals; Play/All have limits. Uses only GET /v1/summary?track=... and local diagnostics, without sync, uploads, state changes, or UI. Reports as_of and coverage limits. Legacy turn-based estimates are not measured attention. Do not add overlapping totals. A legacy global cache cannot establish track status.',
+		description: 'Read Cukup daily and Monday–Sunday weekly status in Asia/Jakarta. Defaults to Work (projects on the service Work list); Play includes all other projects and Unassigned; All is the global union. Work has goals; Play/All have limits. Uses only GET /v1/summary?track=... and local diagnostics, without sync, uploads, state changes, or UI. Reports as_of and coverage limits. Legacy turn-based estimates are not measured attention. Do not add overlapping totals. A legacy global cache cannot establish track status.',
 		inputSchema: {
 			type: 'object',
 			properties: { track: { type: 'string', enum: ['work', 'play', 'all'], default: 'work' } },
@@ -205,7 +205,7 @@ export default function (amp: PluginAPI) {
 			})
 			if (!confirmed) return
 			if (!client) {
-				await ctx.ui.notify('Authoritative day-off update failed. The Cukup service is unavailable.')
+				await ctx.ui.notify('Authoritative day-off update failed. Set CUKUP_SERVICE_URL to your Cukup API origin.')
 				return
 			}
 			try {
