@@ -44,7 +44,14 @@ case "$endpoint" in
 		printf '%s\n' "$TEST_CANDIDATE"
 		;;
 	*/actions/workflows/publish-service.yml/runs)
-		jq -n --arg sha "$TEST_CANDIDATE" '{
+		# GitHub omitted the successful rerun from the status-filtered list.
+		for argument in "$@"; do
+			if [[ "$argument" == status=completed ]]; then
+				printf '%s\n' '{"workflow_runs":[]}'
+				exit 0
+			fi
+		done
+		jq -n --arg sha "$TEST_CANDIDATE" --arg conclusion "${TEST_PUBLISH_CONCLUSION:-success}" '{
 			workflow_runs: [{
 				name: "Publish service image",
 				path: ".github/workflows/publish-service.yml",
@@ -52,7 +59,8 @@ case "$endpoint" in
 				head_branch: "main",
 				head_sha: $sha,
 				status: "completed",
-				conclusion: "success"
+				conclusion: $conclusion,
+				run_attempt: 2
 			}]
 		}'
 		;;
@@ -316,6 +324,17 @@ TEST_CONFIG_BASE_VERSION= TEST_CONFIG_BASE_IMAGE= TEST_CONFIG_BASE_IMAGE_ID= TES
 grep -Fq '`preflight` `success-no-mutation`' "$root/success-summary"
 assert_absent '(^| )(deploy|rollback)( |$)' "$root/kamal.log"
 assert_absent 'systemctl start cukup-backup.service' "$root/ssh.log"
+
+: > "$root/kamal.log"
+: > "$root/ssh.log"
+if TEST_PUBLISH_CONCLUSION=failure run_operator "$root/failed-publication-summary" deploy 2> "$root/failed-publication-stderr"; then
+	printf 'failed publication unexpectedly authorized deployment\n' >&2
+	exit 1
+fi
+grep -Fq 'failed-before-deploy' "$root/failed-publication-summary"
+grep -Fq 'deployment failed at phase: source-authorization' "$root/failed-publication-stderr"
+test ! -s "$root/kamal.log"
+test ! -s "$root/ssh.log"
 
 : > "$root/kamal.log"
 : > "$root/ssh.log"
