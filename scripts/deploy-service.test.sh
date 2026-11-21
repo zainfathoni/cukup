@@ -98,7 +98,10 @@ fi
 if [[ "$1 $2" == "image inspect" ]]; then
 	source=https://github.com/Example-Owner/Cukup
 	if [[ "${TEST_BAD_IMAGE_SOURCE:-0}" == 1 ]]; then source=https://github.com/Other-Owner/Cukup; fi
-	jq -n --arg sha "$TEST_CANDIDATE" --arg source "$source" '[{
+	id="sha256:$(printf "${TEST_IMAGE_ID_HEX:-b}%.0s" {1..64})"
+	digest="ghcr.io/example-owner/cukup@sha256:$(printf "${TEST_IMAGE_DIGEST_HEX:-a}%.0s" {1..64})"
+	jq -n --arg sha "$TEST_CANDIDATE" --arg source "$source" --arg id "$id" --arg digest "$digest" '[{
+		Id: $id,
 		Os: "linux",
 		Architecture: "amd64",
 		Config: { Labels: {
@@ -106,7 +109,7 @@ if [[ "$1 $2" == "image inspect" ]]; then
 			"org.opencontainers.image.source": $source,
 			"org.opencontainers.image.revision": $sha
 		} },
-		RepoDigests: ["ghcr.io/example-owner/cukup@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+		RepoDigests: [$digest]
 	}]'
 	exit 0
 fi
@@ -125,7 +128,12 @@ if [[ "$*" == *"lock status"* ]]; then
 		printf 'There is no deploy lock\n'
 	fi
 fi
-if [[ "$1" == redeploy || "$1 $2" == 'app boot' ]]; then
+if [[ "$1 $2" == 'build pull' ]]; then
+	if (( $(grep -Fc " build pull " "$TEST_KAMAL_LOG") <= ${TEST_PULL_FAILURES:-0} )); then
+		printf 'raw transport diagnostic\n' >&2
+		exit 1
+	fi
+elif [[ "$1" == redeploy || "$1 $2" == 'app boot' ]]; then
 	printf candidate > "$TEST_RUNNING_STATE"
 	if [[ "${TEST_DEPLOY_FAIL:-0}" == 1 ]]; then
 		printf 'raw transport diagnostic on stdout\n'
@@ -215,7 +223,7 @@ case "$command" in
 	*"PRAGMA user_version"*) printf '4\nok\n' ;;
 	*"systemctl start cukup-backup.service"*) printf 'test-backup\n' ;;
 	*"sudo -n cat"*) printf 'synthetic-backup\n' ;;
-	*"docker image inspect"*) docker image inspect ignored ;;
+	*"docker image inspect"*) TEST_IMAGE_ID_HEX=a TEST_IMAGE_DIGEST_HEX="${TEST_REMOTE_DIGEST_HEX:-a}" docker image inspect ignored ;;
 	*"docker container inspect"*) ;;
 	*"docker stop"*)
 		[[ "$command" == "docker stop 'cukup-service-web-$TEST_CANDIDATE'" ]]
@@ -459,11 +467,26 @@ done
 
 rm -f "$root/running-state" "$root/running-state.recreated"
 : > "$root/kamal.log"
-TEST_TRUST_BASELINE=1 run_operator "$root/deployed-summary" deploy
+for control in TEST_PULL_FAILURES=3 TEST_REMOTE_DIGEST_HEX=c; do
+	: > "$root/kamal.log"
+	if (export "$control"; TEST_TRUST_BASELINE=1 run_operator "$root/staging-failure" deploy) > "$root/staging-log" 2>&1; then
+		printf 'deployment with an unavailable or mismatched staged image unexpectedly passed\n' >&2
+		exit 1
+	fi
+	grep -Fq 'failed-before-deploy' "$root/staging-failure"
+	grep -Fxq 'deployment failed at phase: remote-image-staging' "$root/staging-log"
+	assert_absent 'raw transport diagnostic' "$root/staging-log"
+	assert_absent 'app boot|redeploy|rollback|app start' "$root/kamal.log"
+	test ! -e "$root/running-state"
+done
+
+: > "$root/kamal.log"
+TEST_TRUST_BASELINE=1 TEST_PULL_FAILURES=1 run_operator "$root/deployed-summary" deploy
 grep -Fq '`deploy` `success`' "$root/deployed-summary"
 test "$(cat "$root/running-state")" = candidate
-grep -Fq 'redeploy --skip-push' "$root/kamal.log"
-assert_absent '(^| )(deploy|rollback|prune|proxy)( |$)' "$root/kamal.log"
+test "$(grep -Fc "$candidate build pull" "$root/kamal.log")" = 2
+grep -Fq "$candidate app boot --version $candidate" "$root/kamal.log"
+assert_absent '(^| )(deploy|redeploy|rollback|prune|proxy)( |$)' "$root/kamal.log"
 
 # The rewritten candidate has no parent. Ordinary authorization cannot use a manual publication.
 candidate="$(git -C "$release" commit-tree 'HEAD^{tree}' -m rewritten)"
