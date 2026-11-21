@@ -19,6 +19,7 @@ on:
       - bun.lock
       - tsconfig.json
       - scripts/check-service-runtime.ts
+      - scripts/deploy-service
       - media/motion-explainer/cukup-explainer.mp4
       - media/motion-explainer/poster.png
       - media/motion-explainer/captions.en.vtt
