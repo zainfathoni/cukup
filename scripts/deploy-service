@@ -68,6 +68,18 @@ readonly candidate="$CUKUP_REVISION"
 readonly release_root="$CUKUP_RELEASE_ROOT"
 readonly expected_image="ghcr.io/$CUKUP_IMAGE"
 readonly remote_target="$CUKUP_SSH_USER@$CUKUP_DEPLOY_HOST"
+readonly cutover="${CUKUP_HISTORY_CUTOVER:-}"
+if [[ -n "$cutover" ]]; then
+	[[ "${GITHUB_EVENT_NAME:-}" == workflow_dispatch && -z "$TRUST_BASE_VERSION" ]] || exit 1
+	binding="$(jq -er --arg candidate "$candidate" '
+		select(.candidate == $candidate and (.prior_revision | test("^[0-9a-f]{40}$"))
+			and .prior_revision != $candidate and (.container_id | test("^[0-9a-f]{64}$"))
+			and (.image_id | test("^sha256:[0-9a-f]{64}$"))
+			and (.digest | test("^sha256:[0-9a-f]{64}$")) and (.run_id | test("^[1-9][0-9]*$")))
+		| [.prior_revision, .container_id, .image_id, .digest, .run_id] | @tsv
+	' <<< "$cutover" 2>/dev/null)" || { printf 'invalid history cutover binding\n' >&2; exit 1; }
+	IFS=$'\t' read -r cutover_prior cutover_container cutover_image_id cutover_digest cutover_run_id <<< "$binding"
+fi
 
 [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] || {
 	printf 'revision must be a full lowercase commit SHA\n' >&2
@@ -169,6 +181,13 @@ ids=$(docker ps -q --filter label=service=cukup-service)
 test "$(printf "%s\n" "$ids" | sed "/^$/d" | wc -l | tr -d " ")" = 1
 id=$ids
 docker inspect "$id" | jq -r ".[0] | [.Id, .Name, .Config.Image] | @tsv"'
+}
+
+verify_cutover_baseline() {
+	local info
+	info="$(running_info)" || return 1
+	[[ "$info" == "$cutover_container"$'\t'"/cukup-service-web-$cutover_prior"$'\t'"$expected_image:$cutover_prior" ]] || return 1
+	[[ "$(remote "docker inspect '$cutover_container' --format '{{.Image}}'")" == "$cutover_image_id" ]]
 }
 
 running_version() {
@@ -314,13 +333,15 @@ verify_service() {
 
 verify_remote_image() {
 	local image_json
-	image_json="$(remote "docker image inspect '$expected_image:$candidate'" 2>/dev/null)" || return 1
-	jq -e --arg sha "$candidate" --arg service "$EXPECTED_SERVICE" --arg source "$EXPECTED_SOURCE" '
+	image_json="$(remote "docker image inspect '${1:-$expected_image:$candidate}'" 2>/dev/null)" || return 1
+	jq -e --arg sha "$candidate" --arg service "$EXPECTED_SERVICE" --arg source "$EXPECTED_SOURCE" \
+		--arg digest "${cutover_digest:+$expected_image@$cutover_digest}" '
 		length == 1 and
 		.[0].Os == "linux" and .[0].Architecture == "amd64" and
 		.[0].Config.Labels.service == $service and
 		.[0].Config.Labels["org.opencontainers.image.source"] == $source and
-		.[0].Config.Labels["org.opencontainers.image.revision"] == $sha
+		.[0].Config.Labels["org.opencontainers.image.revision"] == $sha and
+		($digest == "" or any(.[0].RepoDigests[]; . == $digest))
 	' <<< "$image_json" >/dev/null
 }
 
@@ -329,6 +350,9 @@ verify_source_authorization() {
 	main_tip="$(gh api "repos/$EXPECTED_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
 	[[ "$main_tip" =~ ^[0-9a-f]{40}$ ]] || return 1
 	git -C "$release_root" merge-base --is-ancestor "$candidate" "$main_tip" || return 1
+	if [[ -n "$cutover" ]]; then
+		[[ "$candidate" == "$main_tip" && "$(git -C "$release_root" rev-parse HEAD)" == "$candidate" ]] || return 1
+	fi
 
 	for revision in "$candidate" "$main_tip"; do
 		commit_json="$(gh api "repos/$EXPECTED_REPOSITORY/commits/$revision")" || return 1
@@ -336,6 +360,16 @@ verify_source_authorization() {
 			.sha == $sha and .commit.verification.verified == true and .commit.verification.reason == "valid"
 		' <<< "$commit_json" >/dev/null || return 1
 	done
+
+	if [[ -n "$cutover" ]]; then
+		runs_json="$(gh api "repos/$EXPECTED_REPOSITORY/actions/runs/$cutover_run_id")" || return 1
+		jq -e --arg sha "$candidate" --arg id "$cutover_run_id" '
+			(.id | tostring) == $id and .name == "Publish service image" and
+			.path == ".github/workflows/publish-service.yml" and .event == "workflow_dispatch" and
+			.head_branch == "main" and .head_sha == $sha and .status == "completed" and .conclusion == "success"
+		' <<< "$runs_json" >/dev/null || return 1
+		return 0
+	fi
 
 	# The API's completed filter can omit successful reruns. Check status locally.
 	runs_json="$(gh api -X GET "repos/$EXPECTED_REPOSITORY/actions/workflows/publish-service.yml/runs" \
@@ -353,12 +387,13 @@ verify_local_image() {
 	local image_json
 	docker pull --quiet --platform linux/amd64 "$expected_image:$candidate" >/dev/null
 	image_json="$(docker image inspect "$expected_image:$candidate")"
-	jq -e --arg sha "$candidate" --arg service "$EXPECTED_SERVICE" --arg source "$EXPECTED_SOURCE" --arg image "$expected_image" '
+	jq -e --arg sha "$candidate" --arg service "$EXPECTED_SERVICE" --arg source "$EXPECTED_SOURCE" --arg image "$expected_image" \
+		--arg digest "${cutover_digest:+$expected_image@$cutover_digest}" '
 		length == 1 and .[0].Os == "linux" and .[0].Architecture == "amd64" and
 		.[0].Config.Labels.service == $service and
 		.[0].Config.Labels["org.opencontainers.image.source"] == $source and
 		.[0].Config.Labels["org.opencontainers.image.revision"] == $sha and
-		any(.[0].RepoDigests[]; startswith($image + "@sha256:"))
+		any(.[0].RepoDigests[]; if $digest == "" then startswith($image + "@sha256:") else . == $digest end)
 	' <<< "$image_json" >/dev/null
 	docker run --rm --read-only -i --entrypoint bun "$expected_image:$candidate" run - \
 		< "$release_root/scripts/check-service-runtime.ts"
@@ -422,8 +457,11 @@ rollback_if_needed() {
 	[[ -n "$prior_version" ]] || return 1
 	current="$(running_version 2>/dev/null || true)"
 	if [[ "$current" != "$prior_version" ]]; then
-		if [[ "$prior_version" == "$TRUST_BASE_VERSION" ]]; then
-			# Start the retained patched container. Do not recreate it or use the vulnerable image.
+		if [[ -n "$cutover" ]]; then
+			[[ "$(remote "docker container inspect 'cukup-service-web-$cutover_prior' --format '{{.Id}} {{.Image}}'" 2>/dev/null)" == "$cutover_container $cutover_image_id" ]] || return 1
+		fi
+		if [[ -n "$cutover" || "$prior_version" == "$TRUST_BASE_VERSION" ]]; then
+			# Restore the exact retained container without recreating it.
 			remote "docker stop 'cukup-service-web-$candidate'" >/dev/null 2>&1 || true
 			run_kamal "$prior_version" app start >/dev/null 2>&1 || rollback_ok=0
 		else
@@ -444,6 +482,9 @@ rollback_if_needed() {
 	if [[ "$prior_version" == "$TRUST_BASE_VERSION" ]]; then
 		[[ "$id" == "$prior_container" ]] || rollback_ok=0
 		[[ "$(remote "docker inspect '$id' --format '{{.Image}}'" 2>/dev/null)" == "$TRUST_BASE_IMAGE_ID" ]] || rollback_ok=0
+	fi
+	if [[ -n "$cutover" ]]; then
+		verify_cutover_baseline >/dev/null 2>&1 || rollback_ok=0
 	fi
 	[[ -n "$id" && "$(runtime_hash "$id" 2>/dev/null || true)" == "$prior_runtime_hash" ]] || rollback_ok=0
 	verify_live_runtime "$id" "$prior_version" >/dev/null 2>&1 || rollback_ok=0
@@ -505,7 +546,10 @@ prior_version="${prior_name#cukup-service-web-}"
 [[ "$prior_container" =~ ^[0-9a-f]{64}$ ]]
 [[ "$prior_name" == "cukup-service-web-$prior_version" ]]
 prior_revision="$prior_version"
-if [[ -n "$TRUST_BASE_VERSION" && "$prior_version" == "$TRUST_BASE_VERSION" ]]; then
+if [[ -n "$cutover" ]]; then
+	[[ "$prior_container" == "$cutover_container" && "$prior_version" == "$cutover_prior" ]]
+	verify_cutover_baseline
+elif [[ -n "$TRUST_BASE_VERSION" && "$prior_version" == "$TRUST_BASE_VERSION" ]]; then
 	[[ "$prior_image" == "$TRUST_BASE_IMAGE" ]]
 	[[ "$prior_container" == "$TRUST_BASE_CONTAINER_ID" ]]
 	[[ "$(remote "docker inspect '$prior_container' --format '{{.Image}}'")" == "$TRUST_BASE_IMAGE_ID" ]]
@@ -514,8 +558,10 @@ else
 	[[ "$prior_version" =~ ^[0-9a-f]{40}$ ]]
 	[[ "$prior_image" == "$expected_image:$prior_version" ]]
 fi
-git -C "$release_root" merge-base --is-ancestor "$prior_revision" "$candidate"
-git -C "$release_root" show "$prior_revision:service/store.ts" | grep -Eq '^const DATABASE_VERSION = 4$'
+if [[ -z "$cutover" ]]; then
+	git -C "$release_root" merge-base --is-ancestor "$prior_revision" "$candidate"
+	git -C "$release_root" show "$prior_revision:service/store.ts" | grep -Eq '^const DATABASE_VERSION = 4$'
+fi
 prior_runtime_hash="$(runtime_hash "$prior_container")"
 [[ "$prior_runtime_hash" =~ ^[0-9a-f]{64}$ ]]
 phase="runtime-configuration"
@@ -554,11 +600,24 @@ verify_independent_backup
 verify_preservation
 
 phase="final-authorization"
+if [[ -n "$cutover" ]]; then
+	# Boot the verified local tag without pulling it again during the cutover.
+	run_kamal "$candidate" build pull
+	verify_remote_image
+fi
 verify_source_authorization
+if [[ -n "$cutover" ]]; then
+	verify_cutover_baseline
+	[[ "$(runtime_hash "$prior_container")" == "$prior_runtime_hash" ]]
+fi
 
 phase="deploy"
 mutation_started=1
-run_kamal "$candidate" redeploy --skip-push
+if [[ -n "$cutover" ]]; then
+	run_kamal "$candidate" app boot --version "$candidate"
+else
+	run_kamal "$candidate" redeploy --skip-push
+fi
 
 phase="post-deploy"
 [[ "$(running_version)" == "$candidate" ]]
@@ -567,6 +626,11 @@ post_info="$(running_info)"
 IFS=$'\t' read -r post_container post_name post_image <<< "$post_info"
 [[ "${post_name#/}" == "cukup-service-web-$candidate" ]]
 [[ "$post_image" == "$expected_image:$candidate" ]]
+if [[ -n "$cutover" ]]; then
+	post_image_id="$(remote "docker inspect '$post_container' --format '{{.Image}}'")"
+	[[ "$post_image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+	verify_remote_image "$post_image_id"
+fi
 [[ "$(runtime_hash "$post_container" CUKUP_WORK_PROJECTS)" == "$prior_preserved_runtime_hash" ]]
 verify_runtime_configuration "$post_container" CUKUP_WORK_PROJECTS
 remote "docker container inspect '$prior_container'" >/dev/null

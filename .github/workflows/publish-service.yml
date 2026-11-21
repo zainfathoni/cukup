@@ -1,22 +1,13 @@
 name: Publish service image
 
 on:
+  # History cutover: a push to rewritten main must not publish an image.
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - service/**
-      - Dockerfile.service
-      - package.json
-      - bun.lock
-      - tsconfig.json
-      - scripts/check-service-runtime.ts
-      - media/motion-explainer/cukup-explainer.mp4
-      - media/motion-explainer/poster.png
-      - media/motion-explainer/captions.en.vtt
-      - media/motion-explainer/transcript.md
-      - media/og-image/og-image.png
+    inputs:
+      revision:
+        description: Full SHA of the approved signed main tip
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -36,9 +27,15 @@ jobs:
           persist-credentials: false
 
       - name: Require main
+        env:
+          APPROVED_REVISION: ${{ inputs.revision }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_SHA" = "$APPROVED_REVISION"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" | jq -e --arg sha "$GITHUB_SHA" \
+            '.sha == $sha and .commit.verification.verified == true and .commit.verification.reason == "valid"' >/dev/null
           printf 'IMAGE=ghcr.io/%s\n' "${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
       - name: Set up Bun

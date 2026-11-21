@@ -47,17 +47,18 @@ jobs:
       CUKUP_REVISION: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.revision }}
       CUKUP_OPERATION: ${{ github.event_name == 'workflow_run' && 'deploy' || inputs.operation }}
       CUKUP_RELEASE_ROOT: ${{ github.workspace }}/release
-      CUKUP_DEPLOY_HOST: ${{ vars.CUKUP_DEPLOY_HOST }}
-      CUKUP_SSH_USER: ${{ vars.CUKUP_SSH_USER }}
+      CUKUP_DEPLOY_HOST: ${{ secrets.CUKUP_DEPLOY_HOST }}
+      CUKUP_SSH_USER: ${{ secrets.CUKUP_SSH_USER }}
       CUKUP_API_HOSTNAME: ${{ vars.CUKUP_API_HOSTNAME }}
       CUKUP_DASHBOARD_HOSTNAME: ${{ vars.CUKUP_DASHBOARD_HOSTNAME }}
       CUKUP_WORK_PROJECTS: ${{ vars.CUKUP_WORK_PROJECTS }}
-      CUKUP_DATA_DIRECTORY: ${{ vars.CUKUP_DATA_DIRECTORY }}
-      CUKUP_BACKUP_DIRECTORY: ${{ vars.CUKUP_BACKUP_DIRECTORY }}
+      CUKUP_DATA_DIRECTORY: ${{ secrets.CUKUP_DATA_DIRECTORY }}
+      CUKUP_BACKUP_DIRECTORY: ${{ secrets.CUKUP_BACKUP_DIRECTORY }}
       CUKUP_TRUST_BASE_VERSION: ${{ vars.CUKUP_TRUST_BASE_VERSION }}
       CUKUP_TRUST_BASE_IMAGE: ${{ vars.CUKUP_TRUST_BASE_IMAGE }}
       CUKUP_TRUST_BASE_IMAGE_ID: ${{ vars.CUKUP_TRUST_BASE_IMAGE_ID }}
       CUKUP_TRUST_BASE_CONTAINER_ID: ${{ vars.CUKUP_TRUST_BASE_CONTAINER_ID }}
+      CUKUP_HISTORY_CUTOVER: ${{ secrets.CUKUP_HISTORY_CUTOVER }}
       KAMAL_REGISTRY_PASSWORD: ${{ secrets.KAMAL_REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
       CUKUP_OIDC_ALLOWED_USER_ID: ${{ secrets.CUKUP_OIDC_ALLOWED_USER_ID }}
       CUKUP_FLEET_HOSTNAMES: ${{ secrets.CUKUP_FLEET_HOSTNAMES }}

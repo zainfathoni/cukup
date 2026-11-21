@@ -38,5 +38,16 @@ assert_contains 'run: scripts/deploy-service "$CUKUP_OPERATION"'
 assert_contains 'group: cukup-production'
 assert_contains 'cancel-in-progress: false'
 assert_contains 'environment: production'
+for name in CUKUP_DEPLOY_HOST CUKUP_SSH_USER CUKUP_DATA_DIRECTORY CUKUP_BACKUP_DIRECTORY CUKUP_HISTORY_CUTOVER; do
+	assert_contains "$name: \${{ secrets.$name }}"
+done
+
+publish="$project_root/.github/workflows/publish-service.yml"
+grep -Fxq '  workflow_dispatch:' "$publish"
+if grep -Eq '^  push:' "$publish"; then
+	printf 'cutover publication must not run on push\n' >&2
+	exit 1
+fi
+grep -Fq 'test "$GITHUB_SHA" = "$APPROVED_REVISION"' "$publish"
 
 printf 'deployment workflow trigger regression checks passed\n'

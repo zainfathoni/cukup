@@ -51,17 +51,24 @@ case "$endpoint" in
 				exit 0
 			fi
 		done
-		jq -n --arg sha "$TEST_CANDIDATE" --arg conclusion "${TEST_PUBLISH_CONCLUSION:-success}" '{
+		jq -n --arg sha "$TEST_CANDIDATE" --arg conclusion "${TEST_PUBLISH_CONCLUSION:-success}" \
+			--arg event "${TEST_PUBLICATION_EVENT:-push}" '{
 			workflow_runs: [{
 				name: "Publish service image",
 				path: ".github/workflows/publish-service.yml",
-				event: "push",
+				event: $event,
 				head_branch: "main",
 				head_sha: $sha,
 				status: "completed",
 				conclusion: $conclusion,
 				run_attempt: 2
 			}]
+		}'
+		;;
+	*/actions/runs/123)
+		jq -n --arg sha "${TEST_PUBLISHED_SHA:-$TEST_CANDIDATE}" '{
+			id: 123, name: "Publish service image", path: ".github/workflows/publish-service.yml",
+			event: "workflow_dispatch", head_branch: "main", head_sha: $sha, status: "completed", conclusion: "success"
 		}'
 		;;
 	*/commits/*)
@@ -114,7 +121,7 @@ if [[ "$*" == *"lock status"* ]]; then
 		printf 'There is no deploy lock\n'
 	fi
 fi
-if [[ "$1" == redeploy ]]; then
+if [[ "$1" == redeploy || "$1 $2" == 'app boot' ]]; then
 	printf candidate > "$TEST_RUNNING_STATE"
 	[[ "${TEST_DEPLOY_FAIL:-0}" != 1 ]]
 elif [[ "$1" == rollback ]]; then
@@ -126,7 +133,7 @@ elif [[ "$1" == rollback ]]; then
 	fi
 	printf rolled-back > "$TEST_RUNNING_STATE"
 elif [[ "$1 $2" == 'app start' ]]; then
-	[[ "$VERSION" == '1111111111111111111111111111111111111111-trust-test' ]]
+	[[ "$VERSION" == '1111111111111111111111111111111111111111-trust-test' || "$VERSION" == "$TEST_PRIOR" ]]
 	[[ "${TEST_START_FAILURE:-0}" != 1 ]]
 	if [[ "$(cat "$TEST_RUNNING_STATE")" == candidate ]]; then
 		printf both > "$TEST_RUNNING_STATE"
@@ -166,6 +173,9 @@ case "$command" in
 		fi
 		printf '%s\t/%s\t%s\n' \
 			"$id" "cukup-service-web-$version" "$image"
+		;;
+	*"--format '{{.Id}} {{.Image}}'"*)
+		printf '%s sha256:%s\n' "$(printf 'b%.0s' {1..64})" "$(printf 'a%.0s' {1..64})"
 		;;
 	*"--format '{{.Image}}'"*)
 		if [[ "${TEST_BAD_BASELINE_ID:-0}" == 1 ]]; then printf 'sha256:wrong\n'
@@ -438,5 +448,50 @@ grep -Fq '`deploy` `success`' "$root/deployed-summary"
 test "$(cat "$root/running-state")" = candidate
 grep -Fq 'redeploy --skip-push' "$root/kamal.log"
 assert_absent '(^| )(deploy|rollback|prune|proxy)( |$)' "$root/kamal.log"
+
+# The rewritten candidate has no parent. Ordinary authorization cannot use a manual publication.
+candidate="$(git -C "$release" commit-tree 'HEAD^{tree}' -m rewritten)"
+git -C "$release" checkout -q --detach "$candidate"
+unset TEST_TRUST_BASELINE
+export TEST_CONFIG_BASE_VERSION= TEST_CONFIG_BASE_IMAGE= TEST_CONFIG_BASE_IMAGE_ID= TEST_CONFIG_BASE_CONTAINER_ID=
+export GITHUB_EVENT_NAME=workflow_dispatch
+rm -f "$root/running-state"
+if TEST_PUBLICATION_EVENT=workflow_dispatch run_operator "$root/manual-without-binding"; then
+	printf 'manual publication unexpectedly passed outside the cutover\n' >&2
+	exit 1
+fi
+grep -Fq 'source-authorization' "$root/manual-without-binding"
+
+export CUKUP_HISTORY_CUTOVER
+CUKUP_HISTORY_CUTOVER="$(jq -nc --arg candidate "$candidate" --arg prior "$prior" \
+	--arg container "$(printf 'b%.0s' {1..64})" --arg image "sha256:$(printf 'a%.0s' {1..64})" \
+	'{candidate:$candidate, prior_revision:$prior, container_id:$container, image_id:$image, digest:$image, run_id:"123"}')"
+run_operator "$root/cutover-preflight"
+grep -Fq 'success-no-mutation' "$root/cutover-preflight"
+
+for control in TEST_BAD_BASELINE_ID=1 TEST_PUBLISHED_SHA=wrong GITHUB_EVENT_NAME=workflow_run; do
+	: > "$root/kamal.log"
+	if (export "$control"; run_operator "$root/cutover-rejected" deploy) 2> "$root/cutover-stderr"; then
+		printf 'cutover accepted an invalid binding: %s\n' "$control" >&2
+		exit 1
+	fi
+	assert_absent 'app boot|app start|build pull' "$root/kamal.log"
+done
+wrong_digest="$(jq -c --arg digest "sha256:$(printf 'c%.0s' {1..64})" '.digest=$digest' <<< "$CUKUP_HISTORY_CUTOVER")"
+if CUKUP_HISTORY_CUTOVER="$wrong_digest" run_operator "$root/cutover-wrong-digest" deploy; then
+	printf 'cutover accepted an unapproved digest\n' >&2
+	exit 1
+fi
+grep -Fq 'image-verification' "$root/cutover-wrong-digest"
+
+: > "$root/kamal.log"
+if TEST_POST_RUNTIME_FAILURE=1 run_operator "$root/cutover-rollback" deploy; then
+	printf 'cutover with a failed runtime check unexpectedly succeeded\n' >&2
+	exit 1
+fi
+grep -Fq 'failed-and-rolled-back' "$root/cutover-rollback"
+grep -Fq "$candidate app boot --version $candidate" "$root/kamal.log"
+grep -Fq "$prior app start" "$root/kamal.log"
+assert_absent 'redeploy| rollback ' "$root/kamal.log"
 
 printf 'deployment preflight regression checks passed\n'
