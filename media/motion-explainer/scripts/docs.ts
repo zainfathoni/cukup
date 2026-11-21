@@ -114,7 +114,7 @@ End card: **${endCard.url}** · ${endCard.invitation} · ${endCard.status}
 - Working Time is an estimate from Amp turns. The video says it is not measured attention.
 - The video does not treat agent runtime as human effort. Parallel turns count once.
 - The video claims no change in quality, productivity, stress, burnout, or wellbeing, and shows no testimonials.
-- Status: a personal dashboard, Amp only, and an open-source release in preparation. There is no public signup.
+- Status: open source, Amp only, and one owner per installation. There is no public signup. Only Zain's own installation has been verified for self-hosting.
 - The close sends people to cukup.dev to read. It does not offer access.
 `
 await Bun.write(`${root}storyboard.md`, storyboard)

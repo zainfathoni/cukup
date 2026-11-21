@@ -72,12 +72,12 @@ Cukup does not decide. You do.
 
 ## Invitation (1:25.0–1:38.9)
 
-*Title. The closing line appears in large type. Then the end card shows cukup.dev and the current status: a personal dashboard, Amp only, and an open-source release in preparation.*
+*Title. The closing line appears in large type. Then the end card shows cukup.dev and the current status: open source, Amp only, and one owner per installation.*
 
 Let AI help you do the work.
 
 Keep the decision to say: cukup.
 
-*End card:* **cukup.dev**. Read why Cukup exists, and what it can and cannot tell you. A personal dashboard · Amp only · Open-source release in preparation.
+*End card:* **cukup.dev**. Read why Cukup exists, and what it can and cannot tell you. Open source · Amp only · One owner per install.
 
 Read why Cukup exists, and what it can and cannot tell you, at cukup.dev.

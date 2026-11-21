@@ -9,11 +9,11 @@
 | Dimensions | 1920 × 1080 |
 | Frame rate | 30 fps, 2967 frames |
 | Duration | 98.9 s |
-| Size | 6.07 MiB |
+| Size | 6.05 MiB |
 | Audio | AAC, 48 kHz, mono, 128 kb/s, 98.9 s. Narration only. |
 | Poster | [`poster.png`](poster.png), 1920 × 1080, the last frame |
 
-`scripts/inspect.ts` and ffprobe reported these values from the final file.
+The open-source update changes the end-card status. The new render keeps all 2967 frames and the same audio stream. I checked the poster and the decoded end card at 98.5 s for legibility. The method and findings below document the original cut.
 
 The duration is 98.9 s, not 60–90 s. Each caption line needs 0.3 s per word, plus 1 s. Narration added 5 s: two lines needed more time for speech, and the spoken end card needed more. The product scene also needs time to show how the rule works. Cutting to 90 s would drop lines or crowd them. The scene file can make that trade if the owner prefers a shorter cut.
 
@@ -75,10 +75,10 @@ The synthetic day is Tuesday 2026-09-15 in Asia/Jakarta, with the weekday target
 
 ## Claims
 
-- `docs.ts` rejects signup, download, install, clone, self-host, and “try it” language. It also rejects claims that Cukup measures attention, productivity, wellbeing, or quality, reduces stress or burnout, or is open source now.
+- `docs.ts` checks that the copy does not invite people to sign up or make unsupported claims about what Cukup measures or improves.
 - The kind chip labels every conceptual scene. Product scenes say “synthetic data”. The “Next task” card arrives labelled “Your choice · conceptual”, and lands in a “Tomorrow · your choice” slot. From then on the chip reads “Real Cukup view + conceptual choice”.
 - The video shows no Cukup control that stops agents, approves work, or enforces limits. The person moves the next task.
-- Status matches today: cukup.dev serves the public landing page, the dashboard is personal, support is Amp only, and the open-source release is in preparation. The repository is private.
+- The end card says Cukup is open source and supports Amp only and one owner per installation. Only Zain's own installation has been verified for self-hosting.
 
 ## Narration
 
