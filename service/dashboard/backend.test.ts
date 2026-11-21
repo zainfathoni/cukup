@@ -380,7 +380,8 @@ describe('dashboard HTTP contract', () => {
 		expect(page).toContain('Prompts, agent replies, or source code.')
 		expect(page).toContain('Amp only.')
 		expect(page).toContain('There is no public signup and no waitlist.')
-		expect(page).toContain('The source code is not public yet')
+		expect(page).toContain('Cukup is open source.')
+		expect(page).toContain('<a href="https://github.com/zainfathoni/cukup">View the source on GitHub</a>')
 		expect(page).toContain('Synthetic example, not real activity.')
 
 		// Owner sign-in stays findable and is labelled as restricted.
@@ -394,7 +395,7 @@ describe('dashboard HTTP contract', () => {
 		value.store.close()
 	})
 
-	test('keeps the signed-out page static, local, and navigable', async () => {
+	test('keeps the signed-out page static and limits link destinations', async () => {
 		const value = fixture()
 		const page = await (await value.app.fetch(request('cukup.dev', '/'))).text()
 		expect(page).not.toMatch(/<script|<form|<iframe|<video|<img|style=/i)
@@ -407,13 +408,13 @@ describe('dashboard HTTP contract', () => {
 			if (destination.startsWith('#')) {
 				expect(ids).toContain(destination.slice(1))
 			} else {
-				// The canonical link is the one absolute self-reference.
 				expect([
 					'/auth/github',
 					'/assets/favicon.svg',
 					'/assets/dashboard.css',
 					'https://ampcode.com/',
 					'https://cukup.dev/',
+					'https://github.com/zainfathoni/cukup',
 				]).toContain(destination)
 			}
 		}
