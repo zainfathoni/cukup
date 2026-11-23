@@ -415,6 +415,7 @@ describe('dashboard HTTP contract', () => {
 					'https://ampcode.com/',
 					'https://cukup.dev/',
 					'https://github.com/zainfathoni/cukup',
+					'https://www.zainfathoni.com/human-attention-is-all-you-need.html',
 				]).toContain(destination)
 			}
 		}

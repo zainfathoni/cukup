@@ -287,7 +287,9 @@ describe('signed-out player', () => {
 					'https://ampcode.com/',
 					// The canonical link, which must be absolute.
 					'https://cukup.dev/',
-					...(attribute === 'href' ? ['https://github.com/zainfathoni/cukup'] : []),
+					...(attribute === 'href'
+						? ['https://github.com/zainfathoni/cukup', 'https://www.zainfathoni.com/human-attention-is-all-you-need.html']
+						: []),
 					...Object.values(EXPLAINER_ROUTES),
 				]).toContain(value!)
 			}

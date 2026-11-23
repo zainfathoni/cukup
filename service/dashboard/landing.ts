@@ -18,7 +18,7 @@ export function renderLandingPage(options: {
 	socialImage?: boolean
 }): string {
 	const video = options.explainer ? explainerSection(options.explainer.durationLabel) : ''
-	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="${DESCRIPTION}"><title>${TITLE}</title>${shareMetadata(options.origin, Boolean(options.socialImage))}<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/dashboard.css"></head><body class="landing"><a class="skip-link" href="#content">Skip to content</a>${header}<main id="content" tabindex="-1">${hero}${video}${concern}${response}${why}${workingTime}${status}</main>${options.explainer ? footerWithVideo : footer}</body></html>`
+	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="${DESCRIPTION}"><title>${TITLE}</title>${shareMetadata(options.origin, Boolean(options.socialImage))}<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/dashboard.css"></head><body class="landing"><a class="skip-link" href="#content">Skip to content</a>${header}<main id="content" tabindex="-1">${hero}${video}${concern}${response}${why}${workingTime}${status}</main>${footer(Boolean(options.explainer))}</body></html>`
 }
 
 const TITLE = 'Cukup · Decide what is enough'
@@ -88,9 +88,13 @@ const status = `<section id="status" aria-labelledby="status-title"><p class="ey
 <dt>Open source</dt><dd>Cukup is open source. <a href="https://github.com/zainfathoni/cukup">View the source on GitHub</a>.</dd>
 </div></dl><div class="landing-prose"><h3>Why open source?</h3><p>A tool that estimates your time should be open to inspection. You should be able to read its rules, change them to fit your life, and host your own copy with your own data. Open source makes that possible. It does not make a dashboard enough on its own.</p><h3>What can you do now?</h3><ul><li>Ask yourself one question before you start the next task: is this enough for today?</li><li>Before you delegate, decide which judgment stays with you.</li><li>When the work gets heavy, notice it, remember that you are not alone, and be kind to yourself.</li></ul></div><aside class="landing-owner" aria-labelledby="owner-title"><h3 id="owner-title">Owner sign-in</h3><p>Only the owner's GitHub account can open this dashboard. Other accounts are refused. Signing in does not create an account.</p><p><a class="button" href="/auth/github">Sign in with GitHub</a></p></aside></section>`
 
-const footer = `<footer class="page-footer landing-footer"><p>Cukup · Indonesian for “enough”. The dashboard never shows prompts or source code. The illustration on this page uses synthetic data.</p></footer>`
-
-const footerWithVideo = `<footer class="page-footer landing-footer"><p>Cukup · Indonesian for “enough”. The dashboard never shows prompts or source code. The illustration and the video on this page use synthetic data.</p></footer>`
+function footer(hasVideo: boolean): string {
+	const syntheticDataNote = hasVideo
+		? 'The illustration and the video on this page use synthetic data.'
+		: 'The illustration on this page uses synthetic data.'
+	return `<footer class="page-footer landing-footer"><p>Cukup · Indonesian for “enough”. The dashboard never shows prompts or source code. ${syntheticDataNote}</p>
+<p>Launched at IDSW 2026 · <a href="https://www.zainfathoni.com/human-attention-is-all-you-need.html">View the talk slides</a></p></footer>`
+}
 
 /**
  * No autoplay, loop, or muted start: the visitor chooses to play. Captions are
